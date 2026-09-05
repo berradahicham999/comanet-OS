@@ -216,14 +216,18 @@ export const products = pgTable(
 );
 
 /** Variantes de désignation (ventes, stock, objectifs…) rattachées à un produit canonique. */
-export const productAliases = pgTable("product_aliases", {
-  alias: text("alias").primaryKey(), // désignation normalisée
-  productId: uuid("product_id")
-    .notNull()
-    .references(() => products.id, { onDelete: "cascade" }),
-  source: text("source").notNull().default("IMPORT"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const productAliases = pgTable(
+  "product_aliases",
+  {
+    alias: text("alias").primaryKey(), // désignation normalisée
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    source: text("source").notNull().default("IMPORT"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("product_aliases_product_idx").on(t.productId)],
+);
 
 /* ------------------------------------------------------------------ */
 /* Clients (= points de vente)                                         */
@@ -249,44 +253,56 @@ export const clients = pgTable(
 );
 
 /** Raisons sociales / libellés bruts rattachés à un client fonctionnel. */
-export const clientAliases = pgTable("client_aliases", {
-  alias: text("alias").primaryKey(), // raison sociale normalisée
-  clientId: uuid("client_id")
-    .notNull()
-    .references(() => clients.id, { onDelete: "cascade" }),
-  source: text("source").notNull().default("IMPORT"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const clientAliases = pgTable(
+  "client_aliases",
+  {
+    alias: text("alias").primaryKey(), // raison sociale normalisée
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    source: text("source").notNull().default("IMPORT"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("client_aliases_client_idx").on(t.clientId)],
+);
 
 /* ------------------------------------------------------------------ */
 /* Imports Sage                                                        */
 /* ------------------------------------------------------------------ */
 
-export const imports = pgTable("imports", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  type: importTypeEnum("type").notNull(),
-  fileName: text("file_name").notNull(),
-  mapping: jsonb("mapping").$type<Record<string, string>>().notNull(),
-  totalRows: integer("total_rows").notNull().default(0),
-  insertedRows: integer("inserted_rows").notNull().default(0),
-  updatedRows: integer("updated_rows").notNull().default(0),
-  duplicateRows: integer("duplicate_rows").notNull().default(0),
-  errorRows: integer("error_rows").notNull().default(0),
-  errors: jsonb("errors").$type<{ row: number; message: string }[]>().notNull().default([]),
-  warnings: jsonb("warnings").$type<string[]>().notNull().default([]),
-  status: importStatusEnum("status").notNull().default("PENDING"),
-  userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const imports = pgTable(
+  "imports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    type: importTypeEnum("type").notNull(),
+    fileName: text("file_name").notNull(),
+    mapping: jsonb("mapping").$type<Record<string, string>>().notNull(),
+    totalRows: integer("total_rows").notNull().default(0),
+    insertedRows: integer("inserted_rows").notNull().default(0),
+    updatedRows: integer("updated_rows").notNull().default(0),
+    duplicateRows: integer("duplicate_rows").notNull().default(0),
+    errorRows: integer("error_rows").notNull().default(0),
+    errors: jsonb("errors").$type<{ row: number; message: string }[]>().notNull().default([]),
+    warnings: jsonb("warnings").$type<string[]>().notNull().default([]),
+    status: importStatusEnum("status").notNull().default("PENDING"),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("imports_user_idx").on(t.userId)],
+);
 
 /** Fichiers téléversés en attente de mapping (stockés en base pour fonctionner sans disque persistant). */
-export const importFiles = pgTable("import_files", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: text("name").notNull(),
-  data: customType<{ data: Buffer; driverData: Buffer }>({ dataType() { return "bytea"; } })("data").notNull(),
-  userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const importFiles = pgTable(
+  "import_files",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    data: customType<{ data: Buffer; driverData: Buffer }>({ dataType() { return "bytea"; } })("data").notNull(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("import_files_user_idx").on(t.userId)],
+);
 
 /* ------------------------------------------------------------------ */
 /* Ventes (sell-in Sage)                                               */
@@ -322,6 +338,7 @@ export const sales = pgTable(
     index("sales_client_idx").on(t.clientId),
     index("sales_product_idx").on(t.productId),
     index("sales_site_idx").on(t.site),
+    index("sales_import_idx").on(t.importId),
   ],
 );
 
@@ -343,7 +360,7 @@ export const stockSnapshots = pgTable(
     importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("stock_product_date_idx").on(t.productId, t.date)],
+  (t) => [index("stock_product_date_idx").on(t.productId, t.date), index("stock_snapshots_import_idx").on(t.importId)],
 );
 
 /* ------------------------------------------------------------------ */
@@ -382,6 +399,8 @@ export const animations = pgTable(
     uniqueIndex("animations_dedupe_uq").on(t.dedupeKey).where(sql`dedupe_key is not null`),
     index("animations_client_idx").on(t.clientId),
     index("animations_animatrice_idx").on(t.animatriceId),
+    index("animations_brand_idx").on(t.brandId),
+    index("animations_import_idx").on(t.importId),
   ],
 );
 
@@ -470,6 +489,9 @@ export const regulatoryFiles = pgTable(
     index("regulatory_brand_idx").on(t.brandId),
     index("regulatory_certificate_idx").on(t.certificateStatus),
     uniqueIndex("regulatory_dedupe_uq").on(t.dedupeKey).where(sql`dedupe_key is not null`),
+    index("regulatory_files_product_idx").on(t.productId),
+    index("regulatory_files_responsible_idx").on(t.responsibleId),
+    index("regulatory_files_import_idx").on(t.importId),
   ],
 );
 
@@ -489,18 +511,22 @@ export const regulatoryEvents = pgTable(
     userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("regulatory_events_file_idx").on(t.fileId, t.date)],
+  (t) => [index("regulatory_events_file_idx").on(t.fileId, t.date), index("regulatory_events_user_idx").on(t.userId)],
 );
 
-export const documents = pgTable("documents", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: text("name").notNull(),
-  url: text("url").notNull(),
-  entityType: text("entity_type").notNull(), // regulatory_file | task | product | ...
-  entityId: uuid("entity_id").notNull(),
-  uploadedById: uuid("uploaded_by_id").references(() => users.id, { onDelete: "set null" }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const documents = pgTable(
+  "documents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    url: text("url").notNull(),
+    entityType: text("entity_type").notNull(), // regulatory_file | task | product | ...
+    entityId: uuid("entity_id").notNull(),
+    uploadedById: uuid("uploaded_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("documents_uploaded_by_idx").on(t.uploadedById)],
+);
 
 /* ------------------------------------------------------------------ */
 /* Tâches                                                              */
@@ -530,18 +556,24 @@ export const tasks = pgTable(
     index("tasks_assignee_idx").on(t.assigneeId),
     index("tasks_status_idx").on(t.status),
     index("tasks_source_key_idx").on(t.sourceKey),
+    index("tasks_brand_idx").on(t.brandId),
+    index("tasks_created_by_idx").on(t.createdById),
   ],
 );
 
-export const taskComments = pgTable("task_comments", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  taskId: uuid("task_id")
-    .notNull()
-    .references(() => tasks.id, { onDelete: "cascade" }),
-  userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
-  body: text("body").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const taskComments = pgTable(
+  "task_comments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("task_comments_task_idx").on(t.taskId), index("task_comments_user_idx").on(t.userId)],
+);
 
 /* ------------------------------------------------------------------ */
 /* Marketing : budgets, dépenses, campagnes, contenus                  */
@@ -605,7 +637,7 @@ export const campaigns = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("campaigns_brand_idx").on(t.brandId, t.startDate)],
+  (t) => [index("campaigns_brand_idx").on(t.brandId, t.startDate), index("campaigns_responsible_idx").on(t.responsibleId)],
 );
 
 /** Produits poussés par une campagne (référentiel produits existant, pas de duplication). */
@@ -615,7 +647,10 @@ export const campaignProducts = pgTable(
     campaignId: uuid("campaign_id").notNull().references(() => campaigns.id, { onDelete: "cascade" }),
     productId: uuid("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
   },
-  (t) => [primaryKey({ name: "campaign_products_pk", columns: [t.campaignId, t.productId] })],
+  (t) => [
+    primaryKey({ name: "campaign_products_pk", columns: [t.campaignId, t.productId] }),
+    index("campaign_products_product_idx").on(t.productId),
+  ],
 );
 
 /* ------------------------------------------------------------------ */
@@ -638,7 +673,7 @@ export const adAccounts = pgTable(
     importedRows: integer("imported_rows").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("ad_accounts_uq").on(t.platform, t.name)],
+  (t) => [uniqueIndex("ad_accounts_uq").on(t.platform, t.name), index("ad_accounts_brand_idx").on(t.brandId)],
 );
 
 /** Une ligne = une journée × une publicité (ou campagne si le fichier n'a pas le détail). */
@@ -672,6 +707,9 @@ export const adMetrics = pgTable(
     index("ad_metrics_date_idx").on(t.date),
     index("ad_metrics_brand_idx").on(t.brandId, t.date),
     index("ad_metrics_campaign_idx").on(t.campaignName),
+    index("ad_metrics_account_idx").on(t.accountId),
+    index("ad_metrics_campaign_id_idx").on(t.campaignId),
+    index("ad_metrics_import_idx").on(t.importId),
   ],
 );
 
@@ -689,7 +727,11 @@ export const adCreatives = pgTable(
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("ad_creatives_uq").on(t.platform, t.adName)],
+  (t) => [
+    uniqueIndex("ad_creatives_uq").on(t.platform, t.adName),
+    index("ad_creatives_product_idx").on(t.productId),
+    index("ad_creatives_content_idx").on(t.contentId),
+  ],
 );
 
 /* ------------------------------------------------------------------ */
@@ -750,7 +792,13 @@ export const collaborations = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("collaborations_date_idx").on(t.date), index("collaborations_influencer_idx").on(t.influencerId)],
+  (t) => [
+    index("collaborations_date_idx").on(t.date),
+    index("collaborations_influencer_idx").on(t.influencerId),
+    index("collaborations_brand_idx").on(t.brandId),
+    index("collaborations_campaign_idx").on(t.campaignId),
+    index("collaborations_product_idx").on(t.productId),
+  ],
 );
 
 /* ------------------------------------------------------------------ */
@@ -785,7 +833,14 @@ export const activations = pgTable(
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("activations_date_idx").on(t.date)],
+  (t) => [
+    index("activations_date_idx").on(t.date),
+    index("activations_brand_idx").on(t.brandId),
+    index("activations_product_idx").on(t.productId),
+    index("activations_campaign_idx").on(t.campaignId),
+    index("activations_client_idx").on(t.clientId),
+    index("activations_responsible_idx").on(t.responsibleId),
+  ],
 );
 
 export const marketingExpenses = pgTable(
@@ -809,7 +864,13 @@ export const marketingExpenses = pgTable(
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("expenses_brand_date_idx").on(t.brandId, t.date)],
+  (t) => [
+    index("expenses_brand_date_idx").on(t.brandId, t.date),
+    index("marketing_expenses_campaign_idx").on(t.campaignId),
+    index("marketing_expenses_activation_idx").on(t.activationId),
+    index("marketing_expenses_collaboration_idx").on(t.collaborationId),
+    index("marketing_expenses_product_idx").on(t.productId),
+  ],
 );
 
 export const contentItems = pgTable(
@@ -835,7 +896,15 @@ export const contentItems = pgTable(
     link: text("link"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("content_date_idx").on(t.date)],
+  (t) => [
+    index("content_date_idx").on(t.date),
+    index("content_items_brand_idx").on(t.brandId),
+    index("content_items_product_idx").on(t.productId),
+    index("content_items_responsible_idx").on(t.responsibleId),
+    index("content_items_campaign_idx").on(t.campaignId),
+    index("content_items_activation_idx").on(t.activationId),
+    index("content_items_influencer_idx").on(t.influencerId),
+  ],
 );
 
 /* ------------------------------------------------------------------ */
@@ -860,6 +929,8 @@ export const objectives = pgTable(
       t.year,
       sql`coalesce(${t.month}, 0)`,
     ),
+    index("objectives_brand_idx").on(t.brandId),
+    index("objectives_product_idx").on(t.productId),
   ],
 );
 
