@@ -46,3 +46,6 @@ next-env.d.ts
 /pgdata
 *.log
 /drizzle/meta/*_journal.json.bak
+
+# Claude desktop app
+/Claude outputs/
