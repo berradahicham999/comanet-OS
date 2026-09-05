@@ -1,0 +1,144 @@
+import { sql } from "drizzle-orm";
+import { db } from "@/db";
+import { getSettings, type ComanetSettings } from "./settings";
+import { addDays, iso, today } from "./format";
+
+export type CoverageLevel = "green" | "yellow" | "orange" | "red" | "none" | "unknown";
+
+export type ProductStock = {
+  productId: string;
+  sku: string;
+  name: string;
+  brandId: string | null;
+  brandName: string | null;
+  brandColor: string | null;
+  category: string | null;
+  stock: number;
+  stockKnown: boolean; // false = aucune photo de stock importée pour ce produit
+  onOrder: number;
+  stockDate: string | null;
+  avgMonthly: number; // ventes moyennes mensuelles (sell-in)
+  trendPct: number | null; // dernier mois complet vs moyenne
+  coverageMonths: number | null; // null si pas de ventes
+  level: CoverageLevel;
+  stockoutDate: string | null;
+  leadTimeDays: number;
+  safetyStockDays: number;
+  moq: number | null;
+  recommendedOrder: number;
+  targetStock: number;
+  costPrice: number | null;
+  priceWholesale: number | null;
+  marginPct: number | null;
+  stockValue: number; // au prix d'achat
+  fieldSellOut30d: number; // sell-out constaté terrain (unités) 30 j
+  fieldStockAvg: number | null; // stock rayon moyen constaté 30 j
+};
+
+export function coverageLevel(months: number | null, s: ComanetSettings): CoverageLevel {
+  if (months === null) return "none";
+  if (months >= s.coverage.green) return "green";
+  if (months >= s.coverage.yellow) return "yellow";
+  if (months >= s.coverage.orange) return "orange";
+  return "red";
+}
+
+export const LEVEL_LABEL: Record<CoverageLevel, string> = {
+  green: "Confortable",
+  yellow: "À surveiller",
+  orange: "Tendu",
+  red: "Critique",
+  none: "Pas de rotation",
+  unknown: "Stock non renseigné",
+};
+
+/**
+ * Calcule la couverture et la recommandation d'achat pour tous les produits (ou un seul).
+ * Vente moyenne = moyenne des N derniers mois complets (paramètre avgSalesMonths).
+ */
+export async function productStocks(opts: { productId?: string; brandId?: string } = {}, ref?: Date): Promise<ProductStock[]> {
+  const s = await getSettings();
+  const t = ref ?? today();
+  // moyenne mensuelle = ventes des N derniers mois glissants (jusqu'à la date de référence) / N
+  const avgStart = iso(addDays(t, -30 * s.avgSalesMonths));
+  const avgEnd = iso(addDays(t, 1));
+  const lastMonthStart = iso(addDays(t, -30));
+  const d30 = iso(addDays(t, -30));
+
+  const r = await db.execute(sql`
+    with latest as (
+      select distinct on (product_id) product_id, quantity::float8 as quantity, on_order::float8 as on_order, date::text as date
+      from stock_snapshots order by product_id, date desc, created_at desc
+    ),
+    avg_sales as (
+      select product_id, sum(quantity)::float8 / ${s.avgSalesMonths} as avg_monthly
+      from sales where date >= ${avgStart}::date and date < ${avgEnd}::date group by product_id
+    ),
+    last_month as (
+      select product_id, sum(quantity)::float8 as qty from sales where date >= ${lastMonthStart}::date and date < ${avgEnd}::date group by product_id
+    ),
+    field as (
+      select al.product_id, sum(al.quantity_sold)::float8 as sold, avg(al.stock_observed)::float8 as stock_avg
+      from animation_lines al join animations a on a.id = al.animation_id
+      where a.status = 'DONE' and a.date >= ${d30}::date group by al.product_id
+    )
+    select p.id as product_id, p.sku, p.name, p.brand_id, b.name as brand_name, b.color as brand_color, p.category,
+           coalesce(l.quantity, 0) as stock, coalesce(l.on_order, 0) as on_order, l.date as stock_date,
+           coalesce(a.avg_monthly, 0) as avg_monthly, lm.qty as last_month_qty,
+           p.lead_time_days, p.safety_stock_days, p.moq,
+           p.cost_price::float8 as cost_price, p.price_wholesale::float8 as price_wholesale,
+           coalesce(f.sold, 0) as field_sold, f.stock_avg as field_stock_avg
+    from products p
+    left join brands b on b.id = p.brand_id
+    left join latest l on l.product_id = p.id
+    left join avg_sales a on a.product_id = p.id
+    left join last_month lm on lm.product_id = p.id
+    left join field f on f.product_id = p.id
+    where p.active
+      ${opts.productId ? sql`and p.id = ${opts.productId}::uuid` : sql``}
+      ${opts.brandId ? sql`and p.brand_id = ${opts.brandId}::uuid` : sql``}
+    order by b.name, p.name`);
+
+  return (r.rows as Record<string, unknown>[]).map((row) => {
+    const stockKnown = row.stock_date !== null && row.stock_date !== undefined;
+    const stock = Number(row.stock), onOrder = Number(row.on_order), avg = Number(row.avg_monthly);
+    const lastMonthQty = row.last_month_qty === null ? null : Number(row.last_month_qty);
+    const coverage = stockKnown && avg > 0 ? stock / avg : null;
+    const leadTimeDays = Number(row.lead_time_days), safety = Number(row.safety_stock_days), moq = row.moq === null ? null : Number(row.moq);
+    // Stock cible = couverture du délai fournisseur + stock de sécurité + 1 mois de revue
+    const targetMonths = leadTimeDays / 30 + safety / 30 + 1;
+    const targetStock = Math.round(avg * targetMonths);
+    let rec = stockKnown ? Math.max(0, targetStock - stock - onOrder) : 0;
+    if (moq && rec > 0) rec = Math.ceil(rec / moq) * moq;
+    const cost = row.cost_price === null ? null : Number(row.cost_price);
+    const pw = row.price_wholesale === null ? null : Number(row.price_wholesale);
+    return {
+      productId: String(row.product_id), sku: String(row.sku), name: String(row.name),
+      brandId: row.brand_id ? String(row.brand_id) : null, brandName: row.brand_name ? String(row.brand_name) : null,
+      brandColor: row.brand_color ? String(row.brand_color) : null, category: row.category ? String(row.category) : null,
+      stock, stockKnown, onOrder, stockDate: row.stock_date ? String(row.stock_date) : null,
+      avgMonthly: avg, trendPct: avg > 0 && lastMonthQty !== null ? ((lastMonthQty - avg) / avg) * 100 : null,
+      coverageMonths: coverage, level: !stockKnown ? "unknown" : coverageLevel(coverage, s),
+      stockoutDate: coverage !== null ? iso(addDays(t, Math.round(coverage * 30))) : null,
+      leadTimeDays, safetyStockDays: safety, moq, recommendedOrder: Math.round(rec), targetStock,
+      costPrice: cost, priceWholesale: pw,
+      marginPct: cost && pw ? ((pw - cost) / pw) * 100 : null,
+      stockValue: stock * (cost ?? 0),
+      fieldSellOut30d: Number(row.field_sold), fieldStockAvg: row.field_stock_avg === null ? null : Number(row.field_stock_avg),
+    };
+  });
+}
+
+export function stockSummary(list: ProductStock[]) {
+  return {
+    red: list.filter((p) => p.level === "red").length,
+    orange: list.filter((p) => p.level === "orange").length,
+    yellow: list.filter((p) => p.level === "yellow").length,
+    green: list.filter((p) => p.level === "green").length,
+    overstock: list.filter((p) => p.coverageMonths !== null && p.coverageMonths > 6).length,
+    stockout: list.filter((p) => p.stockKnown && p.stock <= 0 && p.avgMonthly > 0).length,
+    unknown: list.filter((p) => !p.stockKnown).length,
+    toOrder: list.filter((p) => p.recommendedOrder > 0),
+    value: list.reduce((a, p) => a + p.stockValue, 0),
+  };
+}
