@@ -4,12 +4,13 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { importFiles, imports, sales, stockSnapshots } from "@/db/schema";
+import { importFiles, imports } from "@/db/schema";
 import { requireAccess } from "@/lib/access";
 import { parseSheet } from "@/lib/import/parse";
 import { runImport } from "@/lib/import/run";
 import { FIELDS, missingRequired, type ImportType } from "@/lib/import/fields";
 import { appendUploadChunk, createUploadFile, MAX_UPLOAD_BYTES, UPLOAD_CHUNK_BYTES, purgeStaleUploads } from "@/lib/import/upload";
+import { isReversible, rollbackRows } from "@/lib/import/rollback";
 
 /**
  * Étape 1 : téléversement par morceaux (voir src/lib/chunked-upload.ts) → stockage temporaire en base
@@ -64,14 +65,34 @@ export async function runImportAction(formData: FormData) {
   redirect(`/imports/${summary.importId}`);
 }
 
-/** Annule un import : supprime les lignes de vente / stock qu'il a créées (les entités créées sont conservées). */
+/**
+ * Annule un import : supprime les enregistrements qu'il a créés (ventes, photos de stock,
+ * journées d'animation, lignes de régie). Les produits, clients et marques créés au passage
+ * sont conservés — ils peuvent être utilisés ailleurs.
+ */
 export async function rollbackImport(formData: FormData) {
-  await requireAccess("imports");
+  const user = await requireAccess("imports");
+  if (user.role !== "ADMIN") redirect("/imports?error=" + encodeURIComponent("Seul un administrateur peut annuler un import."));
   const id = String(formData.get("id") ?? "");
   if (!id) return;
-  await db.delete(sales).where(eq(sales.importId, id));
-  await db.delete(stockSnapshots).where(eq(stockSnapshots.importId, id));
-  await db.update(imports).set({ status: "FAILED", warnings: sql`array_to_json(array_append(array(select json_array_elements_text(warnings)), 'Import annulé : lignes supprimées.'))::jsonb` }).where(eq(imports.id, id));
-  revalidatePath("/imports"); revalidatePath("/");
-  redirect("/imports");
+  const imp = await db.query.imports.findFirst({ where: eq(imports.id, id) });
+  if (!imp) redirect("/imports?error=" + encodeURIComponent("Import introuvable."));
+  if (!isReversible(imp.type)) redirect(`/imports/${id}?error=` + encodeURIComponent("Ce type d'import ne peut pas être annulé."));
+
+  let removed = 0;
+  try {
+    removed = await rollbackRows(id, imp.type);
+  } catch (e) {
+    redirect(`/imports/${id}?error=` + encodeURIComponent(`Annulation impossible : ${(e as Error).message}`));
+  }
+  await db
+    .update(imports)
+    .set({
+      status: "FAILED",
+      warnings: [...imp.warnings, `Import annulé le ${new Date().toLocaleDateString("fr-FR")} : ${removed} enregistrement(s) supprimé(s).`],
+    })
+    .where(eq(imports.id, id));
+
+  for (const p of ["/imports", "/", "/ventes", "/stock", "/terrain", "/marketing", "/marketing/ads", "/produits", "/clients", "/actions"]) revalidatePath(p);
+  redirect(`/imports?annule=${removed}`);
 }

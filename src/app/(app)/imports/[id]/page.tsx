@@ -7,22 +7,26 @@ import { requireAccess } from "@/lib/access";
 import { PageHeader, Card, Badge } from "@/components/ui";
 import { IMPORT_TYPES, FIELDS } from "@/lib/import/fields";
 import { rollbackImport } from "../actions";
+import { isReversible, irreversibleReason, rollbackPlan } from "@/lib/import/rollback";
 import { fmtDate, fmtNum, fmtMAD } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-export default async function ImportDetailPage(props: { params: Promise<{ id: string }> }) {
+export default async function ImportDetailPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string }> }) {
   const user = await requireAccess("imports");
   const { id } = await props.params;
+  const { error } = await props.searchParams;
   const imp = await db.query.imports.findFirst({ where: eq(importsTable.id, id) });
   if (!imp) notFound();
   const stats = (await db.execute(sql`select count(*)::int as n, coalesce(sum(amount),0)::float8 as amount, min(date)::text as min_date, max(date)::text as max_date from sales where import_id = ${id}::uuid`)).rows[0] as { n: number; amount: number; min_date: string | null; max_date: string | null };
   const typeDef = IMPORT_TYPES.find((t) => t.key === imp.type);
+  const plan = isReversible(imp.type) ? await rollbackPlan(id, imp.type) : null;
   const fuzzy = imp.warnings.filter((w) => w.startsWith("≈"));
   const other = imp.warnings.filter((w) => !w.startsWith("≈"));
   return (
     <>
       <PageHeader eyebrow={<Link href="/imports" className="hover:underline">Imports</Link>} title={typeDef?.label ?? imp.type} subtitle={`${imp.fileName} · ${fmtDate(imp.createdAt)}`} actions={<Badge tone={imp.status === "DONE" ? "green" : imp.status === "FAILED" ? "red" : "yellow"}>{imp.status}</Badge>} />
+      {error && <div className="rounded-xl border border-red/40 bg-red-soft/30 px-3 py-2 text-[13px] mb-4">{error}</div>}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
         <Card><div className="label">Lignes lues</div><div className="kpi mt-2">{fmtNum(imp.totalRows)}</div></Card>
         <Card><div className="label">Insérées</div><div className="kpi mt-2 text-green">{fmtNum(imp.insertedRows)}</div></Card>
@@ -44,9 +48,31 @@ export default async function ImportDetailPage(props: { params: Promise<{ id: st
           <p className="text-[11.5px] text-faint mt-3">Un rapprochement erroné se corrige depuis la fiche produit (« Fusionner ») ou en modifiant la désignation.</p>
         </Card>
       </div>
-      {user.role === "ADMIN" && imp.status === "DONE" && (imp.type === "SALES" || imp.type === "STOCK") && (
-        <form action={rollbackImport} className="mt-4"><input type="hidden" name="id" value={id} /><button className="btn-ghost btn-sm text-red" type="submit">Annuler cet import (supprime les {imp.type === "SALES" ? "ventes" : "photos de stock"} importées)</button></form>
-      )}
+      <Card className="mt-4" title="Annuler cet import">
+        {!isReversible(imp.type) ? (
+          <p className="text-[13px] text-ink-2">{irreversibleReason(imp.type)}</p>
+        ) : imp.status !== "DONE" ? (
+          <p className="text-[13px] text-ink-2">Cet import n&apos;est pas dans l&apos;état « terminé » : il n&apos;y a rien à annuler.</p>
+        ) : !plan || plan.count === 0 ? (
+          <p className="text-[13px] text-ink-2">Aucun enregistrement n&apos;est rattaché à cet import — il a déjà été annulé, ou ses lignes ont été remplacées par un import plus récent.</p>
+        ) : (
+          <>
+            <p className="text-[13px] text-ink-2">
+              Retire <b>{fmtNum(plan.count)} {plan.label}</b>{plan.detail ? ` (${plan.detail})` : ""} de la base.
+              Les produits, clients et marques créés au passage sont conservés : ils peuvent servir ailleurs.
+              Recharger le même fichier rétablit les lignes à l&apos;identique.
+            </p>
+            {user.role !== "ADMIN" ? (
+              <p className="text-[12.5px] text-faint mt-2">Seul un administrateur peut annuler un import.</p>
+            ) : (
+              <form action={rollbackImport} className="mt-3">
+                <input type="hidden" name="id" value={id} />
+                <button className="btn-secondary btn-sm text-red" type="submit">Supprimer les {fmtNum(plan.count)} {plan.label}</button>
+              </form>
+            )}
+          </>
+        )}
+      </Card>
     </>
   );
 }

@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 export const metadata = { title: "Imports Sage" };
 
-export default async function ImportsPage(props: { searchParams: Promise<{ type?: string; error?: string }> }) {
+export default async function ImportsPage(props: { searchParams: Promise<{ type?: string; error?: string; annule?: string }> }) {
   await requireAccess("imports");
   const sp = await props.searchParams;
   const history = await db.query.imports.findMany({ orderBy: [desc(importsTable.createdAt)], limit: 50, with: { } });
@@ -20,6 +20,7 @@ export default async function ImportsPage(props: { searchParams: Promise<{ type?
   return (
     <>
       <PageHeader eyebrow="Données" title="Imports Sage" subtitle="Excel ou CSV exporté de Sage (ou vos fichiers de compilation). Sage reste la source de vérité : COMANET OS ne modifie jamais vos données d'origine." />
+      {sp.annule && <div className="mb-4 rounded-2xl bg-green-soft border border-green/30 px-4 py-3 text-[13px] text-green">Import annulé : {sp.annule} enregistrement(s) supprimé(s).</div>}
       {sp.error && <div className="mb-4 rounded-2xl bg-red-soft border border-red/30 px-4 py-3 text-[13px] text-red">{sp.error === "fichier" ? "Aucun fichier reçu." : sp.error === "taille" ? "Fichier trop volumineux (max 25 Mo)." : sp.error === "expire" ? "Fichier expiré, recommencez le téléversement." : sp.error}</div>}
       <div className="grid lg:grid-cols-[380px_1fr] gap-4">
         <Card title="Nouvel import">
