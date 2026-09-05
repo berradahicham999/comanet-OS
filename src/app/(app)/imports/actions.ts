@@ -53,10 +53,13 @@ export async function runImportAction(formData: FormData) {
       year: Number(formData.get("year")) || undefined,
       stockDate: String(formData.get("stockDate") ?? "") || undefined,
       createUnknown: formData.get("createUnknown") !== "off",
+      // Matrices (animations, objectifs par ville) : les colonnes non mappées portent les données.
+      headers: parsed.headers,
+      columnGroups: parsed.groups,
     },
   });
   await db.delete(importFiles).where(eq(importFiles.id, fileId));
-  revalidatePath("/imports"); revalidatePath("/"); revalidatePath("/produits"); revalidatePath("/clients"); revalidatePath("/stock");
+  revalidatePath("/imports"); revalidatePath("/"); revalidatePath("/produits"); revalidatePath("/clients"); revalidatePath("/stock"); revalidatePath("/terrain"); revalidatePath("/reglementaire");
   redirect(`/imports/${summary.importId}`);
 }
 

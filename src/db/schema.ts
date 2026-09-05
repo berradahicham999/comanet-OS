@@ -53,6 +53,8 @@ export const importTypeEnum = pgEnum("import_type", [
   "OBJECTIVES",
   "BUDGETS",
   "REGULATORY",
+  "ANIMATIONS",
+  "ANIM_OBJECTIVES",
 ]);
 
 export const importStatusEnum = pgEnum("import_status", [
@@ -164,6 +166,8 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   role: userRoleEnum("role").notNull().default("TRADE"),
+  /** Ville de rattachement (animatrices : sert au rapprochement avec les objectifs par ville). */
+  city: text("city"),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -360,16 +364,25 @@ export const animations = pgTable(
     animatriceId: uuid("animatrice_id").references(() => users.id, { onDelete: "set null" }),
     brandId: uuid("brand_id").references(() => brands.id, { onDelete: "set null" }),
     status: animationStatusEnum("status").notNull().default("PLANNED"),
+    /** Nombre de jours d'animation couverts par la ligne (colonne « NB JOUR ANIMATION »). */
+    days: integer("days").notNull().default(1),
+    /** Ville dénormalisée (celle du point de vente au moment de l'animation). */
+    city: text("city"),
     cost: numeric("cost", { precision: 12, scale: 2 }).notNull().default("0"),
     durationHours: numeric("duration_hours", { precision: 5, scale: 1 }),
     customersAdvised: integer("customers_advised").notNull().default(0),
     samples: integer("samples").notNull().default(0),
     comment: text("comment"),
     photoUrl: text("photo_url"),
+    /** Identité d'une ligne du fichier quotidien : date | ville | point de vente | animatrice. */
+    dedupeKey: text("dedupe_key"),
+    importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("animations_date_idx").on(t.date),
+    index("animations_city_idx").on(t.city),
+    uniqueIndex("animations_dedupe_uq").on(t.dedupeKey).where(sql`dedupe_key is not null`),
     index("animations_client_idx").on(t.clientId),
     index("animations_animatrice_idx").on(t.animatriceId),
   ],
@@ -386,6 +399,10 @@ export const animationLines = pgTable(
       .notNull()
       .references(() => products.id, { onDelete: "cascade" }),
     quantitySold: integer("quantity_sold").notNull().default(0), // sell-out constaté
+    /** Prix unitaire TTC appliqué (repris du fichier d'animation, sinon prix public du produit). */
+    unitPrice: numeric("unit_price", { precision: 12, scale: 2 }),
+    /** Valeur TTC de la ligne = quantité × prix unitaire. */
+    amount: numeric("amount", { precision: 14, scale: 2 }),
     stockObserved: integer("stock_observed"), // stock rayon constaté
   },
   (t) => [index("animation_lines_animation_idx").on(t.animationId)],
@@ -394,6 +411,22 @@ export const animationLines = pgTable(
 /* ------------------------------------------------------------------ */
 /* Réglementaire                                                       */
 /* ------------------------------------------------------------------ */
+
+/** Objectifs de sell-out animation, par marque × ville. `month` nul = objectif annuel. */
+export const animationObjectives = pgTable(
+  "animation_objectives",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    brandId: uuid("brand_id").notNull().references(() => brands.id, { onDelete: "cascade" }),
+    city: text("city").notNull(),
+    year: integer("year").notNull(),
+    month: integer("month"),
+    units: numeric("units", { precision: 12, scale: 2 }).notNull(),
+    amount: numeric("amount", { precision: 14, scale: 2 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("animation_objectives_uq").on(t.brandId, t.city, t.year, sql`coalesce(${t.month}, 0)`)],
+);
 
 export const regulatoryFiles = pgTable(
   "regulatory_files",
@@ -727,6 +760,7 @@ export type StockSnapshot = typeof stockSnapshots.$inferSelect;
 export type Animation = typeof animations.$inferSelect;
 export type RegulatoryFile = typeof regulatoryFiles.$inferSelect;
 export type RegulatoryEvent = typeof regulatoryEvents.$inferSelect;
+export type AnimationObjective = typeof animationObjectives.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
 export type MarketingExpense = typeof marketingExpenses.$inferSelect;
 export type ContentItem = typeof contentItems.$inferSelect;

@@ -120,7 +120,7 @@ export default async function CockpitPage() {
 
           <Card href="/terrain" title="Terrain">
             <div className="kpi">{d.terrain.today.length} <span className="text-[14px] font-medium text-muted">animation{d.terrain.today.length > 1 ? "s" : ""} aujourd&apos;hui</span></div>
-            <div className="text-[12px] text-muted mt-1">{fmtNum(d.terrain.sales7.units)} u. vendues sur 7 j ({d.terrain.sales7.animations} animations)</div>
+            <div className="text-[12px] text-muted mt-1">{fmtNum(d.terrain.sales7.units)} u. · {fmtMAD(d.terrain.sales7.revenue, { compact: true })} sur 7 j ({d.terrain.sales7.animations} animations)</div>
             <div className="mt-3 space-y-1 text-[12px]">
               <div className="flex justify-between gap-2"><span className="text-muted">Top animatrice</span><span className="font-medium truncate">{d.terrain.topAnimatrice?.name ?? "—"}</span></div>
               <div className="flex justify-between gap-2"><span className="text-muted">Top produit</span><span className="font-medium truncate">{d.terrain.topProduct?.name ?? "—"}</span></div>

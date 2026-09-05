@@ -13,6 +13,7 @@ import { regulatoryExpiryRule } from "./regulatory-rules";
 import { clientRules, brandDropRule, dataQualityRule } from "./commercial-rules";
 import { budgetRule, adsRule } from "./marketing-rules";
 import { terrainRules, overdueTasksRule } from "./execution-rules";
+import { animationPerformanceRule } from "./animation-rules";
 
 export * from "./types";
 
@@ -26,6 +27,7 @@ export const RULES: Rule[] = [
   budgetRule,
   clientRules,
   terrainRules,
+  animationPerformanceRule,
   overstockRule,
   overdueTasksRule,
   dataQualityRule,

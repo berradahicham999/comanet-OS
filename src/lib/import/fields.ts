@@ -4,7 +4,7 @@
  */
 import { normKey } from "./normalize";
 
-export type ImportType = "SALES" | "CLIENTS" | "PRODUCTS" | "STOCK" | "OBJECTIVES" | "BUDGETS" | "REGULATORY";
+export type ImportType = "SALES" | "CLIENTS" | "PRODUCTS" | "STOCK" | "OBJECTIVES" | "BUDGETS" | "REGULATORY" | "ANIMATIONS" | "ANIM_OBJECTIVES";
 
 export type FieldDef = { key: string; label: string; required?: boolean; synonyms: string[]; hint?: string };
 
@@ -16,6 +16,8 @@ export const IMPORT_TYPES: { key: ImportType; label: string; description: string
   { key: "OBJECTIVES", label: "Objectifs de CA", description: "Objectifs annuels ou mensuels par marque et/ou produit." },
   { key: "BUDGETS", label: "Budgets marketing", description: "Budget annuel par marque, avec répartition par catégorie." },
   { key: "REGULATORY", label: "Dossiers réglementaires", description: "Enregistrements DMP : une ligne par variante déposée (marque, référence, type, contenance, ATD, validité)." },
+  { key: "ANIMATIONS", label: "Animations POS (feuille quotidienne)", description: "Matrice « Données Journalières » : une ligne par jour × point de vente × animatrice, une colonne par produit. Les colonnes non identifiées sont lues comme des produits." },
+  { key: "ANIM_OBJECTIVES", label: "Objectifs animation par ville", description: "Tableau croisé ville × marque (unités par an). Choisir la ligne d'en-tête du bloc YEARLY ; l'objectif mensuel est calculé automatiquement." },
 ];
 
 export const FIELDS: Record<ImportType, FieldDef[]> = {
@@ -78,6 +80,21 @@ export const FIELDS: Record<ImportType, FieldDef[]> = {
     { key: "month", label: "Mois (1-12, facultatif)", synonyms: ["mois", "month"] },
     { key: "year", label: "Année", synonyms: ["annee", "year", "exercice"] },
   ],
+  ANIMATIONS: [
+    { key: "date", label: "Date", required: true, synonyms: ["date", "jour", "date animation"] },
+    { key: "city", label: "Ville", required: true, synonyms: ["ville", "city", "localite"] },
+    { key: "pos", label: "Point de vente", required: true, synonyms: ["nom du pos", "pos", "point de vente", "pharmacie", "parapharmacie", "client"] },
+    { key: "animatrice", label: "Animatrice", required: true, synonyms: ["nom de l animatrice", "animatrice", "nom animatrice", "promotrice"] },
+    { key: "days", label: "Nombre de jours d'animation", synonyms: ["nb jour animation", "nb jours", "jours", "nombre de jours"] },
+    { key: "month", label: "Mois (colonne à ignorer)", synonyms: ["mois", "month"], hint: "Colonne de repère du classeur : mappez-la pour qu'elle ne soit pas lue comme un produit." },
+    { key: "year", label: "Année (colonne à ignorer)", synonyms: ["annee", "year", "exercice"], hint: "Idem : simple repère, non traité comme un produit." },
+    { key: "customers", label: "Clientes conseillées", synonyms: ["clientes conseillees", "clientes", "contacts", "passages"] },
+    { key: "cost", label: "Coût de l'animation", synonyms: ["cout", "cout animation", "budget"] },
+    { key: "comment", label: "Commentaire", synonyms: ["commentaire", "remarque", "observation"] },
+  ],
+  ANIM_OBJECTIVES: [
+    { key: "city", label: "Ville", required: true, synonyms: ["ville", "city", "column1", "localite"] },
+  ],
   REGULATORY: [
     { key: "brand", label: "Marque", required: true, synonyms: ["marque", "brand", "gamme"] },
     { key: "reference", label: "Référence / produit", required: true, synonyms: ["reference", "produit", "designation", "article", "nom produit", "libelle"] },
@@ -131,6 +148,28 @@ export function autoMap(type: ImportType, headers: string[]): Record<string, str
     if (unnamed) { mapping.notes = unnamed; used.add(unnamed); }
   }
   return mapping;
+}
+
+/**
+ * Colonnes de la matrice « Données Journalières » qui ne sont PAS des produits :
+ * totaux calculés par le classeur, à ignorer à l'import.
+ */
+export function isComputedColumn(header: string) {
+  const k = normKey(header); // MAJUSCULES sans accents
+  if (!k) return true;
+  if (/^COL \d+$/.test(k)) return true;
+  return (
+    k.startsWith("TOTAL") ||
+    k.startsWith("SOMME") ||
+    k.startsWith("SUM OF") ||
+    k === "VENTES DU JOUR" ||
+    k === "CA" ||
+    k.startsWith("CA TTC") ||
+    k.startsWith("REMISE") ||
+    k.startsWith("GRAND TOTAL") ||
+    // repères de date présents dans les classeurs de suivi
+    ["MOIS", "ANNEE", "SEMAINE", "TRIMESTRE", "JOUR", "DATE", "VILLE"].includes(k)
+  );
 }
 
 export function missingRequired(type: ImportType, mapping: Record<string, string>) {

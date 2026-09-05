@@ -73,7 +73,7 @@ async function terrainBlock(ref: Date, d30: string, tomorrow: string) {
   const day = iso(ref);
   const [todayAnims, sales7, top] = await Promise.all([
     db.execute(sql`select a.id, a.status::text as status, c.name as client, c.city, u.name as animatrice, b.name as brand from animations a join clients c on c.id = a.client_id left join users u on u.id = a.animatrice_id left join brands b on b.id = a.brand_id where a.date = ${day}::date order by a.status`),
-    db.execute(sql`select coalesce(sum(al.quantity_sold),0)::int as units, count(distinct a.id)::int as animations from animations a join animation_lines al on al.animation_id = a.id where a.status = 'DONE' and a.date >= ${iso(addDays(ref, -7))}::date and a.date < ${tomorrow}::date`),
+    db.execute(sql`select coalesce(sum(al.quantity_sold),0)::int as units, coalesce(sum(al.amount),0)::float8 as revenue, count(distinct a.id)::int as animations from animations a join animation_lines al on al.animation_id = a.id where a.status = 'DONE' and a.date >= ${iso(addDays(ref, -7))}::date and a.date < ${tomorrow}::date`),
     db.execute(sql`
       with lines as (
         select a.animatrice_id, a.client_id, al.product_id, al.quantity_sold from animations a join animation_lines al on al.animation_id = a.id
@@ -90,7 +90,7 @@ async function terrainBlock(ref: Date, d30: string, tomorrow: string) {
   const first = (k: string) => tops.find((t) => t.kind === k) ?? null;
   return {
     today: todayAnims.rows as { id: string; status: string; client: string; city: string | null; animatrice: string | null; brand: string | null }[],
-    sales7: sales7.rows[0] as { units: number; animations: number },
+    sales7: sales7.rows[0] as { units: number; revenue: number; animations: number },
     topAnimatrice: first("animatrice"), topProduct: first("product"), topClient: first("client"),
   };
 }

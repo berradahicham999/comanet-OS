@@ -5,7 +5,8 @@ import { saleLineHash } from "@/lib/hash";
 import { categoryFromLabel } from "@/lib/budget-categories";
 import { cleanText, inferClientType, normKey, toISODate, toNumber } from "./normalize";
 import { matchBrand, matchClient, matchProduct, type ClientCandidate, type ProductCandidate } from "./match";
-import type { ImportType } from "./fields";
+import { isComputedColumn, type ImportType } from "./fields";
+import { normalizeCity, animationKey, animatriceName, animatriceEmail } from "@/lib/animations-shared";
 import {
   VARIANT_TYPES, normalizeBool, normalizeDocumentType, normalizeObservation,
   normalizePackaging, normalizeSize, normalizeState, normalizeVariantType, regulatoryKey,
@@ -13,6 +14,10 @@ import {
 
 export type ImportOptions = {
   year?: number; // objectifs / budgets
+  /** Matrice d'animations : libellé de marque au-dessus de chaque colonne produit. */
+  columnGroups?: Record<string, string>;
+  /** Matrice d'animations : en-têtes de toutes les colonnes de la feuille (produits = celles non mappées). */
+  headers?: string[];
   stockDate?: string; // photo de stock
   skipStatuses?: string[]; // ex: ["Annulé"]
   createUnknown?: boolean; // créer clients / produits inconnus (défaut true)
@@ -215,6 +220,8 @@ export async function runImport(params: {
       case "OBJECTIVES": await importObjectives(rows, mapping, options, resolver, summary); break;
       case "BUDGETS": await importBudgets(rows, mapping, options, resolver, summary); break;
       case "REGULATORY": await importRegulatory(rows, mapping, options, resolver, imp.id, summary); break;
+      case "ANIMATIONS": await importAnimations(rows, mapping, options, resolver, imp.id, summary); break;
+      case "ANIM_OBJECTIVES": await importAnimationObjectives(rows, mapping, options, resolver, summary); break;
     }
     await resolver.flushAliases(type);
     summary.created = resolver.created;
@@ -598,4 +605,265 @@ async function importRegulatory(rows: Record<string, unknown>[], mapping: Mappin
   if (stale) out.warnings.push(`${stale} dossier(s) conservent les dates saisies dans l'application : le fichier contenait un dépôt plus ancien (fichier périmé).`);
   if (stats.no_date) out.warnings.push(`${stats.no_date} dossier(s) enregistré(s) sans date de validité : à retrouver pour pouvoir anticiper les redépôts.`);
   if (stats.unlinked) out.warnings.push(`${stats.unlinked} dossier(s) non rattaché(s) à un produit du référentiel (le suivi fonctionne, mais le lien ventes/stock ne sera pas actif).`);
+}
+
+/* ------------------------------------------------------------------ */
+/* Animations POS — matrice quotidienne                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Feuille « Données Journalières » : une ligne = un jour × un point de vente × une animatrice,
+ * une colonne = un produit (quantité vendue). La ligne juste sous l'en-tête porte les prix unitaires TTC,
+ * la ligne au-dessus porte la marque de chaque colonne.
+ *
+ * Ré-importable à volonté : la clé date|ville|POS|animatrice remplace les lignes déjà chargées.
+ */
+async function importAnimations(rows: Record<string, unknown>[], mapping: Mapping, options: ImportOptions, R: Resolver, importId: string, out: ImportSummary) {
+  const headers = options.headers ?? [];
+  const groups = options.columnGroups ?? {};
+  const mapped = new Set(Object.values(mapping));
+  const candidates = headers.filter((h) => !mapped.has(h) && !isComputedColumn(h));
+  if (!candidates.length) {
+    out.errors.push({ row: 0, message: "Aucune colonne produit détectée : vérifiez la ligne d'en-tête." });
+    return;
+  }
+
+  /* 1) Ligne des prix : première ligne sans date comportant au moins 5 valeurs numériques. */
+  const prices = new Map<string, number>();
+  let priceRowIndex = -1;
+  for (let i = 0; i < Math.min(rows.length, 5); i++) {
+    const r = rows[i];
+    if (toISODate(get(r, mapping, "date"))) continue;
+    if (candidates.filter((c) => toNumber(r[c]) !== null).length >= 5) {
+      for (const c of candidates) {
+        const v = toNumber(r[c]);
+        if (v !== null && v > 0) prices.set(c, v);
+      }
+      priceRowIndex = i;
+      break;
+    }
+  }
+  // Une colonne produit porte un prix unitaire ; les colonnes de sous-totaux par marque n'en ont pas.
+  const productCols = priceRowIndex >= 0 ? candidates.filter((c) => prices.has(c)) : candidates;
+  const ignored = candidates.filter((c) => !productCols.includes(c));
+  if (priceRowIndex < 0) out.warnings.push("Aucune ligne de prix détectée sous l'en-tête : les montants sont calculés à partir du prix public des produits, et toutes les colonnes libres sont lues comme des produits.");
+  else if (ignored.length) out.warnings.push(`${ignored.length} colonne(s) sans prix ignorée(s) (sous-totaux du classeur) : ${ignored.slice(0, 8).join(", ")}${ignored.length > 8 ? "…" : ""}.`);
+  if (!productCols.length) {
+    out.errors.push({ row: 0, message: "Aucune colonne produit avec prix : vérifiez la ligne des prix sous l'en-tête." });
+    return;
+  }
+
+  /* 2) Colonnes produits → référentiel (la marque vient de la ligne de regroupement). */
+  const productIds = new Map<string, string>();
+  const createdProducts: string[] = [];
+  for (const col of productCols) {
+    const brandName = groups[col] ?? null;
+    const brandId = brandName ? R.brand(brandName) : null;
+    let id = await R.product(col, null, brandId, false);
+    if (!id) {
+      id = await R.product(col, null, brandId, true, { needsReview: true, priceRetail: prices.has(col) ? String(prices.get(col)) : undefined });
+      if (id) createdProducts.push(col);
+    }
+    if (id) {
+      productIds.set(col, id);
+      R.addProductAlias(normKey(col), id);
+      const price = prices.get(col);
+      if (price) await db.execute(sql`update products set price_retail = coalesce(price_retail, ${price}) where id = ${id}::uuid`);
+    }
+  }
+
+  /* 3) Animatrices et points de vente : résolus une seule fois, pas à chaque ligne. */
+  const dataRows = rows.filter((r, i) => i !== priceRowIndex && toISODate(get(r, mapping, "date")) && txt(r, mapping, "pos"));
+  const animatriceIds = new Map<string, string>();
+  const existingUsers = await db.execute(sql`select id, name from users`);
+  const usersByKey = new Map((existingUsers.rows as { id: string; name: string }[]).map((u) => [normKey(u.name), u.id]));
+  for (const raw of new Set(dataRows.map((r) => txt(r, mapping, "animatrice")).filter(Boolean) as string[])) {
+    const k = normKey(raw);
+    let id = usersByKey.get(k) ?? null;
+    // Ville de rattachement = celle où elle anime le plus, pas la première rencontrée.
+    const cityCount = new Map<string, number>();
+    for (const r of dataRows) {
+      if (normKey(txt(r, mapping, "animatrice") ?? "") !== k) continue;
+      const c = normalizeCity(get(r, mapping, "city"));
+      if (c) cityCount.set(c, (cityCount.get(c) ?? 0) + 1);
+    }
+    const city = [...cityCount.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    if (!id) {
+      const [u] = await db.insert(s.users).values({
+        name: animatriceName(raw), email: animatriceEmail(raw), passwordHash: "!", role: "ANIMATRICE", city, active: true,
+      }).onConflictDoNothing().returning({ id: s.users.id });
+      if (u) { id = u.id; out.warnings.push(`Animatrice créée : ${animatriceName(raw)} — définissez son mot de passe dans Paramètres pour lui ouvrir la saisie mobile.`); }
+    } else if (city) {
+      await db.execute(sql`update users set city = ${city} where id = ${id}::uuid and role = 'ANIMATRICE'`);
+    }
+    if (id) animatriceIds.set(k, id);
+  }
+
+  const posIds = new Map<string, string>();
+  let cityFixes = 0;
+  const posSeen = new Map<string, string | null>();
+  for (const r of dataRows) {
+    const pos = txt(r, mapping, "pos")!;
+    if (!posSeen.has(normKey(pos))) posSeen.set(normKey(pos), normalizeCity(get(r, mapping, "city")));
+  }
+  for (const r of dataRows) {
+    const pos = txt(r, mapping, "pos")!;
+    const k = normKey(pos);
+    if (posIds.has(k)) continue;
+    const city = posSeen.get(k) ?? null;
+    const clientId = await R.client(pos, null, null, city, true, { needsReview: true });
+    if (!clientId) { out.errors.push({ row: 0, message: `Point de vente illisible : ${pos}` }); continue; }
+    posIds.set(k, clientId);
+    if (city) {
+      const upd = await db.execute(sql`update clients set city = ${city} where id = ${clientId}::uuid and (city is null or city = '')`);
+      if (upd.rowCount) cityFixes++;
+    }
+  }
+
+  /* 4) Animations : un seul insert par lot, avec mise à jour sur la clé date|ville|POS|animatrice. */
+  type Pending = { key: string; values: typeof s.animations.$inferInsert; lines: { col: string; qty: number }[] };
+  const pending: Pending[] = [];
+  const seen = new Set<string>();
+  for (const r of dataRows) {
+    const date = toISODate(get(r, mapping, "date"))!;
+    const pos = txt(r, mapping, "pos")!;
+    const city = normalizeCity(get(r, mapping, "city"));
+    const animatriceRaw = txt(r, mapping, "animatrice");
+    const key = animationKey({ date, city, pos, animatrice: animatriceRaw });
+    if (seen.has(key)) { out.duplicates++; continue; }
+    const clientId = posIds.get(normKey(pos));
+    if (!clientId) continue;
+    seen.add(key);
+    const lines: { col: string; qty: number }[] = [];
+    for (const col of productCols) {
+      const qty = toNumber(r[col]);
+      if (qty && qty > 0 && productIds.has(col)) lines.push({ col, qty: Math.round(qty) });
+    }
+    pending.push({
+      key,
+      values: {
+        date, clientId, animatriceId: animatriceRaw ? animatriceIds.get(normKey(animatriceRaw)) ?? null : null,
+        city, days: Math.max(1, Math.round(toNumber(get(r, mapping, "days")) ?? 1)), status: "DONE",
+        customersAdvised: Math.round(toNumber(get(r, mapping, "customers")) ?? 0),
+        cost: (toNumber(get(r, mapping, "cost")) ?? 0).toFixed(2),
+        comment: txt(r, mapping, "comment"), dedupeKey: key, importId,
+      },
+      lines,
+    });
+  }
+
+  const idByKey = new Map<string, string>();
+  const existingKeys = new Set(
+    ((await db.execute(sql`select dedupe_key from animations where dedupe_key is not null`)).rows as { dedupe_key: string }[]).map((x) => x.dedupe_key),
+  );
+  for (let i = 0; i < pending.length; i += 200) {
+    const chunk = pending.slice(i, i + 200);
+    const inserted = await db
+      .insert(s.animations)
+      .values(chunk.map((p) => p.values))
+      .onConflictDoUpdate({
+        target: s.animations.dedupeKey,
+        // l'index unique est partiel : le prédicat doit être répété pour que Postgres l'identifie
+        targetWhere: sql`dedupe_key is not null`,
+        set: {
+          clientId: sql`excluded.client_id`, animatriceId: sql`excluded.animatrice_id`, city: sql`excluded.city`,
+          days: sql`excluded.days`, status: sql`excluded.status`, customersAdvised: sql`excluded.customers_advised`,
+          cost: sql`excluded.cost`, importId: sql`excluded.import_id`,
+        },
+      })
+      .returning({ id: s.animations.id, key: s.animations.dedupeKey });
+    for (const row of inserted) if (row.key) idByKey.set(row.key, row.id);
+  }
+  out.inserted += pending.filter((p) => !existingKeys.has(p.key)).length;
+  out.updated += pending.filter((p) => existingKeys.has(p.key)).length;
+
+  /* 5) Lignes produit : purge puis insertion en masse. */
+  const ids = [...idByKey.values()];
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500);
+    await db.execute(sql`delete from animation_lines where animation_id in (${sql.join(chunk.map((x) => sql`${x}::uuid`), sql`, `)})`);
+  }
+  const allLines: typeof s.animationLines.$inferInsert[] = [];
+  let revenue = 0;
+  for (const p of pending) {
+    const animationId = idByKey.get(p.key);
+    if (!animationId) continue;
+    for (const l of p.lines) {
+      const price = prices.get(l.col) ?? null;
+      const amount = price !== null ? l.qty * price : null;
+      if (amount) revenue += amount;
+      allLines.push({
+        animationId, productId: productIds.get(l.col)!, quantitySold: l.qty,
+        unitPrice: price !== null ? price.toFixed(2) : null,
+        amount: amount !== null ? amount.toFixed(2) : null,
+      });
+    }
+  }
+  for (let i = 0; i < allLines.length; i += 1000) await db.insert(s.animationLines).values(allLines.slice(i, i + 1000));
+
+  // Valorisation de secours : prix public du produit quand le fichier ne porte pas de prix.
+  await db.execute(sql`
+    update animation_lines al set unit_price = p.price_retail, amount = al.quantity_sold * p.price_retail
+    from products p where p.id = al.product_id and al.amount is null and p.price_retail is not null`);
+
+  out.warnings.push(`${allLines.length} lignes produit chargées · ${Math.round(revenue).toLocaleString("fr-FR")} MAD TTC de sell-out valorisé · ${posIds.size} points de vente · ${animatriceIds.size} animatrices.`);
+
+  // Contrôle : le total recalculé doit coller au total du classeur (colonne « Total TTC »).
+  const totalCol = headers.find((h) => normKey(h) === "TOTAL TTC");
+  if (totalCol) {
+    const fileTotal = dataRows.reduce((sum, r) => sum + (toNumber(r[totalCol]) ?? 0), 0);
+    const gap = revenue - fileTotal;
+    if (fileTotal > 0 && Math.abs(gap) / fileTotal > 0.005) {
+      out.warnings.push(`Contrôle : total du fichier ${Math.round(fileTotal).toLocaleString("fr-FR")} MAD, total recalculé ${Math.round(revenue).toLocaleString("fr-FR")} MAD (écart ${gap > 0 ? "+" : ""}${Math.round(gap).toLocaleString("fr-FR")} MAD). L'application recalcule chaque ligne à partir des quantités et des prix : l'écart vient de totaux saisis à la main dans le classeur.`);
+    } else if (fileTotal > 0) {
+      out.warnings.push(`Contrôle : total recalculé conforme au classeur (${Math.round(fileTotal).toLocaleString("fr-FR")} MAD).`);
+    }
+  }
+  if (createdProducts.length) out.warnings.push(`${createdProducts.length} produit(s) créé(s) depuis les colonnes du fichier et marqués « à qualifier » : ${createdProducts.slice(0, 6).join(", ")}${createdProducts.length > 6 ? "…" : ""}. Fusionnez-les avec vos articles Sage depuis la fiche produit si nécessaire.`);
+  if (cityFixes) out.warnings.push(`${cityFixes} point(s) de vente ont reçu leur ville depuis ce fichier.`);
+}
+
+/**
+ * Objectifs animation : tableau croisé ville × marque, en unités par an.
+ * L'objectif mensuel est déduit (annuel ÷ 12) — inutile de charger un second tableau.
+ */
+async function importAnimationObjectives(rows: Record<string, unknown>[], mapping: Mapping, options: ImportOptions, R: Resolver, out: ImportSummary) {
+  const headers = options.headers ?? [];
+  const mapped = new Set(Object.values(mapping));
+  const year = options.year ?? new Date().getUTCFullYear();
+  const brandCols: { col: string; brandId: string }[] = [];
+  for (const h of headers) {
+    if (mapped.has(h) || isComputedColumn(h)) continue;
+    const brandId = R.brand(h);
+    if (brandId) brandCols.push({ col: h, brandId });
+  }
+  if (!brandCols.length) {
+    out.errors.push({ row: 0, message: "Aucune colonne de marque reconnue sur cette ligne d'en-tête." });
+    return;
+  }
+  const seenCities = new Set<string>();
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const city = normalizeCity(get(r, mapping, "city"));
+    if (!city) continue;
+    if (["GRAND TOTAL", "TOTAL", "MONTHLY", "YEARLY"].includes(city)) continue;
+    // Le classeur enchaîne souvent un bloc ANNUEL puis un bloc MENSUEL avec les mêmes villes :
+    // dès qu'une ville se répète, le premier tableau est terminé — on s'arrête là.
+    if (seenCities.has(city)) {
+      out.warnings.push(`Second tableau détecté à partir de « ${city} » : seul le premier bloc (annuel) a été lu.`);
+      break;
+    }
+    seenCities.add(city);
+    const rowYear = year;
+    for (const { col, brandId } of brandCols) {
+      const units = toNumber(r[col]);
+      if (units === null || units <= 0) continue;
+      await db.execute(sql`
+        insert into animation_objectives (brand_id, city, year, month, units)
+        values (${brandId}::uuid, ${city}, ${rowYear}, null, ${units.toFixed(2)}::numeric)
+        on conflict (brand_id, city, year, coalesce(month, 0)) do update set units = excluded.units`);
+      out.inserted++;
+    }
+  }
+  out.warnings.push(`Objectifs ${year} enregistrés en unités par ville et par marque. L'objectif mensuel affiché est l'annuel divisé par 12.`);
 }

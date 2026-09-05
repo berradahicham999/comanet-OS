@@ -74,6 +74,7 @@ export async function animationImpact(animationId: string) {
       (select coalesce(sum(s.amount),0)::float8 from sales s join products p on p.id = s.product_id, a where s.client_id = a.client_id and (a.brand_id is null or p.brand_id = a.brand_id) and s.date > a.date and s.date <= a.date + 30) as after_amount,
       (select coalesce(sum(al.quantity_sold),0)::float8 from animation_lines al where al.animation_id = ${animationId}::uuid) as during_qty,
       (select coalesce(sum(al.quantity_sold * coalesce(p.price_wholesale,0)),0)::float8 from animation_lines al join products p on p.id = al.product_id where al.animation_id = ${animationId}::uuid) as during_revenue,
-      (select coalesce(sum(al.quantity_sold * coalesce(p.price_retail, p.price_wholesale * 1.6, 0)),0)::float8 from animation_lines al join products p on p.id = al.product_id where al.animation_id = ${animationId}::uuid) as during_retail`);
+      -- sell-out TTC : montant porté par la ligne (prix du fichier d'animation), sinon prix public du produit
+      (select coalesce(sum(coalesce(al.amount, al.quantity_sold * coalesce(p.price_retail, p.price_wholesale * 1.6, 0))),0)::float8 from animation_lines al join products p on p.id = al.product_id where al.animation_id = ${animationId}::uuid) as during_retail`);
   return r.rows[0] as { before_qty: number; after_qty: number; before_amount: number; after_amount: number; during_qty: number; during_revenue: number; during_retail: number };
 }
