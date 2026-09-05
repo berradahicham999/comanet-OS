@@ -22,6 +22,7 @@ import {
   jsonb,
   index,
   uniqueIndex,
+  primaryKey,
   customType,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
@@ -55,6 +56,7 @@ export const importTypeEnum = pgEnum("import_type", [
   "REGULATORY",
   "ANIMATIONS",
   "ANIM_OBJECTIVES",
+  "ADS",
 ]);
 
 export const importStatusEnum = pgEnum("import_status", [
@@ -149,12 +151,7 @@ export const campaignChannelEnum = pgEnum("campaign_channel", [
   "AUTRE",
 ]);
 
-export const campaignStatusEnum = pgEnum("campaign_status", [
-  "DRAFT",
-  "ACTIVE",
-  "PAUSED",
-  "DONE",
-]);
+export const campaignStatusEnum = pgEnum("campaign_status", ["DRAFT", "PLANNED", "ACTIVE", "PAUSED", "DONE", "ANALYZED"]);
 
 /* ------------------------------------------------------------------ */
 /* Collaborateurs                                                      */
@@ -582,21 +579,214 @@ export const budgetLines = pgTable(
   (t) => [index("budget_lines_brand_year_idx").on(t.brandId, t.year)],
 );
 
-export const campaigns = pgTable("campaigns", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  brandId: uuid("brand_id")
-    .notNull()
-    .references(() => brands.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  channel: campaignChannelEnum("channel").notNull().default("META"),
-  objective: text("objective"),
-  startDate: date("start_date"),
-  endDate: date("end_date"),
-  budget: numeric("budget", { precision: 14, scale: 2 }),
-  status: campaignStatusEnum("status").notNull().default("DRAFT"),
-  notes: text("notes"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const campaigns = pgTable(
+  "campaigns",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    brandId: uuid("brand_id")
+      .notNull()
+      .references(() => brands.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** Nature de la campagne : AWARENESS, ACQUISITION, LANCEMENT, RAMADAN, 360… (voir lib/marketing-shared). */
+    type: text("type").notNull().default("AWARENESS"),
+    channel: campaignChannelEnum("channel").notNull().default("META"),
+    objective: text("objective"),
+    startDate: date("start_date"),
+    endDate: date("end_date"),
+    budget: numeric("budget", { precision: 14, scale: 2 }),
+    status: campaignStatusEnum("status").notNull().default("DRAFT"),
+    audience: text("audience"),
+    message: text("message"),
+    offer: text("offer"),
+    kpiTarget: text("kpi_target"),
+    kpiActual: text("kpi_actual"),
+    responsibleId: uuid("responsible_id").references(() => users.id, { onDelete: "set null" }),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("campaigns_brand_idx").on(t.brandId, t.startDate)],
+);
+
+/** Produits poussés par une campagne (référentiel produits existant, pas de duplication). */
+export const campaignProducts = pgTable(
+  "campaign_products",
+  {
+    campaignId: uuid("campaign_id").notNull().references(() => campaigns.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ name: "campaign_products_pk", columns: [t.campaignId, t.productId] })],
+);
+
+/* ------------------------------------------------------------------ */
+/* Régie publicitaire (Meta / TikTok / Google)                         */
+/* ------------------------------------------------------------------ */
+
+/** Compte publicitaire + état de synchronisation (import manuel aujourd'hui, API demain). */
+export const adAccounts = pgTable(
+  "ad_accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    platform: text("platform").notNull(), // META | TIKTOK | GOOGLE | AUTRE
+    name: text("name").notNull(),
+    externalId: text("external_id"),
+    brandId: uuid("brand_id").references(() => brands.id, { onDelete: "set null" }),
+    currency: text("currency").notNull().default("MAD"),
+    lastSyncAt: timestamp("last_sync_at", { withTimezone: true }),
+    syncStatus: text("sync_status").notNull().default("MANUAL"), // MANUAL | OK | ERROR
+    lastError: text("last_error"),
+    importedRows: integer("imported_rows").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("ad_accounts_uq").on(t.platform, t.name)],
+);
+
+/** Une ligne = une journée × une publicité (ou campagne si le fichier n'a pas le détail). */
+export const adMetrics = pgTable(
+  "ad_metrics",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    date: date("date").notNull(),
+    platform: text("platform").notNull(),
+    accountId: uuid("account_id").references(() => adAccounts.id, { onDelete: "set null" }),
+    brandId: uuid("brand_id").references(() => brands.id, { onDelete: "set null" }),
+    campaignId: uuid("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
+    campaignName: text("campaign_name").notNull(),
+    adsetName: text("adset_name"),
+    adName: text("ad_name"),
+    spend: numeric("spend", { precision: 14, scale: 2 }).notNull().default("0"),
+    impressions: integer("impressions").notNull().default(0),
+    reach: integer("reach").notNull().default(0),
+    clicks: integer("clicks").notNull().default(0),
+    linkClicks: integer("link_clicks").notNull().default(0),
+    landingPageViews: integer("landing_page_views").notNull().default(0),
+    leads: integer("leads").notNull().default(0),
+    purchases: integer("purchases").notNull().default(0),
+    revenue: numeric("revenue", { precision: 14, scale: 2 }).notNull().default("0"),
+    dedupeKey: text("dedupe_key").notNull(),
+    importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("ad_metrics_dedupe_uq").on(t.dedupeKey),
+    index("ad_metrics_date_idx").on(t.date),
+    index("ad_metrics_brand_idx").on(t.brandId, t.date),
+    index("ad_metrics_campaign_idx").on(t.campaignName),
+  ],
+);
+
+/** Enrichissement d'une publicité : format, accroche, produit, contenu du planning éditorial. */
+export const adCreatives = pgTable(
+  "ad_creatives",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    platform: text("platform").notNull(),
+    adName: text("ad_name").notNull(),
+    format: text("format"),
+    hook: text("hook"),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
+    contentId: uuid("content_id").references(() => contentItems.id, { onDelete: "set null" }),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("ad_creatives_uq").on(t.platform, t.adName)],
+);
+
+/* ------------------------------------------------------------------ */
+/* Influence                                                           */
+/* ------------------------------------------------------------------ */
+
+export const influencers = pgTable(
+  "influencers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    instagram: text("instagram"),
+    tiktok: text("tiktok"),
+    followers: integer("followers"),
+    engagementRate: numeric("engagement_rate", { precision: 6, scale: 2 }),
+    audience: text("audience"),
+    city: text("city"),
+    country: text("country").default("Maroc"),
+    category: text("category"),
+    usualRate: numeric("usual_rate", { precision: 12, scale: 2 }),
+    contact: text("contact"),
+    active: boolean("active").notNull().default(true),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("influencers_name_uq").on(sql`lower(${t.name})`)],
+);
+
+export const collaborations = pgTable(
+  "collaborations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    influencerId: uuid("influencer_id").notNull().references(() => influencers.id, { onDelete: "cascade" }),
+    brandId: uuid("brand_id").notNull().references(() => brands.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
+    campaignId: uuid("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
+    date: date("date").notNull(),
+    contentType: text("content_type"),
+    stories: integer("stories").notNull().default(0),
+    reels: integer("reels").notNull().default(0),
+    posts: integer("posts").notNull().default(0),
+    fee: numeric("fee", { precision: 12, scale: 2 }).notNull().default("0"),
+    productValue: numeric("product_value", { precision: 12, scale: 2 }).notNull().default("0"),
+    /** PROSPECT | CONTACTEE | NEGOCIATION | CONFIRMEE | CONTENU_RECU | PUBLIE | ANALYSE | TERMINE */
+    status: text("status").notNull().default("PROSPECT"),
+    reach: integer("reach"),
+    impressions: integer("impressions"),
+    views: integer("views"),
+    likes: integer("likes"),
+    comments: integer("comments"),
+    shares: integer("shares"),
+    saves: integer("saves"),
+    linkClicks: integer("link_clicks"),
+    promoCode: text("promo_code"),
+    conversions: integer("conversions"),
+    attributedRevenue: numeric("attributed_revenue", { precision: 14, scale: 2 }),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("collaborations_date_idx").on(t.date), index("collaborations_influencer_idx").on(t.influencerId)],
+);
+
+/* ------------------------------------------------------------------ */
+/* Activations marketing                                               */
+/* ------------------------------------------------------------------ */
+
+export const activations = pgTable(
+  "activations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    /** EVENEMENT | SPONSORING | PLV | SHOOTING | SALON | SAMPLING | GOODIES | PARTENARIAT… */
+    type: text("type").notNull().default("EVENEMENT"),
+    brandId: uuid("brand_id").references(() => brands.id, { onDelete: "set null" }),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
+    campaignId: uuid("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
+    clientId: uuid("client_id").references(() => clients.id, { onDelete: "set null" }),
+    date: date("date").notNull(),
+    endDate: date("end_date"),
+    place: text("place"),
+    city: text("city"),
+    responsibleId: uuid("responsible_id").references(() => users.id, { onDelete: "set null" }),
+    objective: text("objective"),
+    budgetPlanned: numeric("budget_planned", { precision: 14, scale: 2 }).notNull().default("0"),
+    status: text("status").notNull().default("PLANNED"), // PLANNED | ACTIVE | DONE | CANCELLED
+    participants: integer("participants"),
+    leads: integer("leads"),
+    samples: integer("samples"),
+    newClients: integer("new_clients"),
+    attributedRevenue: numeric("attributed_revenue", { precision: 14, scale: 2 }),
+    results: text("results"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("activations_date_idx").on(t.date)],
+);
 
 export const marketingExpenses = pgTable(
   "marketing_expenses",
@@ -606,6 +796,9 @@ export const marketingExpenses = pgTable(
       .notNull()
       .references(() => brands.id, { onDelete: "cascade" }),
     campaignId: uuid("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
+    activationId: uuid("activation_id").references(() => activations.id, { onDelete: "set null" }),
+    collaborationId: uuid("collaboration_id").references(() => collaborations.id, { onDelete: "set null" }),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
     category: budgetCategoryEnum("category").notNull(),
     label: text("label").notNull(),
     amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
@@ -635,6 +828,10 @@ export const contentItems = pgTable(
     brief: text("brief"),
     responsibleId: uuid("responsible_id").references(() => users.id, { onDelete: "set null" }),
     status: contentStatusEnum("status").notNull().default("IDEE"),
+    campaignId: uuid("campaign_id").references((): any => campaigns.id, { onDelete: "set null" }),
+    activationId: uuid("activation_id").references((): any => activations.id, { onDelete: "set null" }),
+    influencerId: uuid("influencer_id").references((): any => influencers.id, { onDelete: "set null" }),
+    budget: numeric("budget", { precision: 12, scale: 2 }),
     link: text("link"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -719,6 +916,45 @@ export const regulatoryRelations = relations(regulatoryFiles, ({ one, many }) =>
   events: many(regulatoryEvents),
 }));
 
+export const campaignRelations = relations(campaigns, ({ one, many }) => ({
+  brand: one(brands, { fields: [campaigns.brandId], references: [brands.id] }),
+  responsible: one(users, { fields: [campaigns.responsibleId], references: [users.id] }),
+  products: many(campaignProducts),
+  expenses: many(marketingExpenses),
+  collaborations: many(collaborations),
+  activations: many(activations),
+}));
+
+export const campaignProductsRelations = relations(campaignProducts, ({ one }) => ({
+  campaign: one(campaigns, { fields: [campaignProducts.campaignId], references: [campaigns.id] }),
+  product: one(products, { fields: [campaignProducts.productId], references: [products.id] }),
+}));
+
+export const influencerRelations = relations(influencers, ({ many }) => ({
+  collaborations: many(collaborations),
+}));
+
+export const collaborationRelations = relations(collaborations, ({ one }) => ({
+  influencer: one(influencers, { fields: [collaborations.influencerId], references: [influencers.id] }),
+  brand: one(brands, { fields: [collaborations.brandId], references: [brands.id] }),
+  product: one(products, { fields: [collaborations.productId], references: [products.id] }),
+  campaign: one(campaigns, { fields: [collaborations.campaignId], references: [campaigns.id] }),
+}));
+
+export const activationRelations = relations(activations, ({ one }) => ({
+  brand: one(brands, { fields: [activations.brandId], references: [brands.id] }),
+  product: one(products, { fields: [activations.productId], references: [products.id] }),
+  campaign: one(campaigns, { fields: [activations.campaignId], references: [campaigns.id] }),
+  client: one(clients, { fields: [activations.clientId], references: [clients.id] }),
+  responsible: one(users, { fields: [activations.responsibleId], references: [users.id] }),
+}));
+
+export const adMetricsRelations = relations(adMetrics, ({ one }) => ({
+  account: one(adAccounts, { fields: [adMetrics.accountId], references: [adAccounts.id] }),
+  brand: one(brands, { fields: [adMetrics.brandId], references: [brands.id] }),
+  campaign: one(campaigns, { fields: [adMetrics.campaignId], references: [campaigns.id] }),
+}));
+
 export const regulatoryEventsRelations = relations(regulatoryEvents, ({ one }) => ({
   file: one(regulatoryFiles, { fields: [regulatoryEvents.fileId], references: [regulatoryFiles.id] }),
   user: one(users, { fields: [regulatoryEvents.userId], references: [users.id] }),
@@ -761,6 +997,12 @@ export type Animation = typeof animations.$inferSelect;
 export type RegulatoryFile = typeof regulatoryFiles.$inferSelect;
 export type RegulatoryEvent = typeof regulatoryEvents.$inferSelect;
 export type AnimationObjective = typeof animationObjectives.$inferSelect;
+export type Campaign = typeof campaigns.$inferSelect;
+export type AdAccount = typeof adAccounts.$inferSelect;
+export type AdMetric = typeof adMetrics.$inferSelect;
+export type Influencer = typeof influencers.$inferSelect;
+export type Collaboration = typeof collaborations.$inferSelect;
+export type Activation = typeof activations.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
 export type MarketingExpense = typeof marketingExpenses.$inferSelect;
 export type ContentItem = typeof contentItems.$inferSelect;

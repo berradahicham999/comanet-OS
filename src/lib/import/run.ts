@@ -7,6 +7,7 @@ import { cleanText, inferClientType, normKey, toISODate, toNumber } from "./norm
 import { matchBrand, matchClient, matchProduct, type ClientCandidate, type ProductCandidate } from "./match";
 import { isComputedColumn, type ImportType } from "./fields";
 import { normalizeCity, animationKey, animatriceName, animatriceEmail } from "@/lib/animations-shared";
+import { normalizePlatform } from "@/lib/marketing-shared";
 import {
   VARIANT_TYPES, normalizeBool, normalizeDocumentType, normalizeObservation,
   normalizePackaging, normalizeSize, normalizeState, normalizeVariantType, regulatoryKey,
@@ -19,6 +20,8 @@ export type ImportOptions = {
   /** Matrice d'animations : en-têtes de toutes les colonnes de la feuille (produits = celles non mappées). */
   headers?: string[];
   stockDate?: string; // photo de stock
+  /** Régie par défaut quand le fichier ne porte pas de colonne « plateforme ». */
+  adPlatform?: string;
   skipStatuses?: string[]; // ex: ["Annulé"]
   createUnknown?: boolean; // créer clients / produits inconnus (défaut true)
   fuzzyThreshold?: number;
@@ -81,6 +84,21 @@ class Resolver {
 
   brand(value: string | null, fallbackName?: string | null): string | null {
     return matchBrand(value, this.brands) ?? (fallbackName ? matchBrand(fallbackName, this.brands) : null);
+  }
+
+  /** Marque citée à l'intérieur d'un libellé libre (nom de campagne publicitaire, par ex.). */
+  brandInText(text: string | null): string | null {
+    if (!text) return null;
+    const direct = matchBrand(text, this.brands);
+    if (direct) return direct;
+    const key = normKey(text);
+    for (const b of this.brands) {
+      for (const cand of [b.name, ...b.aliases]) {
+        const k = normKey(cand);
+        if (k.length >= 3 && new RegExp(`(^|[^A-Z0-9])${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^A-Z0-9]|$)`).test(key)) return b.id;
+      }
+    }
+    return null;
   }
 
   async createBrand(name: string) {
@@ -222,6 +240,7 @@ export async function runImport(params: {
       case "REGULATORY": await importRegulatory(rows, mapping, options, resolver, imp.id, summary); break;
       case "ANIMATIONS": await importAnimations(rows, mapping, options, resolver, imp.id, summary); break;
       case "ANIM_OBJECTIVES": await importAnimationObjectives(rows, mapping, options, resolver, summary); break;
+      case "ADS": await importAds(rows, mapping, options, resolver, imp.id, summary); break;
     }
     await resolver.flushAliases(type);
     summary.created = resolver.created;
@@ -821,6 +840,142 @@ async function importAnimations(rows: Record<string, unknown>[], mapping: Mappin
   }
   if (createdProducts.length) out.warnings.push(`${createdProducts.length} produit(s) créé(s) depuis les colonnes du fichier et marqués « à qualifier » : ${createdProducts.slice(0, 6).join(", ")}${createdProducts.length > 6 ? "…" : ""}. Fusionnez-les avec vos articles Sage depuis la fiche produit si nécessaire.`);
   if (cityFixes) out.warnings.push(`${cityFixes} point(s) de vente ont reçu leur ville depuis ce fichier.`);
+}
+
+/* ------------------------------------------------------------------ */
+/* Régie publicitaire (Meta / TikTok / Google)                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Une ligne = un jour × une publicité (ou × une campagne si le fichier
+ * n'a pas le détail créative). L'import est idempotent : réimporter le même
+ * export met à jour les lignes au lieu de les dupliquer.
+ *
+ * La marque est prise dans la colonne « marque » si elle existe, sinon
+ * déduite du nom de la campagne (« KLORANE - Acquisition mars » → KLORANE).
+ */
+async function importAds(rows: Record<string, unknown>[], mapping: Mapping, options: ImportOptions, R: Resolver, importId: string, out: ImportSummary) {
+  const fallbackPlatform = normalizePlatform(options.adPlatform ?? "");
+  const accounts = new Map<string, string>(); // platform|name -> id
+  const campaignIds = new Map<string, string | null>(); // platform|campaignName -> campaign uuid
+  const unmatchedBrands = new Set<string>();
+
+  const getAccount = async (platform: string, name: string, brandId: string | null): Promise<string | null> => {
+    const key = `${platform}|${name}`;
+    if (accounts.has(key)) return accounts.get(key)!;
+    const res = await db.execute(sql`
+      insert into ad_accounts (platform, name, brand_id) values (${platform}, ${name}, ${brandId}::uuid)
+      on conflict (platform, name) do update set brand_id = coalesce(ad_accounts.brand_id, excluded.brand_id)
+      returning id`);
+    const id = (res.rows[0] as { id: string } | undefined)?.id ?? null;
+    if (id) accounts.set(key, id);
+    return id;
+  };
+
+  /** Rattache la ligne à une campagne existante du même nom (même marque), sans en créer. */
+  const getCampaign = async (name: string, brandId: string | null): Promise<string | null> => {
+    const key = `${brandId ?? ""}|${normKey(name)}`;
+    if (campaignIds.has(key)) return campaignIds.get(key)!;
+    let id: string | null = null;
+    if (brandId) {
+      const res = await db.execute(sql`
+        select id from campaigns
+        where brand_id = ${brandId}::uuid and (upper(name) = upper(${name}) or upper(${name}) like '%' || upper(name) || '%')
+        order by length(name) desc limit 1`);
+      id = (res.rows[0] as { id: string } | undefined)?.id ?? null;
+    }
+    campaignIds.set(key, id);
+    return id;
+  };
+
+  type Row = {
+    date: string; platform: string; accountId: string | null; brandId: string | null; campaignId: string | null;
+    campaignName: string; adsetName: string | null; adName: string | null;
+    spend: number; impressions: number; reach: number; clicks: number; linkClicks: number;
+    landingPageViews: number; leads: number; purchases: number; revenue: number; dedupeKey: string;
+  };
+  const batch: Row[] = [];
+  const flush = async () => {
+    if (!batch.length) return;
+    await db
+      .insert(s.adMetrics)
+      .values(batch.map((b) => ({
+        date: b.date, platform: b.platform, accountId: b.accountId, brandId: b.brandId, campaignId: b.campaignId,
+        campaignName: b.campaignName, adsetName: b.adsetName, adName: b.adName,
+        spend: b.spend.toFixed(2), impressions: b.impressions, reach: b.reach, clicks: b.clicks, linkClicks: b.linkClicks,
+        landingPageViews: b.landingPageViews, leads: b.leads, purchases: b.purchases, revenue: b.revenue.toFixed(2),
+        dedupeKey: b.dedupeKey, importId,
+      })))
+      .onConflictDoUpdate({
+        target: s.adMetrics.dedupeKey,
+        set: {
+          spend: sql`excluded.spend`, impressions: sql`excluded.impressions`, reach: sql`excluded.reach`,
+          clicks: sql`excluded.clicks`, linkClicks: sql`excluded.link_clicks`, landingPageViews: sql`excluded.landing_page_views`,
+          leads: sql`excluded.leads`, purchases: sql`excluded.purchases`, revenue: sql`excluded.revenue`,
+          brandId: sql`coalesce(excluded.brand_id, ad_metrics.brand_id)`,
+          campaignId: sql`coalesce(excluded.campaign_id, ad_metrics.campaign_id)`,
+          adsetName: sql`coalesce(excluded.adset_name, ad_metrics.adset_name)`,
+          adName: sql`coalesce(excluded.ad_name, ad_metrics.ad_name)`,
+          accountId: sql`coalesce(excluded.account_id, ad_metrics.account_id)`,
+          importId: sql`excluded.import_id`,
+        },
+      });
+    batch.length = 0;
+  };
+
+  const seen = new Set<string>();
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const date = toISODate(get(r, mapping, "date"));
+    const campaignName = txt(r, mapping, "campaign");
+    if (!date || !campaignName) continue;
+    if (normKey(campaignName).startsWith("TOTAL")) continue;
+
+    const platform = mapping.platform ? normalizePlatform(get(r, mapping, "platform")) : fallbackPlatform;
+    const adsetName = txt(r, mapping, "adset");
+    const adName = txt(r, mapping, "ad");
+
+    // Marque : colonne dédiée, sinon un nom de marque connu présent dans le libellé de campagne.
+    const brandRaw = txt(r, mapping, "brand");
+    let brandId = brandRaw ? R.brand(brandRaw) : null;
+    if (!brandId) brandId = R.brandInText(campaignName);
+    if (!brandId && brandRaw) unmatchedBrands.add(brandRaw);
+
+    const accountName = txt(r, mapping, "account");
+    const accountId = accountName ? await getAccount(platform, accountName, brandId) : null;
+    const campaignId = await getCampaign(campaignName, brandId);
+
+    const dedupeKey = [platform, date, normKey(campaignName), normKey(adsetName ?? ""), normKey(adName ?? "")].join("|");
+    if (seen.has(dedupeKey)) { out.duplicates++; continue; }
+    seen.add(dedupeKey);
+
+    const int = (k: string) => Math.round(num(r, mapping, k) ?? 0);
+    batch.push({
+      date, platform, accountId, brandId, campaignId, campaignName, adsetName, adName,
+      spend: num(r, mapping, "spend") ?? 0,
+      impressions: int("impressions"), reach: int("reach"), clicks: int("clicks"), linkClicks: int("linkClicks"),
+      landingPageViews: int("landingPageViews"), leads: int("leads"), purchases: int("purchases"),
+      revenue: num(r, mapping, "revenue") ?? 0,
+      dedupeKey,
+    });
+    out.inserted++;
+    if (batch.length >= 400) await flush();
+  }
+  await flush();
+
+  for (const id of accounts.values()) {
+    await db.execute(sql`
+      update ad_accounts set last_sync_at = now(), sync_status = 'OK',
+        imported_rows = (select count(*) from ad_metrics where account_id = ${id}::uuid)
+      where id = ${id}::uuid`);
+  }
+  const orphan = await db.execute(sql`select count(*)::int as n from ad_metrics where import_id = ${importId}::uuid and brand_id is null`);
+  const n = (orphan.rows[0] as { n: number } | undefined)?.n ?? 0;
+  if (n) out.warnings.push(`${n} ligne(s) sans marque identifiée : nommez vos campagnes en commençant par la marque (ex : « KLORANE — Acquisition ») ou ajoutez une colonne « Marque » au fichier.`);
+  if (unmatchedBrands.size) out.warnings.push(`Marque(s) non reconnue(s) : ${[...unmatchedBrands].slice(0, 10).join(", ")}.`);
+  const linked = await db.execute(sql`select count(*)::int as n from ad_metrics where import_id = ${importId}::uuid and campaign_id is not null`);
+  const l = (linked.rows[0] as { n: number } | undefined)?.n ?? 0;
+  out.warnings.push(`${l} ligne(s) rattachée(s) à une campagne du module Campagnes. Les autres restent analysables par nom de campagne publicitaire.`);
 }
 
 /**

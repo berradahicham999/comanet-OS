@@ -11,7 +11,7 @@ import { PRIORITY_ORDER, type RecommendationWithState, type Rule, type RuleConte
 import { stockCoverageRule, overstockRule, scaleCautionRule } from "./stock-rules";
 import { regulatoryExpiryRule } from "./regulatory-rules";
 import { clientRules, brandDropRule, dataQualityRule } from "./commercial-rules";
-import { budgetRule, adsRule } from "./marketing-rules";
+import { budgetRule, adsRule, influenceRule, campaignStockRule } from "./marketing-rules";
 import { terrainRules, overdueTasksRule } from "./execution-rules";
 import { animationPerformanceRule } from "./animation-rules";
 
@@ -24,7 +24,9 @@ export const RULES: Rule[] = [
   regulatoryExpiryRule,
   brandDropRule,
   adsRule,
+  campaignStockRule,
   budgetRule,
+  influenceRule,
   clientRules,
   terrainRules,
   animationPerformanceRule,

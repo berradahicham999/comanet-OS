@@ -4,7 +4,7 @@
  */
 import { normKey } from "./normalize";
 
-export type ImportType = "SALES" | "CLIENTS" | "PRODUCTS" | "STOCK" | "OBJECTIVES" | "BUDGETS" | "REGULATORY" | "ANIMATIONS" | "ANIM_OBJECTIVES";
+export type ImportType = "SALES" | "CLIENTS" | "PRODUCTS" | "STOCK" | "OBJECTIVES" | "BUDGETS" | "REGULATORY" | "ANIMATIONS" | "ANIM_OBJECTIVES" | "ADS";
 
 export type FieldDef = { key: string; label: string; required?: boolean; synonyms: string[]; hint?: string };
 
@@ -18,6 +18,7 @@ export const IMPORT_TYPES: { key: ImportType; label: string; description: string
   { key: "REGULATORY", label: "Dossiers réglementaires", description: "Enregistrements DMP : une ligne par variante déposée (marque, référence, type, contenance, ATD, validité)." },
   { key: "ANIMATIONS", label: "Animations POS (feuille quotidienne)", description: "Matrice « Données Journalières » : une ligne par jour × point de vente × animatrice, une colonne par produit. Les colonnes non identifiées sont lues comme des produits." },
   { key: "ANIM_OBJECTIVES", label: "Objectifs animation par ville", description: "Tableau croisé ville × marque (unités par an). Choisir la ligne d'en-tête du bloc YEARLY ; l'objectif mensuel est calculé automatiquement." },
+  { key: "ADS", label: "Publicités (Meta / TikTok / Google)", description: "Export de la régie : une ligne par jour × campagne (ou par publicité). Dépense, impressions, clics, achats, CA." },
 ];
 
 export const FIELDS: Record<ImportType, FieldDef[]> = {
@@ -79,6 +80,24 @@ export const FIELDS: Record<ImportType, FieldDef[]> = {
     { key: "costPrice", label: "Prix d'achat", synonyms: ["prix d achat exwork", "prix d achat", "exwork", "cr"] },
     { key: "month", label: "Mois (1-12, facultatif)", synonyms: ["mois", "month"] },
     { key: "year", label: "Année", synonyms: ["annee", "year", "exercice"] },
+  ],
+  ADS: [
+    { key: "date", label: "Date", required: true, synonyms: ["date", "jour", "day", "reporting starts", "date de debut des rapports", "date du rapport"] },
+    { key: "campaign", label: "Campagne", required: true, synonyms: ["campaign name", "nom de la campagne", "campagne", "campaign"] },
+    { key: "adset", label: "Ensemble de publicités", synonyms: ["ad set name", "nom de l ensemble de publicites", "adset", "ad set", "groupe d annonces"] },
+    { key: "ad", label: "Publicité / créative", synonyms: ["ad name", "nom de la publicite", "publicite", "ad", "annonce", "creative"] },
+    { key: "brand", label: "Marque", synonyms: ["marque", "brand"], hint: "Sinon déduite du nom de la campagne." },
+    { key: "spend", label: "Dépense", required: true, synonyms: ["amount spent", "montant depense", "depense", "spend", "cost", "cout"] },
+    { key: "impressions", label: "Impressions", synonyms: ["impressions", "impr"] },
+    { key: "reach", label: "Couverture", synonyms: ["reach", "couverture", "portee"] },
+    { key: "clicks", label: "Clics", synonyms: ["clicks all", "clics tous", "clicks", "clics"] },
+    { key: "linkClicks", label: "Clics sur le lien", synonyms: ["link clicks", "clics sur un lien", "clics sur le lien"] },
+    { key: "landingPageViews", label: "Vues de page de destination", synonyms: ["landing page views", "vues de page de destination"] },
+    { key: "leads", label: "Leads", synonyms: ["leads", "prospects", "results", "resultats"] },
+    { key: "purchases", label: "Achats / conversions", synonyms: ["purchases", "achats", "conversions", "website purchases"] },
+    { key: "revenue", label: "CA attribué", synonyms: ["purchases conversion value", "valeur de conversion des achats", "revenue", "ca", "conversion value", "valeur de conversion"] },
+    { key: "platform", label: "Plateforme", synonyms: ["platform", "plateforme", "source", "reseau"], hint: "META, TIKTOK ou GOOGLE — sinon choisie ci-dessous." },
+    { key: "account", label: "Compte publicitaire", synonyms: ["account name", "nom du compte", "compte", "account"] },
   ],
   ANIMATIONS: [
     { key: "date", label: "Date", required: true, synonyms: ["date", "jour", "date animation"] },

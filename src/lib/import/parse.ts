@@ -7,9 +7,42 @@ export type ParsedSheet = {
   groups: Record<string, string>;
 };
 
+/**
+ * Encodage d'un CSV. Les exports de régie (Meta, TikTok, Google) sont en UTF-8,
+ * ceux de Sage et d'Excel Windows en Windows-1252 : sans détection, les accents
+ * arrivent en « publicitÃ©s » et les colonnes ne sont plus reconnues.
+ * On ne touche pas aux .xlsx, qui portent leur propre encodage.
+ */
+function codepageFor(buffer: ArrayBuffer | Buffer): number | undefined {
+  const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+  // Un classeur binaire (xlsx = zip « PK », xls = OLE « \xD0\xCF ») : laisser SheetJS décider.
+  if (buf.length >= 2 && ((buf[0] === 0x50 && buf[1] === 0x4b) || (buf[0] === 0xd0 && buf[1] === 0xcf))) return undefined;
+  if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) return 65001; // BOM UTF-8
+  // Séquence UTF-8 valide multi-octets et aucun octet invalide → UTF-8.
+  const sample = buf.subarray(0, 262144);
+  let multibyte = false;
+  for (let i = 0; i < sample.length; i++) {
+    const c = sample[i];
+    if (c < 0x80) continue;
+    let extra = 0;
+    if (c >= 0xc2 && c <= 0xdf) extra = 1;
+    else if (c >= 0xe0 && c <= 0xef) extra = 2;
+    else if (c >= 0xf0 && c <= 0xf4) extra = 3;
+    else return 1252; // octet impossible en UTF-8
+    for (let k = 1; k <= extra; k++) {
+      const n = sample[i + k];
+      if (n === undefined) return multibyte ? 65001 : 1252; // coupé par l'échantillon
+      if (n < 0x80 || n > 0xbf) return 1252;
+    }
+    multibyte = true;
+    i += extra;
+  }
+  return multibyte ? 65001 : undefined;
+}
+
 /** Liste les feuilles d'un fichier (xlsx/xls/csv). */
 export function listSheets(buffer: ArrayBuffer | Buffer): string[] {
-  const wb = XLSX.read(buffer, { type: "buffer", bookSheets: true });
+  const wb = XLSX.read(buffer, { type: "buffer", bookSheets: true, codepage: codepageFor(buffer) });
   return wb.SheetNames;
 }
 
@@ -18,7 +51,7 @@ export function listSheets(buffer: ArrayBuffer | Buffer): string[] {
  * (première ligne avec ≥ 3 cellules texte non vides).
  */
 export function parseSheet(buffer: ArrayBuffer | Buffer, sheetName?: string, opts: { headerRow?: number; maxRows?: number; stopAtBlank?: boolean } = {}): ParsedSheet {
-  const wb = XLSX.read(buffer, { type: "buffer", cellDates: true, raw: true });
+  const wb = XLSX.read(buffer, { type: "buffer", cellDates: true, raw: true, codepage: codepageFor(buffer) });
   const name = sheetName && wb.SheetNames.includes(sheetName) ? sheetName : wb.SheetNames[0];
   const ws = wb.Sheets[name];
   const matrix: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: true });

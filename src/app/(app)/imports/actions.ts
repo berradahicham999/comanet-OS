@@ -52,6 +52,7 @@ export async function runImportAction(formData: FormData) {
     options: {
       year: Number(formData.get("year")) || undefined,
       stockDate: String(formData.get("stockDate") ?? "") || undefined,
+      adPlatform: String(formData.get("adPlatform") ?? "") || undefined,
       createUnknown: formData.get("createUnknown") !== "off",
       // Matrices (animations, objectifs par ville) : les colonnes non mappées portent les données.
       headers: parsed.headers,
@@ -59,7 +60,7 @@ export async function runImportAction(formData: FormData) {
     },
   });
   await db.delete(importFiles).where(eq(importFiles.id, fileId));
-  revalidatePath("/imports"); revalidatePath("/"); revalidatePath("/produits"); revalidatePath("/clients"); revalidatePath("/stock"); revalidatePath("/terrain"); revalidatePath("/reglementaire");
+  revalidatePath("/imports"); revalidatePath("/"); revalidatePath("/produits"); revalidatePath("/clients"); revalidatePath("/stock"); revalidatePath("/terrain"); revalidatePath("/reglementaire"); revalidatePath("/marketing"); revalidatePath("/marketing/ads");
   redirect(`/imports/${summary.importId}`);
 }
 

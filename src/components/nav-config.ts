@@ -32,8 +32,12 @@ export const NAV: NavGroup[] = [
   {
     title: "Marketing",
     items: [
-      { href: "/marketing", label: "Budgets & campagnes", icon: "Megaphone", module: "marketing" },
+      { href: "/marketing", label: "Vue d'ensemble", icon: "Megaphone", module: "marketing", exact: true },
+      { href: "/marketing/campagnes", label: "Campagnes", icon: "Rocket", module: "marketing" },
+      { href: "/marketing/ads", label: "Digital Ads", icon: "MousePointerClick", module: "marketing" },
+      { href: "/marketing/influence", label: "Influence", icon: "Heart", module: "marketing" },
       { href: "/marketing/planning", label: "Planning éditorial", icon: "CalendarDays", module: "marketing" },
+      { href: "/marketing/budgets", label: "Budgets", icon: "Wallet", module: "marketing" },
     ],
   },
   {
