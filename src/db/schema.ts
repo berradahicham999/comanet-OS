@@ -52,6 +52,7 @@ export const importTypeEnum = pgEnum("import_type", [
   "STOCK",
   "OBJECTIVES",
   "BUDGETS",
+  "REGULATORY",
 ]);
 
 export const importStatusEnum = pgEnum("import_status", [
@@ -400,18 +401,65 @@ export const regulatoryFiles = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     productId: uuid("product_id").references(() => products.id, { onDelete: "cascade" }),
     brandId: uuid("brand_id").references(() => brands.id, { onDelete: "set null" }),
-    dossier: text("dossier").notNull(), // libellé du dossier (ex: Autorisation ANMPS)
-    authorizationNumber: text("authorization_number"),
-    filingDate: date("filing_date"),
+    dossier: text("dossier").notNull(), // libellé du dossier (ex: Enregistrement produit cosmétique DMP)
+    /** Référence telle que déposée (utile quand aucun produit du référentiel n'est lié). */
+    reference: text("reference"),
+    /** MODELE_VENTE | ECHANTILLON | MINIDOSE | TRAVEL_SIZE | DECLARATION | TRANSFERT | AUTRE */
+    variantType: text("variant_type").notNull().default("MODELE_VENTE"),
+    /** Contenance déposée : « 30 ml », « 40 g »… (une contenance = un dossier). */
+    size: text("size"),
+    /** Format / conditionnement normalisé : TUBE, FLACON, POT, SACHET, SPRAY… */
+    packaging: text("packaging"),
+    /** Pièce délivrée : ATD (attestation de dépôt) | CE | ATTESTATION | TRANSFERT | AUCUN */
+    documentType: text("document_type").notNull().default("ATD"),
+    authorizationNumber: text("authorization_number"), // n° ATD
+    filingDate: date("filing_date"), // date de dépôt DMP
     validationDate: date("validation_date"),
-    expiryDate: date("expiry_date"),
+    expiryDate: date("expiry_date"), // fin de validité de l'ATD
     status: regulatoryStatusEnum("status").notNull().default("EN_COURS"),
+    /** Étape Certificat d'Enregistrement : NON_APPLICABLE | A_DEMANDER | EN_ATTENTE | DOCS_LABO | OBTENU */
+    certificateStatus: text("certificate_status").notNull().default("A_DEMANDER"),
+    certificateNumber: text("certificate_number"),
+    certificateDate: date("certificate_date"),
+    /** Échantillon physique déposé / disponible (null = inconnu). */
+    physicalProduct: boolean("physical_product"),
+    /** Dossier bloqué (formule non conforme, ingrédient interdit…). */
+    blocked: boolean("blocked").notNull().default(false),
+    blockedReason: text("blocked_reason"),
     missingDocuments: text("missing_documents"),
     responsibleId: uuid("responsible_id").references(() => users.id, { onDelete: "set null" }),
     notes: text("notes"),
+    /** Clé d'identité pour l'import (marque|référence|type|contenance) — évite les doublons. */
+    dedupeKey: text("dedupe_key"),
+    importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("regulatory_expiry_idx").on(t.expiryDate),
+    index("regulatory_brand_idx").on(t.brandId),
+    index("regulatory_certificate_idx").on(t.certificateStatus),
+    uniqueIndex("regulatory_dedupe_uq").on(t.dedupeKey).where(sql`dedupe_key is not null`),
+  ],
+);
+
+/** Historique d'un dossier : dépôts successifs, ATD, CE, renouvellements, notes datées. */
+export const regulatoryEvents = pgTable(
+  "regulatory_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    fileId: uuid("file_id").notNull().references(() => regulatoryFiles.id, { onDelete: "cascade" }),
+    date: date("date").notNull(),
+    /** DEPOT | ATD | CE | RENOUVELLEMENT | EXPIRATION | BLOCAGE | NOTE | IMPORT */
+    kind: text("kind").notNull(),
+    label: text("label"),
+    reference: text("reference"),
+    expiryDate: date("expiry_date"),
+    notes: text("notes"),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("regulatory_expiry_idx").on(t.expiryDate)],
+  (t) => [index("regulatory_events_file_idx").on(t.fileId, t.date)],
 );
 
 export const documents = pgTable("documents", {
@@ -631,10 +679,16 @@ export const animationLinesRelations = relations(animationLines, ({ one }) => ({
   product: one(products, { fields: [animationLines.productId], references: [products.id] }),
 }));
 
-export const regulatoryRelations = relations(regulatoryFiles, ({ one }) => ({
+export const regulatoryRelations = relations(regulatoryFiles, ({ one, many }) => ({
   product: one(products, { fields: [regulatoryFiles.productId], references: [products.id] }),
   brand: one(brands, { fields: [regulatoryFiles.brandId], references: [brands.id] }),
   responsible: one(users, { fields: [regulatoryFiles.responsibleId], references: [users.id] }),
+  events: many(regulatoryEvents),
+}));
+
+export const regulatoryEventsRelations = relations(regulatoryEvents, ({ one }) => ({
+  file: one(regulatoryFiles, { fields: [regulatoryEvents.fileId], references: [regulatoryFiles.id] }),
+  user: one(users, { fields: [regulatoryEvents.userId], references: [users.id] }),
 }));
 
 export const tasksRelations = relations(tasks, ({ one, many }) => ({
@@ -672,6 +726,7 @@ export type Sale = typeof sales.$inferSelect;
 export type StockSnapshot = typeof stockSnapshots.$inferSelect;
 export type Animation = typeof animations.$inferSelect;
 export type RegulatoryFile = typeof regulatoryFiles.$inferSelect;
+export type RegulatoryEvent = typeof regulatoryEvents.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
 export type MarketingExpense = typeof marketingExpenses.$inferSelect;
 export type ContentItem = typeof contentItems.$inferSelect;

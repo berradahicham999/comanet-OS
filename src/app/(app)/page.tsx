@@ -141,8 +141,9 @@ export default async function CockpitPage() {
             <div className="kpi text-red">{d.regulatory.critical} <span className="text-[14px] font-medium text-muted">critique{d.regulatory.critical > 1 ? "s" : ""}</span></div>
             <div className="text-[12px] text-muted mt-1">expirés ou ≤ 30 jours</div>
             <div className="mt-3 space-y-1 text-[12px]">
-              <div className="flex justify-between"><span className="text-muted">Expirent ≤ 120 j</span><span className="font-medium">{d.regulatory.soon}</span></div>
-              <div className="flex justify-between"><span className="text-muted">Documents manquants</span><span className="font-medium">{d.regulatory.missing}</span></div>
+              <div className="flex justify-between"><span className="text-muted">À redéposer ≤ 90 j</span><span className="font-medium">{d.regulatory.soon}</span></div>
+              <div className="flex justify-between"><span className="text-muted">Certificats (CE) à obtenir</span><span className="font-medium">{d.regulatory.certificates}</span></div>
+              <div className="flex justify-between"><span className="text-muted">Non déposés / bloqués</span><span className="font-medium">{d.regulatory.blocked}</span></div>
               <div className="flex justify-between"><span className="text-muted">Dossiers suivis</span><span className="font-medium">{d.regulatory.total}</span></div>
             </div>
           </Card>

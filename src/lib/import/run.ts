@@ -6,6 +6,10 @@ import { categoryFromLabel } from "@/lib/budget-categories";
 import { cleanText, inferClientType, normKey, toISODate, toNumber } from "./normalize";
 import { matchBrand, matchClient, matchProduct, type ClientCandidate, type ProductCandidate } from "./match";
 import type { ImportType } from "./fields";
+import {
+  VARIANT_TYPES, normalizeBool, normalizeDocumentType, normalizeObservation,
+  normalizePackaging, normalizeSize, normalizeState, normalizeVariantType, regulatoryKey,
+} from "@/lib/regulatory";
 
 export type ImportOptions = {
   year?: number; // objectifs / budgets
@@ -210,6 +214,7 @@ export async function runImport(params: {
       case "STOCK": await importStock(rows, mapping, options, resolver, imp.id, summary); break;
       case "OBJECTIVES": await importObjectives(rows, mapping, options, resolver, summary); break;
       case "BUDGETS": await importBudgets(rows, mapping, options, resolver, summary); break;
+      case "REGULATORY": await importRegulatory(rows, mapping, options, resolver, imp.id, summary); break;
     }
     await resolver.flushAliases(type);
     summary.created = resolver.created;
@@ -466,4 +471,131 @@ async function importBudgets(rows: Record<string, unknown>[], mapping: Mapping, 
     const [brandId, y] = key.split("|");
     await db.insert(s.budgets).values({ brandId, year: Number(y), amount: total.toFixed(2) }).onConflictDoNothing();
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Dossiers réglementaires (DMP)                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Une ligne = une variante déposée (marque × référence × type × contenance).
+ * Le rapprochement avec le référentiel produits est tenté mais non bloquant :
+ * la référence telle qu'écrite est toujours conservée.
+ */
+async function importRegulatory(rows: Record<string, unknown>[], mapping: Mapping, _o: ImportOptions, R: Resolver, importId: string, out: ImportSummary) {
+  let lastBrand: string | null = null;
+  const brandOf = (v: string | null): string | null => v ?? lastBrand;
+  const seen = new Set<string>();
+  let stale = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const reference = txt(r, mapping, "reference");
+    if (!reference) continue;
+    const brandValue: string | null = brandOf(txt(r, mapping, "brand"));
+    if (brandValue) lastBrand = brandValue;
+    const variantType = normalizeVariantType(get(r, mapping, "variantType"));
+    const size = normalizeSize(get(r, mapping, "size"));
+    const key = regulatoryKey({ brand: brandValue, reference, variantType, size });
+    if (seen.has(key)) { out.duplicates++; continue; }
+    seen.add(key);
+
+    let brandId = brandValue ? R.brand(brandValue) : null;
+    // « COMANET » n'est pas une marque du portefeuille : dossier société, sans marque.
+    const isCompany = variantType === "DECLARATION" || variantType === "TRANSFERT";
+    if (!brandId && brandValue && !isCompany && normKey(brandValue) !== normKey("COMANET")) {
+      brandId = await R.createBrand(brandValue);
+    }
+    // rapprochement produit : jamais de création, on ne pollue pas le référentiel de vente
+    const productId = variantType === "MODELE_VENTE" ? await R.product(reference, null, brandId, false) : null;
+
+    const state = normalizeState(get(r, mapping, "state"));
+    const notesRaw = txt(r, mapping, "notes");
+    // Le motif de blocage peut vivre dans « Observation » comme dans la colonne de remarques libres.
+    const obs = normalizeObservation(get(r, mapping, "observation"));
+    const obsNotes = normalizeObservation(notesRaw);
+    const blocked = obs.blocked || obsNotes.blocked;
+    const filingDate = toISODate(get(r, mapping, "filingDate"));
+    const expiryDate = toISODate(get(r, mapping, "expiryDate"));
+    const notes = [obs.note, notesRaw].filter(Boolean).join(" — ") || null;
+    const values = {
+      productId,
+      brandId,
+      dossier: isCompany ? reference : `Enregistrement DMP — ${VARIANT_TYPES[variantType]}`,
+      reference,
+      variantType,
+      size,
+      packaging: normalizePackaging(get(r, mapping, "packaging")),
+      documentType: normalizeDocumentType(get(r, mapping, "documentType")),
+      authorizationNumber: txt(r, mapping, "authorizationNumber"),
+      filingDate,
+      expiryDate,
+      status: (state === "VALIDE" ? "VALIDE" : state === "A_DEPOSER" ? "A_DEPOSER" : "EN_COURS") as s.RegulatoryStatus,
+      certificateStatus: blocked ? "NON_APPLICABLE" : state === "A_DEPOSER" ? "NON_APPLICABLE" : obs.certificateStatus,
+      physicalProduct: normalizeBool(get(r, mapping, "physicalProduct")),
+      blocked,
+      blockedReason: blocked ? (obs.blocked ? obs.note : obsNotes.note) ?? notesRaw : null,
+      notes,
+      missingDocuments: null as string | null,
+      dedupeKey: key,
+      importId,
+      updatedAt: new Date(),
+    };
+
+    const existing = await db.query.regulatoryFiles.findFirst({ where: eq(s.regulatoryFiles.dedupeKey, key) });
+    if (existing) {
+      // Le fichier ne doit jamais faire reculer un dossier déjà suivi dans l'application :
+      // un champ vide dans le fichier ne remplace pas une valeur saisie, et un dépôt plus ancien
+      // que celui enregistré est ignoré (cas du ré-import d'un fichier périmé).
+      const staleFiling = Boolean(existing.filingDate && filingDate && filingDate < existing.filingDate);
+      if (staleFiling) {
+        values.filingDate = existing.filingDate;
+        values.expiryDate = existing.expiryDate;
+        values.authorizationNumber = existing.authorizationNumber;
+        stale++;
+      } else {
+        if (!filingDate) values.filingDate = existing.filingDate;
+        if (!expiryDate) values.expiryDate = existing.expiryDate;
+        if (!values.authorizationNumber) values.authorizationNumber = existing.authorizationNumber;
+      }
+      if (existing.certificateStatus === "OBTENU") values.certificateStatus = "OBTENU";
+      if (!blocked && existing.blocked) { values.blocked = true; values.blockedReason = existing.blockedReason; values.certificateStatus = "NON_APPLICABLE"; }
+      if (!values.missingDocuments) values.missingDocuments = existing.missingDocuments;
+      if (!values.size) values.size = existing.size;
+      if (!values.packaging) values.packaging = existing.packaging;
+      if (values.physicalProduct === null) values.physicalProduct = existing.physicalProduct;
+      if (!values.notes) values.notes = existing.notes;
+      if (!values.productId) values.productId = existing.productId;
+      // Redépôt détecté : la date de dépôt a changé → on archive l'état précédent dans l'historique.
+      const redeposit = !staleFiling && filingDate && existing.filingDate && filingDate !== existing.filingDate;
+      await db.update(s.regulatoryFiles).set(values).where(eq(s.regulatoryFiles.id, existing.id));
+      if (redeposit) {
+        await db.insert(s.regulatoryEvents).values({
+          fileId: existing.id, date: existing.filingDate!, kind: "DEPOT",
+          label: "Dépôt précédent (remplacé par l'import)", reference: existing.authorizationNumber,
+          expiryDate: existing.expiryDate, notes: "Archivé automatiquement lors d'un import.",
+        });
+        await db.insert(s.regulatoryEvents).values({
+          fileId: existing.id, date: filingDate!, kind: "RENOUVELLEMENT",
+          label: "Redépôt", expiryDate, notes: "Détecté à l'import.",
+        });
+      }
+      out.updated++;
+    } else {
+      const [row] = await db.insert(s.regulatoryFiles).values(values).returning({ id: s.regulatoryFiles.id });
+      if (row && filingDate) {
+        await db.insert(s.regulatoryEvents).values({
+          fileId: row.id, date: filingDate, kind: "DEPOT", label: "Dépôt DMP",
+          reference: values.authorizationNumber, expiryDate, notes: "Repris de l'historique importé.",
+        });
+      }
+      out.inserted++;
+    }
+  }
+  const stats = (await db.execute(sql`
+    select count(*) filter (where expiry_date is null and status = 'VALIDE')::int as no_date,
+           count(*) filter (where product_id is null and variant_type = 'MODELE_VENTE')::int as unlinked
+    from regulatory_files`)).rows[0] as { no_date: number; unlinked: number };
+  if (stale) out.warnings.push(`${stale} dossier(s) conservent les dates saisies dans l'application : le fichier contenait un dépôt plus ancien (fichier périmé).`);
+  if (stats.no_date) out.warnings.push(`${stats.no_date} dossier(s) enregistré(s) sans date de validité : à retrouver pour pouvoir anticiper les redépôts.`);
+  if (stats.unlinked) out.warnings.push(`${stats.unlinked} dossier(s) non rattaché(s) à un produit du référentiel (le suivi fonctionne, mais le lien ventes/stock ne sera pas actif).`);
 }

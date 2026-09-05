@@ -106,10 +106,12 @@ async function digitalBlock(d30: string, tomorrow: string) {
 async function regulatoryBlock(ref: Date) {
   const r = await db.execute(sql`
     select
-      count(*) filter (where status = 'EXPIRE' or expiry_date < ${iso(ref)}::date or expiry_date <= ${iso(addDays(ref, 30))}::date)::int as critical,
-      count(*) filter (where expiry_date > ${iso(addDays(ref, 30))}::date and expiry_date <= ${iso(addDays(ref, 120))}::date)::int as soon,
-      count(*) filter (where missing_documents is not null and missing_documents <> '')::int as missing,
+      count(*) filter (where not blocked and expiry_date is not null and expiry_date <= ${iso(addDays(ref, 30))}::date)::int as critical,
+      count(*) filter (where not blocked and expiry_date > ${iso(addDays(ref, 30))}::date and expiry_date <= ${iso(addDays(ref, 90))}::date)::int as soon,
+      count(*) filter (where (missing_documents is not null and missing_documents <> '') or (status = 'VALIDE' and expiry_date is null))::int as missing,
+      count(*) filter (where certificate_status in ('A_DEMANDER','DOCS_LABO'))::int as certificates,
+      count(*) filter (where blocked or status = 'A_DEPOSER')::int as blocked,
       count(*)::int as total
     from regulatory_files`);
-  return r.rows[0] as { critical: number; soon: number; missing: number; total: number };
+  return r.rows[0] as { critical: number; soon: number; missing: number; certificates: number; blocked: number; total: number };
 }

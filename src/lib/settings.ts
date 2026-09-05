@@ -22,7 +22,7 @@ export type ComanetSettings = {
   clientHighPotentialPercentile: number;
   /** Jours avant expiration pour déclencher les alertes réglementaires. */
   regulatoryAlertDays: number[];
-  /** Jours avant expiration à partir desquels le renouvellement doit être lancé (tâche auto). */
+  /** Jours avant expiration à partir desquels le redépôt doit être lancé (tâche auto). */
   regulatoryRenewalDays: number;
   /** Seuil de baisse du sell-out terrain (%) déclenchant une recommandation. */
   sellOutDropPct: number;
@@ -46,7 +46,7 @@ export const DEFAULT_SETTINGS: ComanetSettings = {
   clientGrowthPct: 15,
   clientHighPotentialPercentile: 80,
   regulatoryAlertDays: [180, 120, 90, 60, 30, 15],
-  regulatoryRenewalDays: 120,
+  regulatoryRenewalDays: 90,
   sellOutDropPct: 20,
   budgetAlertPct: 90,
   brandDropPct: 15,

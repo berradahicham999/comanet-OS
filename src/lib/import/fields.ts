@@ -4,7 +4,7 @@
  */
 import { normKey } from "./normalize";
 
-export type ImportType = "SALES" | "CLIENTS" | "PRODUCTS" | "STOCK" | "OBJECTIVES" | "BUDGETS";
+export type ImportType = "SALES" | "CLIENTS" | "PRODUCTS" | "STOCK" | "OBJECTIVES" | "BUDGETS" | "REGULATORY";
 
 export type FieldDef = { key: string; label: string; required?: boolean; synonyms: string[]; hint?: string };
 
@@ -15,6 +15,7 @@ export const IMPORT_TYPES: { key: ImportType; label: string; description: string
   { key: "STOCK", label: "Stock", description: "Photo du stock par article (quantité, prix)." },
   { key: "OBJECTIVES", label: "Objectifs de CA", description: "Objectifs annuels ou mensuels par marque et/ou produit." },
   { key: "BUDGETS", label: "Budgets marketing", description: "Budget annuel par marque, avec répartition par catégorie." },
+  { key: "REGULATORY", label: "Dossiers réglementaires", description: "Enregistrements DMP : une ligne par variante déposée (marque, référence, type, contenance, ATD, validité)." },
 ];
 
 export const FIELDS: Record<ImportType, FieldDef[]> = {
@@ -77,6 +78,21 @@ export const FIELDS: Record<ImportType, FieldDef[]> = {
     { key: "month", label: "Mois (1-12, facultatif)", synonyms: ["mois", "month"] },
     { key: "year", label: "Année", synonyms: ["annee", "year", "exercice"] },
   ],
+  REGULATORY: [
+    { key: "brand", label: "Marque", required: true, synonyms: ["marque", "brand", "gamme"] },
+    { key: "reference", label: "Référence / produit", required: true, synonyms: ["reference", "produit", "designation", "article", "nom produit", "libelle"] },
+    { key: "variantType", label: "Type de dépôt", synonyms: ["type", "type de depot", "modele"], hint: "Modèle vente, Échantillon, Minidose, Travel size…" },
+    { key: "size", label: "Contenance", synonyms: ["contenance", "volume", "poids", "format ml"] },
+    { key: "packaging", label: "Format / conditionnement", synonyms: ["format", "conditionnement", "packaging"] },
+    { key: "state", label: "État", synonyms: ["etat", "statut", "status", "enregistre"], hint: "Enregistré / Non" },
+    { key: "documentType", label: "Document", synonyms: ["document", "piece", "type document"], hint: "ATD, attestation de dépôt, CE…" },
+    { key: "filingDate", label: "Date de dépôt DMP", synonyms: ["date depot dmp", "date depot", "date de depot", "depot", "date"] },
+    { key: "expiryDate", label: "Validité (expiration)", synonyms: ["validite", "date validite", "expiration", "date expiration", "fin de validite"] },
+    { key: "authorizationNumber", label: "N° ATD / autorisation", synonyms: ["n atd", "atd", "numero", "n autorisation", "autorisation"] },
+    { key: "physicalProduct", label: "Produit physique", synonyms: ["produit physique", "echantillon physique", "physique"] },
+    { key: "observation", label: "Observation (étape CE)", synonyms: ["observation", "observations", "etape", "commentaire ce"] },
+    { key: "notes", label: "Notes / remarques", synonyms: ["remarque", "remarques", "note", "notes", "commentaire", "commentaires"] },
+  ],
   BUDGETS: [
     { key: "brand", label: "Marque", required: true, synonyms: ["marque", "brand"] },
     { key: "label", label: "Catégorie / libellé", synonyms: ["categorie", "libelle", "poste", "category"] },
@@ -107,6 +123,12 @@ export function autoMap(type: ImportType, headers: string[]): Record<string, str
       }
     }
     if (found) { mapping[f.key] = found; used.add(found); }
+  }
+  // Feuilles réglementaires : la colonne sans en-tête en fin de tableau est la colonne de remarques libres
+  // (elle porte les motifs de blocage) — on la rattache aux notes plutôt que de la perdre.
+  if (type === "REGULATORY" && !mapping.notes) {
+    const unnamed = headers.find((h) => /^col_\d+$/.test(h) && !used.has(h));
+    if (unnamed) { mapping.notes = unnamed; used.add(unnamed); }
   }
   return mapping;
 }
