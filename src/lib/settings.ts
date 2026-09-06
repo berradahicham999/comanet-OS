@@ -36,6 +36,12 @@ export type ComanetSettings = {
   defaultMarginPct: number;
   /** CA mensuel à risque (MAD) à partir duquel une alerte stock est critique / haute. */
   stockCriticalRevenue: number;
+  /** Fréquence de visite médicale par défaut (jours) si non précisée sur la fiche médecin. */
+  medicalDefaultVisitFrequencyDays: number;
+  /** Médecin considéré en retard de visite au-delà de ce nombre de jours sans visite. */
+  medicalOverdueVisitDays: number;
+  /** Nombre moyen d'échantillons distribués par visite (pour la prévision de stock). */
+  medicalSamplesPerVisitDefault: number;
 };
 
 export const DEFAULT_SETTINGS: ComanetSettings = {
@@ -53,6 +59,9 @@ export const DEFAULT_SETTINGS: ComanetSettings = {
   reorderGraceDays: 5,
   defaultMarginPct: 35,
   stockCriticalRevenue: 5000,
+  medicalDefaultVisitFrequencyDays: 30,
+  medicalOverdueVisitDays: 60,
+  medicalSamplesPerVisitDefault: 1,
 };
 
 export const SETTINGS_KEY = "comanet.rules";

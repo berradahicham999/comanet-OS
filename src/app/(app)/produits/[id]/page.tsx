@@ -24,7 +24,7 @@ export default async function ProductPage(props: { params: Promise<{ id: string 
   const product = await db.query.products.findFirst({ where: eq(productsTable.id, id) });
   if (!product) notFound();
   const { ref } = await getRefDate();
-  const [stockList, series, seriesN1, topClients, aliases, brands, regs, contents, openTasks, kpi, others, objectives] = await Promise.all([
+  const [stockList, series, seriesN1, topClients, aliases, brands, regs, contents, openTasks, kpi, others, objectives, medicalActivity] = await Promise.all([
     productStocks({ productId: id }, ref),
     monthlySeries(13, { productId: id }, ref),
     monthlySeries(13, { productId: id }, new Date(Date.UTC(ref.getUTCFullYear() - 1, ref.getUTCMonth(), ref.getUTCDate(), 12))),
@@ -43,6 +43,10 @@ export default async function ProductPage(props: { params: Promise<{ id: string 
       from sales where product_id = ${id}::uuid and date <= ${iso(ref)}::date`),
     db.execute(sql`select id, name from products where id <> ${id}::uuid and active order by name`),
     db.execute(sql`select year, month, amount::float8 as amount, units::float8 as units from objectives where product_id = ${id}::uuid order by year desc, month nulls first`),
+    db.execute(sql`
+      select count(distinct vp.visit_id)::int as visits, count(distinct v.doctor_id)::int as doctors,
+        coalesce((select sum(vs.quantity)::int from visit_samples vs where vs.product_id = ${id}::uuid), 0) as samples
+      from visit_products vp join doctor_visits v on v.id = vp.visit_id where vp.product_id = ${id}::uuid`),
   ]);
   const st = stockList[0];
   const k = kpi.rows[0] as { revenue12: number; qty12: number; clients12: number; revenue_prev12: number; last_sale: string | null; first_sale: string | null };
@@ -157,6 +161,18 @@ export default async function ProductPage(props: { params: Promise<{ id: string 
               </details>
             )}
           </Card>
+          {(() => {
+            const m = medicalActivity.rows[0] as { visits: number; doctors: number; samples: number };
+            return m.visits > 0 || m.samples > 0 ? (
+              <Card title="Activité médicale">
+                <ul className="text-[13px] space-y-1.5">
+                  <li className="flex justify-between"><span className="text-muted">Médecins visités avec ce produit</span><span className="font-medium">{fmtNum(m.doctors)}</span></li>
+                  <li className="flex justify-between"><span className="text-muted">Visites où présenté</span><span className="font-medium">{fmtNum(m.visits)}</span></li>
+                  <li className="flex justify-between"><span className="text-muted">Échantillons distribués</span><span className="font-medium">{fmtNum(m.samples)}</span></li>
+                </ul>
+              </Card>
+            ) : null;
+          })()}
           {k.first_sale && <div className="text-[11px] text-faint px-1">Première vente {fmtDate(k.first_sale)} · dernière {fmtDate(k.last_sale)}</div>}
         </div>
       </div>

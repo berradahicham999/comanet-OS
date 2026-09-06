@@ -49,6 +49,20 @@ export const NAV: NavGroup[] = [
     ],
   },
   {
+    title: "Médical",
+    items: [
+      { href: "/medical", label: "Dashboard médical", icon: "Stethoscope", module: "medical", exact: true },
+      { href: "/medical/medecins", label: "Médecins", icon: "UserRound", module: "medical" },
+      { href: "/medical/delegues", label: "Délégués médicaux", icon: "IdCard", module: "medical" },
+      { href: "/medical/visites", label: "Visites", icon: "CalendarCheck", module: "medical" },
+      { href: "/medical/planning", label: "Planning / tournée", icon: "Map", module: "medical" },
+      { href: "/medical/echantillons", label: "Échantillons", icon: "FlaskConical", module: "medical" },
+      { href: "/medical/secteurs", label: "Secteurs", icon: "LandPlot", module: "medical" },
+      { href: "/medical/specialites", label: "Spécialités", icon: "BriefcaseMedical", module: "medical" },
+      { href: "/medical/parametrage", label: "Paramétrage médical", icon: "SlidersHorizontal", module: "medical" },
+    ],
+  },
+  {
     title: "Conformité & exécution",
     items: [
       { href: "/reglementaire", label: "Réglementaire", icon: "ShieldCheck", module: "reglementaire" },
@@ -64,10 +78,18 @@ export const NAV: NavGroup[] = [
   },
 ];
 
+/** Pages Médical réservées manager/admin — masquées à un délégué médical. */
+const MEDICAL_MANAGER_ONLY = ["/medical/delegues", "/medical/secteurs", "/medical/specialites", "/medical/parametrage"];
+
 export function navForRole(role: UserRole): NavGroup[] {
   return NAV.map((g) => ({
     ...g,
-    items: g.items.filter((i) => canAccess(role, i.module) && !(role === "ANIMATRICE" && i.href === "/terrain/animatrices")),
+    items: g.items.filter(
+      (i) =>
+        canAccess(role, i.module) &&
+        !(role === "ANIMATRICE" && i.href === "/terrain/animatrices") &&
+        !(role === "DELEGUE_MEDICAL" && MEDICAL_MANAGER_ONLY.includes(i.href)),
+    ),
   })).filter((g) => g.items.length > 0);
 }
 
@@ -80,8 +102,16 @@ export function mobileTabsForRole(role: UserRole): NavItem[] {
       { href: "/taches", label: "Tâches", icon: "SquareCheck", module: "taches" },
     ];
   }
+  if (role === "DELEGUE_MEDICAL") {
+    return [
+      { href: "/medical/visites/saisie", label: "Saisie", icon: "ClipboardList", module: "medical" },
+      { href: "/medical/planning", label: "Planning", icon: "Map", module: "medical" },
+      { href: "/medical/medecins", label: "Médecins", icon: "UserRound", module: "medical" },
+      { href: "/taches", label: "Tâches", icon: "SquareCheck", module: "taches" },
+    ];
+  }
   const all = navForRole(role).flatMap((g) => g.items);
-  const prefer = ["/", "/actions", "/taches", "/ventes", "/marketing", "/reglementaire", "/terrain"];
+  const prefer = ["/", "/actions", "/taches", "/ventes", "/marketing", "/reglementaire", "/terrain", "/medical"];
   const picked: NavItem[] = [];
   for (const p of prefer) {
     const it = all.find((i) => i.href === p);

@@ -4,7 +4,7 @@
  */
 import { normKey } from "./normalize";
 
-export type ImportType = "SALES" | "CLIENTS" | "PRODUCTS" | "STOCK" | "OBJECTIVES" | "BUDGETS" | "REGULATORY" | "ANIMATIONS" | "ANIM_OBJECTIVES" | "ADS";
+export type ImportType = "SALES" | "CLIENTS" | "PRODUCTS" | "STOCK" | "OBJECTIVES" | "BUDGETS" | "REGULATORY" | "ANIMATIONS" | "ANIM_OBJECTIVES" | "ADS" | "MEDECINS";
 
 export type FieldDef = { key: string; label: string; required?: boolean; synonyms: string[]; hint?: string };
 
@@ -19,6 +19,7 @@ export const IMPORT_TYPES: { key: ImportType; label: string; description: string
   { key: "ANIMATIONS", label: "Animations POS (feuille quotidienne)", description: "Matrice « Données Journalières » : une ligne par jour × point de vente × animatrice, une colonne par produit. Les colonnes non identifiées sont lues comme des produits." },
   { key: "ANIM_OBJECTIVES", label: "Objectifs animation par ville", description: "Tableau croisé ville × marque (unités par an). Choisir la ligne d'en-tête du bloc YEARLY ; l'objectif mensuel est calculé automatiquement." },
   { key: "ADS", label: "Publicités (Meta / TikTok / Google)", description: "Export de la régie : une ligne par jour × campagne (ou par publicité). Dépense, impressions, clics, achats, CA." },
+  { key: "MEDECINS", label: "Médecins (référentiel)", description: "Référentiel des médecins visités : identité, spécialité, ville, secteur, délégué responsable." },
 ];
 
 export const FIELDS: Record<ImportType, FieldDef[]> = {
@@ -128,6 +129,19 @@ export const FIELDS: Record<ImportType, FieldDef[]> = {
     { key: "physicalProduct", label: "Produit physique", synonyms: ["produit physique", "echantillon physique", "physique"] },
     { key: "observation", label: "Observation (étape CE)", synonyms: ["observation", "observations", "etape", "commentaire ce"] },
     { key: "notes", label: "Notes / remarques", synonyms: ["remarque", "remarques", "note", "notes", "commentaire", "commentaires"] },
+  ],
+  MEDECINS: [
+    { key: "firstName", label: "Prénom", required: true, synonyms: ["prenom", "first name", "prenom medecin"] },
+    { key: "lastName", label: "Nom", required: true, synonyms: ["nom", "last name", "nom medecin", "nom du medecin"] },
+    { key: "phone", label: "Téléphone", synonyms: ["telephone", "tel", "gsm", "phone"] },
+    { key: "email", label: "Email", synonyms: ["email", "mail", "e mail"] },
+    { key: "specialty", label: "Spécialité", synonyms: ["specialite", "specialty"] },
+    { key: "subSpecialty", label: "Sous-spécialité", synonyms: ["sous specialite", "sous-specialite"] },
+    { key: "addressLine", label: "Adresse cabinet", synonyms: ["adresse", "adresse cabinet", "cabinet"] },
+    { key: "city", label: "Ville", required: true, synonyms: ["ville", "city", "localite"] },
+    { key: "sector", label: "Secteur", synonyms: ["secteur", "zone", "sector"] },
+    { key: "delegate", label: "Délégué responsable", synonyms: ["delegue", "delegue medical", "delegue responsable", "representant"] },
+    { key: "comments", label: "Commentaires", synonyms: ["commentaire", "commentaires", "remarque", "notes"] },
   ],
   BUDGETS: [
     { key: "brand", label: "Marque", required: true, synonyms: ["marque", "brand"] },

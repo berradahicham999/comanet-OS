@@ -15,7 +15,8 @@ export const MODULES = {
   terrain: ["ADMIN", "TRADE", "ANIMATRICE"],
   reglementaire: ["ADMIN", "REGLEMENTAIRE"],
   marketing: ["ADMIN", "MARKETING"],
-  taches: ["ADMIN", "MARKETING", "TRADE", "REGLEMENTAIRE", "ANIMATRICE"],
+  medical: ["ADMIN", "MANAGER_MEDICAL", "DELEGUE_MEDICAL"],
+  taches: ["ADMIN", "MARKETING", "TRADE", "REGLEMENTAIRE", "ANIMATRICE", "MANAGER_MEDICAL", "DELEGUE_MEDICAL"],
   imports: ["ADMIN", "TRADE"],
   parametres: ["ADMIN"],
   recherche: ["ADMIN", "MARKETING", "TRADE", "REGLEMENTAIRE"],
@@ -32,6 +33,8 @@ export function homeFor(role: UserRole) {
   if (role === "ANIMATRICE") return "/terrain/saisie";
   if (role === "REGLEMENTAIRE") return "/reglementaire";
   if (role === "MARKETING") return "/marketing";
+  if (role === "DELEGUE_MEDICAL") return "/medical/visites/saisie";
+  if (role === "MANAGER_MEDICAL") return "/medical";
   return "/";
 }
 
@@ -41,4 +44,6 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   REGLEMENTAIRE: "Réglementaire",
   TRADE: "Trade",
   ANIMATRICE: "Animatrice",
+  DELEGUE_MEDICAL: "Délégué médical",
+  MANAGER_MEDICAL: "Manager médical",
 };

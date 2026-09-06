@@ -14,6 +14,7 @@ export async function updateSettings(formData: FormData) {
   await requireAccess("parametres");
   const cur = await getSettings();
   const next: ComanetSettings = {
+    ...cur,
     coverage: { green: num(formData, "cov_green", cur.coverage.green), yellow: num(formData, "cov_yellow", cur.coverage.yellow), orange: num(formData, "cov_orange", cur.coverage.orange) },
     avgSalesMonths: Math.max(1, Math.round(num(formData, "avgSalesMonths", cur.avgSalesMonths))),
     clientInactiveDays: num(formData, "clientInactiveDays", cur.clientInactiveDays),

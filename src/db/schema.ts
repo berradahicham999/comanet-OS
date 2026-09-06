@@ -37,6 +37,8 @@ export const userRoleEnum = pgEnum("user_role", [
   "REGLEMENTAIRE",
   "TRADE",
   "ANIMATRICE",
+  "DELEGUE_MEDICAL",
+  "MANAGER_MEDICAL",
 ]);
 
 export const clientTypeEnum = pgEnum("client_type", [
@@ -57,6 +59,7 @@ export const importTypeEnum = pgEnum("import_type", [
   "ANIMATIONS",
   "ANIM_OBJECTIVES",
   "ADS",
+  "MEDECINS",
 ]);
 
 export const importStatusEnum = pgEnum("import_status", [
@@ -87,6 +90,7 @@ export const taskSourceEnum = pgEnum("task_source", [
   "MARKETING",
   "TERRAIN",
   "COMMERCIAL",
+  "MEDICAL",
 ]);
 
 export const regulatoryStatusEnum = pgEnum("regulatory_status", [
@@ -152,6 +156,27 @@ export const campaignChannelEnum = pgEnum("campaign_channel", [
 ]);
 
 export const campaignStatusEnum = pgEnum("campaign_status", ["DRAFT", "PLANNED", "ACTIVE", "PAUSED", "DONE", "ANALYZED"]);
+
+export const doctorStatusEnum = pgEnum("doctor_status", ["NOUVEAU", "ACTIF", "A_REACTIVER", "INACTIF"]);
+
+export const doctorPotentialEnum = pgEnum("doctor_potential", ["A", "B", "C"]);
+
+export const medicalVisitStatusEnum = pgEnum("medical_visit_status", [
+  "PLANIFIEE",
+  "REALISEE",
+  "ANNULEE",
+  "REPORTEE",
+  "NON_EFFECTUEE",
+]);
+
+export const doctorInterestEnum = pgEnum("doctor_interest", ["FAIBLE", "MOYEN", "FORT"]);
+
+export const sampleMovementTypeEnum = pgEnum("sample_movement_type", [
+  "ENTREE",
+  "SORTIE_VISITE",
+  "TRANSFERT",
+  "AJUSTEMENT",
+]);
 
 /* ------------------------------------------------------------------ */
 /* Collaborateurs                                                      */
@@ -526,6 +551,185 @@ export const documents = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("documents_uploaded_by_idx").on(t.uploadedById)],
+);
+
+/* ------------------------------------------------------------------ */
+/* Médical : délégués, médecins, visites, échantillons                 */
+/* ------------------------------------------------------------------ */
+
+export const medicalSpecialties = pgTable("medical_specialties", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull().unique(),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const medicalSectors = pgTable("medical_sectors", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  city: text("city"),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Profil complémentaire d'un délégué médical — n'existe que pour un `users.role = DELEGUE_MEDICAL` / `MANAGER_MEDICAL`. */
+export const medicalDelegates = pgTable(
+  "medical_delegates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .unique()
+      .references(() => users.id, { onDelete: "cascade" }),
+    zone: text("zone"),
+    monthlyVisitObjective: integer("monthly_visit_objective").notNull().default(0),
+    weeklyVisitObjective: integer("weekly_visit_objective").notNull().default(0),
+    managerId: uuid("manager_id").references(() => users.id, { onDelete: "set null" }),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("medical_delegates_manager_idx").on(t.managerId)],
+);
+
+export const medicalDelegateSectors = pgTable(
+  "medical_delegate_sectors",
+  {
+    delegateId: uuid("delegate_id")
+      .notNull()
+      .references(() => medicalDelegates.id, { onDelete: "cascade" }),
+    sectorId: uuid("sector_id")
+      .notNull()
+      .references(() => medicalSectors.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.delegateId, t.sectorId] }),
+    index("medical_delegate_sectors_sector_idx").on(t.sectorId),
+  ],
+);
+
+export const doctors = pgTable(
+  "doctors",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    firstName: text("first_name").notNull(),
+    lastName: text("last_name").notNull(),
+    phone: text("phone"),
+    email: text("email"),
+    specialtyId: uuid("specialty_id").references(() => medicalSpecialties.id, { onDelete: "set null" }),
+    subSpecialty: text("sub_specialty"),
+    addressLine: text("address_line"),
+    city: text("city"),
+    sectorId: uuid("sector_id").references(() => medicalSectors.id, { onDelete: "set null" }),
+    gpsLat: numeric("gps_lat", { precision: 9, scale: 6 }),
+    gpsLng: numeric("gps_lng", { precision: 9, scale: 6 }),
+    delegateId: uuid("delegate_id").references(() => users.id, { onDelete: "set null" }),
+    status: doctorStatusEnum("status").notNull().default("NOUVEAU"),
+    /** Classification A/B/C — éditable manuellement ; suggérée par `doctorFlags()` mais jamais écrasée automatiquement. */
+    potential: doctorPotentialEnum("potential"),
+    /** Fréquence de visite recommandée en jours. Null = utilise `settings.medicalDefaultVisitFrequencyDays`. */
+    visitFrequencyDays: integer("visit_frequency_days"),
+    lastVisitAt: timestamp("last_visit_at", { withTimezone: true }),
+    comments: text("comments"),
+    notes: text("notes"),
+    dedupeKey: text("dedupe_key"),
+    importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("doctors_sector_idx").on(t.sectorId),
+    index("doctors_delegate_idx").on(t.delegateId),
+    index("doctors_specialty_idx").on(t.specialtyId),
+    index("doctors_import_idx").on(t.importId),
+    uniqueIndex("doctors_dedupe_uq").on(t.dedupeKey).where(sql`dedupe_key is not null`),
+  ],
+);
+
+export const doctorVisits = pgTable(
+  "doctor_visits",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    doctorId: uuid("doctor_id")
+      .notNull()
+      .references(() => doctors.id, { onDelete: "cascade" }),
+    delegateId: uuid("delegate_id").references(() => users.id, { onDelete: "set null" }),
+    date: date("date").notNull(),
+    durationMinutes: integer("duration_minutes"),
+    gpsLat: numeric("gps_lat", { precision: 9, scale: 6 }),
+    gpsLng: numeric("gps_lng", { precision: 9, scale: 6 }),
+    visitType: text("visit_type").notNull().default("VISITE"),
+    objective: text("objective"),
+    result: text("result"),
+    doctorInterest: doctorInterestEnum("doctor_interest"),
+    comment: text("comment"),
+    nextAction: text("next_action"),
+    nextVisitDate: date("next_visit_date"),
+    status: medicalVisitStatusEnum("status").notNull().default("PLANIFIEE"),
+    dedupeKey: text("dedupe_key"),
+    importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("doctor_visits_doctor_idx").on(t.doctorId),
+    index("doctor_visits_delegate_idx").on(t.delegateId),
+    index("doctor_visits_date_idx").on(t.date),
+    uniqueIndex("doctor_visits_dedupe_uq").on(t.dedupeKey).where(sql`dedupe_key is not null`),
+  ],
+);
+
+export const visitProducts = pgTable(
+  "visit_products",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    visitId: uuid("visit_id")
+      .notNull()
+      .references(() => doctorVisits.id, { onDelete: "cascade" }),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+  },
+  (t) => [index("visit_products_visit_idx").on(t.visitId)],
+);
+
+export const visitSamples = pgTable(
+  "visit_samples",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    visitId: uuid("visit_id")
+      .notNull()
+      .references(() => doctorVisits.id, { onDelete: "cascade" }),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    quantity: integer("quantity").notNull().default(1),
+  },
+  (t) => [index("visit_samples_visit_idx").on(t.visitId)],
+);
+
+/** Mouvements de stock d'échantillons par délégué × produit. Le solde courant = somme des `quantity` signées. */
+export const sampleMovements = pgTable(
+  "sample_movements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    delegateId: uuid("delegate_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    type: sampleMovementTypeEnum("type").notNull(),
+    /** Signée : positive pour ENTREE, négative pour SORTIE_VISITE/AJUSTEMENT négatif. */
+    quantity: integer("quantity").notNull(),
+    visitId: uuid("visit_id").references(() => doctorVisits.id, { onDelete: "set null" }),
+    date: date("date").notNull(),
+    comment: text("comment"),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("sample_movements_delegate_product_idx").on(t.delegateId, t.productId),
+    index("sample_movements_visit_idx").on(t.visitId),
+  ],
 );
 
 /* ------------------------------------------------------------------ */
@@ -1054,6 +1258,47 @@ export const contentRelations = relations(contentItems, ({ one }) => ({
   responsible: one(users, { fields: [contentItems.responsibleId], references: [users.id] }),
 }));
 
+export const medicalDelegatesRelations = relations(medicalDelegates, ({ one, many }) => ({
+  user: one(users, { fields: [medicalDelegates.userId], references: [users.id] }),
+  manager: one(users, { fields: [medicalDelegates.managerId], references: [users.id] }),
+  sectors: many(medicalDelegateSectors),
+}));
+
+export const medicalDelegateSectorsRelations = relations(medicalDelegateSectors, ({ one }) => ({
+  delegate: one(medicalDelegates, { fields: [medicalDelegateSectors.delegateId], references: [medicalDelegates.id] }),
+  sector: one(medicalSectors, { fields: [medicalDelegateSectors.sectorId], references: [medicalSectors.id] }),
+}));
+
+export const doctorsRelations = relations(doctors, ({ one, many }) => ({
+  specialty: one(medicalSpecialties, { fields: [doctors.specialtyId], references: [medicalSpecialties.id] }),
+  sector: one(medicalSectors, { fields: [doctors.sectorId], references: [medicalSectors.id] }),
+  delegate: one(users, { fields: [doctors.delegateId], references: [users.id] }),
+  visits: many(doctorVisits),
+}));
+
+export const doctorVisitsRelations = relations(doctorVisits, ({ one, many }) => ({
+  doctor: one(doctors, { fields: [doctorVisits.doctorId], references: [doctors.id] }),
+  delegate: one(users, { fields: [doctorVisits.delegateId], references: [users.id] }),
+  products: many(visitProducts),
+  samples: many(visitSamples),
+}));
+
+export const visitProductsRelations = relations(visitProducts, ({ one }) => ({
+  visit: one(doctorVisits, { fields: [visitProducts.visitId], references: [doctorVisits.id] }),
+  product: one(products, { fields: [visitProducts.productId], references: [products.id] }),
+}));
+
+export const visitSamplesRelations = relations(visitSamples, ({ one }) => ({
+  visit: one(doctorVisits, { fields: [visitSamples.visitId], references: [doctorVisits.id] }),
+  product: one(products, { fields: [visitSamples.productId], references: [products.id] }),
+}));
+
+export const sampleMovementsRelations = relations(sampleMovements, ({ one }) => ({
+  delegate: one(users, { fields: [sampleMovements.delegateId], references: [users.id] }),
+  product: one(products, { fields: [sampleMovements.productId], references: [products.id] }),
+  visit: one(doctorVisits, { fields: [sampleMovements.visitId], references: [doctorVisits.id] }),
+}));
+
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
 /* ------------------------------------------------------------------ */
@@ -1080,6 +1325,12 @@ export type ContentItem = typeof contentItems.$inferSelect;
 export type Import = typeof imports.$inferSelect;
 export type BudgetLine = typeof budgetLines.$inferSelect;
 export type Objective = typeof objectives.$inferSelect;
+export type MedicalSpecialty = typeof medicalSpecialties.$inferSelect;
+export type MedicalSector = typeof medicalSectors.$inferSelect;
+export type MedicalDelegate = typeof medicalDelegates.$inferSelect;
+export type Doctor = typeof doctors.$inferSelect;
+export type DoctorVisit = typeof doctorVisits.$inferSelect;
+export type SampleMovement = typeof sampleMovements.$inferSelect;
 
 export type UserRole = (typeof userRoleEnum.enumValues)[number];
 export type TaskStatus = (typeof taskStatusEnum.enumValues)[number];
@@ -1087,3 +1338,8 @@ export type TaskPriority = (typeof taskPriorityEnum.enumValues)[number];
 export type BudgetCategory = (typeof budgetCategoryEnum.enumValues)[number];
 export type ContentStatus = (typeof contentStatusEnum.enumValues)[number];
 export type RegulatoryStatus = (typeof regulatoryStatusEnum.enumValues)[number];
+export type DoctorStatus = (typeof doctorStatusEnum.enumValues)[number];
+export type DoctorPotential = (typeof doctorPotentialEnum.enumValues)[number];
+export type MedicalVisitStatus = (typeof medicalVisitStatusEnum.enumValues)[number];
+export type DoctorInterest = (typeof doctorInterestEnum.enumValues)[number];
+export type SampleMovementType = (typeof sampleMovementTypeEnum.enumValues)[number];

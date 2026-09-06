@@ -3,7 +3,7 @@ import type { ProductStock } from "@/lib/stock";
 import type { ClientIntel } from "@/lib/clients";
 import type { TaskPriority, UserRole } from "@/db/schema";
 
-export type RecCategory = "STOCK" | "MARKETING" | "REGLEMENTAIRE" | "TERRAIN" | "COMMERCIAL" | "BUDGET" | "EXECUTION" | "DATA";
+export type RecCategory = "STOCK" | "MARKETING" | "REGLEMENTAIRE" | "TERRAIN" | "COMMERCIAL" | "BUDGET" | "EXECUTION" | "DATA" | "MEDICAL";
 
 export const CATEGORY_META: Record<RecCategory, { label: string; tone: "red" | "orange" | "yellow" | "green" | "blue" | "purple" | "gray" | "accent" }> = {
   STOCK: { label: "Stock & achats", tone: "orange" },
@@ -14,6 +14,7 @@ export const CATEGORY_META: Record<RecCategory, { label: string; tone: "red" | "
   BUDGET: { label: "Budget", tone: "yellow" },
   EXECUTION: { label: "Exécution", tone: "gray" },
   DATA: { label: "Données", tone: "gray" },
+  MEDICAL: { label: "Médical", tone: "green" },
 };
 
 export type Recommendation = {
@@ -35,7 +36,7 @@ export type Recommendation = {
   impact?: string;
   /** Tâche proposée. */
   task: { title: string; dueInDays: number; role: UserRole; priority?: TaskPriority };
-  entity?: { type: "product" | "client" | "brand" | "regulatory" | "campaign" | "task" | "user"; id: string; href: string };
+  entity?: { type: "product" | "client" | "brand" | "regulatory" | "campaign" | "task" | "user" | "doctor"; id: string; href: string };
   brandId?: string | null;
   /** Enjeu (MAD) pour ordonner les recommandations de même priorité. */
   score?: number;

@@ -3,13 +3,16 @@
 import {
   LayoutDashboard, Zap, ChartColumn, Users, Package, Tags, Boxes, Megaphone, CalendarDays,
   Store, ClipboardList, Sparkles, ShieldCheck, SquareCheck, Upload, Settings,
-  Rocket, MousePointerClick, Heart, Wallet, type LucideProps,
+  Rocket, MousePointerClick, Heart, Wallet,
+  Stethoscope, UserRound, IdCard, CalendarCheck, Map, FlaskConical, LandPlot, BriefcaseMedical, SlidersHorizontal,
+  type LucideProps,
 } from "lucide-react";
 
 const ICONS = {
   LayoutDashboard, Zap, ChartColumn, Users, Package, Tags, Boxes, Megaphone, CalendarDays,
   Store, ClipboardList, Sparkles, ShieldCheck, SquareCheck, Upload, Settings,
   Rocket, MousePointerClick, Heart, Wallet,
+  Stethoscope, UserRound, IdCard, CalendarCheck, Map, FlaskConical, LandPlot, BriefcaseMedical, SlidersHorizontal,
 } as const;
 
 export function NavIcon({ name, ...props }: { name: string } & LucideProps) {

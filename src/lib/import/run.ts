@@ -241,6 +241,7 @@ export async function runImport(params: {
       case "ANIMATIONS": await importAnimations(rows, mapping, options, resolver, imp.id, summary); break;
       case "ANIM_OBJECTIVES": await importAnimationObjectives(rows, mapping, options, resolver, summary); break;
       case "ADS": await importAds(rows, mapping, options, resolver, imp.id, summary); break;
+      case "MEDECINS": await importMedecins(rows, mapping, options, imp.id, summary); break;
     }
     await resolver.flushAliases(type);
     summary.created = resolver.created;
@@ -1021,4 +1022,101 @@ async function importAnimationObjectives(rows: Record<string, unknown>[], mappin
     }
   }
   out.warnings.push(`Objectifs ${year} enregistrés en unités par ville et par marque. L'objectif mensuel affiché est l'annuel divisé par 12.`);
+}
+
+/* ------------------------------- Médical ------------------------------ */
+
+/**
+ * Référentiel médecins : import non réversible (comme CLIENTS/PRODUCTS). Secteurs et spécialités
+ * sont créés à la volée s'ils n'existent pas encore ; le délégué doit déjà exister (créé dans
+ * Paramètres) — l'import ne crée jamais d'utilisateur silencieusement.
+ */
+async function importMedecins(rows: Record<string, unknown>[], mapping: Mapping, _options: ImportOptions, importId: string, out: ImportSummary) {
+  const [sectorsRes, specialtiesRes, delegatesRes] = await Promise.all([
+    db.select({ id: s.medicalSectors.id, name: s.medicalSectors.name, city: s.medicalSectors.city }).from(s.medicalSectors),
+    db.select({ id: s.medicalSpecialties.id, name: s.medicalSpecialties.name }).from(s.medicalSpecialties),
+    db.execute(sql`select id, name from users where role = 'DELEGUE_MEDICAL'`),
+  ]);
+  const sectorByKey = new Map(sectorsRes.map((x) => [`${normKey(x.name)}|${normKey(x.city ?? "")}`, x.id]));
+  const specialtyByKey = new Map(specialtiesRes.map((x) => [normKey(x.name), x.id]));
+  const delegateByKey = new Map((delegatesRes.rows as { id: string; name: string }[]).map((x) => [normKey(x.name), x.id]));
+
+  type Pending = { key: string; values: typeof s.doctors.$inferInsert };
+  const pending: Pending[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const firstName = txt(r, mapping, "firstName");
+    const lastName = txt(r, mapping, "lastName");
+    const city = normalizeCity(get(r, mapping, "city"));
+    if (!firstName || !lastName) { out.errors.push({ row: i + 2, message: "Nom ou prénom manquant" }); continue; }
+    const key = normKey(`${firstName} ${lastName} ${city ?? ""}`);
+    if (seen.has(key)) { out.duplicates++; continue; }
+    seen.add(key);
+
+    const specialtyName = txt(r, mapping, "specialty");
+    let specialtyId: string | null = null;
+    if (specialtyName) {
+      const sk = normKey(specialtyName);
+      specialtyId = specialtyByKey.get(sk) ?? null;
+      if (!specialtyId) {
+        const [row] = await db.insert(s.medicalSpecialties).values({ name: specialtyName }).onConflictDoNothing().returning();
+        if (row) { specialtyId = row.id; specialtyByKey.set(sk, row.id); }
+      }
+    }
+
+    const sectorName = txt(r, mapping, "sector");
+    let sectorId: string | null = null;
+    if (sectorName) {
+      const ck = `${normKey(sectorName)}|${normKey(city ?? "")}`;
+      sectorId = sectorByKey.get(ck) ?? null;
+      if (!sectorId) {
+        const [row] = await db.insert(s.medicalSectors).values({ name: sectorName, city }).returning();
+        if (row) { sectorId = row.id; sectorByKey.set(ck, row.id); }
+      }
+    }
+
+    const delegateName = txt(r, mapping, "delegate");
+    const delegateId = delegateName ? delegateByKey.get(normKey(delegateName)) ?? null : null;
+    if (delegateName && !delegateId) out.warnings.push(`Délégué inconnu (créez-le dans Paramètres) : « ${delegateName} » — médecin importé sans délégué assigné.`);
+
+    pending.push({
+      key,
+      values: {
+        firstName, lastName, city,
+        phone: txt(r, mapping, "phone"), email: txt(r, mapping, "email"),
+        specialtyId, subSpecialty: txt(r, mapping, "subSpecialty"), addressLine: txt(r, mapping, "addressLine"),
+        sectorId, delegateId, comments: txt(r, mapping, "comments"),
+        dedupeKey: key, importId,
+      },
+    });
+  }
+
+  const existingKeys = new Set(
+    ((await db.execute(sql`select dedupe_key from doctors where dedupe_key is not null`)).rows as { dedupe_key: string }[]).map((x) => x.dedupe_key),
+  );
+  for (let i = 0; i < pending.length; i += 200) {
+    const chunk = pending.slice(i, i + 200);
+    await db
+      .insert(s.doctors)
+      .values(chunk.map((p) => p.values))
+      .onConflictDoUpdate({
+        target: s.doctors.dedupeKey,
+        targetWhere: sql`dedupe_key is not null`,
+        set: {
+          phone: sql`coalesce(excluded.phone, doctors.phone)`,
+          email: sql`coalesce(excluded.email, doctors.email)`,
+          specialtyId: sql`coalesce(excluded.specialty_id, doctors.specialty_id)`,
+          subSpecialty: sql`coalesce(excluded.sub_specialty, doctors.sub_specialty)`,
+          addressLine: sql`coalesce(excluded.address_line, doctors.address_line)`,
+          sectorId: sql`coalesce(excluded.sector_id, doctors.sector_id)`,
+          delegateId: sql`coalesce(excluded.delegate_id, doctors.delegate_id)`,
+          comments: sql`coalesce(excluded.comments, doctors.comments)`,
+          importId: sql`excluded.import_id`,
+          updatedAt: sql`now()`,
+        },
+      });
+  }
+  out.inserted += pending.filter((p) => !existingKeys.has(p.key)).length;
+  out.updated += pending.filter((p) => existingKeys.has(p.key)).length;
 }

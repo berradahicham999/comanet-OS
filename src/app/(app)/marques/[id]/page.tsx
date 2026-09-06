@@ -28,7 +28,7 @@ export default async function BrandPage(props: { params: Promise<{ id: string }>
   const year = ref.getUTCFullYear(), month = ref.getUTCMonth() + 1;
   const ytd = periodRange("ytd", ref), ytdN1 = shiftRange(ytd, -12);
   const f = { brandId: id };
-  const [cmp, ytdT, ytdN1T, series, seriesN1, products, clients, cities, stocks, recs, users, annualObj, monthObj, budget, lines, expenses] = await Promise.all([
+  const [cmp, ytdT, ytdN1T, series, seriesN1, products, clients, cities, stocks, recs, users, annualObj, monthObj, budget, lines, expenses, medicalActivity] = await Promise.all([
     compareMonth(f, ref), totals(ytd.start, ytd.end, f), totals(ytdN1.start, ytdN1.end, f),
     monthlySeries(13, f, ref), monthlySeries(13, f, new Date(Date.UTC(ref.getUTCFullYear() - 1, ref.getUTCMonth(), ref.getUTCDate(), 12))),
     byDim("product", ytd.start, ytd.end, f, 50), byDim("client", ytd.start, ytd.end, f, 10), byDim("city", ytd.start, ytd.end, f, 8),
@@ -36,6 +36,10 @@ export default async function BrandPage(props: { params: Promise<{ id: string }>
     db.execute(sql`select amount::float8 as amount, reference_revenue::float8 as ref, pct_of_revenue::float8 as pct from budgets where brand_id = ${id}::uuid and year = ${year}`),
     db.execute(sql`select label, category::text as category, amount::float8 as amount from budget_lines where brand_id = ${id}::uuid and year = ${year} order by amount desc`),
     db.execute(sql`select category::text as category, status::text as status, sum(amount)::float8 as amount from marketing_expenses where brand_id = ${id}::uuid and extract(year from date) = ${year} group by 1, 2`),
+    db.execute(sql`
+      select count(distinct v.doctor_id)::int as doctors, count(distinct vp.visit_id)::int as visits,
+        coalesce((select sum(vs.quantity)::int from visit_samples vs join products p on p.id = vs.product_id where p.brand_id = ${id}::uuid), 0) as samples
+      from visit_products vp join doctor_visits v on v.id = vp.visit_id join products p on p.id = vp.product_id where p.brand_id = ${id}::uuid`),
   ]);
   const brandRecs = recs.filter((r) => r.brandId === id && !r.existingTask);
   const bud = budget.rows[0] as { amount: number; ref: number | null; pct: number | null } | undefined;
@@ -95,6 +99,19 @@ export default async function BrandPage(props: { params: Promise<{ id: string }>
               <ul className="text-[13px] space-y-1.5">{(lines.rows as { label: string; category: string; amount: number }[]).map((l, i) => <li key={i} className="flex justify-between gap-2"><span className="truncate">{l.label} <span className="text-faint text-[11px]">{BUDGET_CATEGORY_LABELS[l.category as keyof typeof BUDGET_CATEGORY_LABELS]}</span></span><span className="font-medium shrink-0">{fmtMAD(l.amount, { compact: true })}</span></li>)}</ul>
             </Card>
           )}
+          {(() => {
+            const m = medicalActivity.rows[0] as { doctors: number; visits: number; samples: number };
+            return m.visits > 0 || m.samples > 0 ? (
+              <Card title="Activité médicale">
+                <ul className="text-[13px] space-y-1.5">
+                  <li className="flex justify-between"><span className="text-muted">Médecins visités</span><span className="font-medium">{fmtNum(m.doctors)}</span></li>
+                  <li className="flex justify-between"><span className="text-muted">Visites où présentée</span><span className="font-medium">{fmtNum(m.visits)}</span></li>
+                  <li className="flex justify-between"><span className="text-muted">Échantillons distribués</span><span className="font-medium">{fmtNum(m.samples)}</span></li>
+                </ul>
+                <Link href="/medical/medecins" className="text-[12px] text-accent mt-2 inline-block hover:underline">Voir dans Médical →</Link>
+              </Card>
+            ) : null;
+          })()}
           <Card title="Stratégie marketing">
             <form action={updateBrand} className="space-y-2 text-[13px]">
               <input type="hidden" name="id" value={id} />

@@ -14,6 +14,7 @@ import { clientRules, brandDropRule, dataQualityRule } from "./commercial-rules"
 import { budgetRule, adsRule, influenceRule, campaignStockRule } from "./marketing-rules";
 import { terrainRules, overdueTasksRule } from "./execution-rules";
 import { animationPerformanceRule } from "./animation-rules";
+import { medicalRules } from "./medical-rules";
 
 export * from "./types";
 
@@ -33,6 +34,7 @@ export const RULES: Rule[] = [
   overstockRule,
   overdueTasksRule,
   dataQualityRule,
+  ...medicalRules,
 ];
 
 async function buildContext(): Promise<RuleContext> {
