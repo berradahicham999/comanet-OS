@@ -80,7 +80,8 @@ export default async function CampagneDetailPage(props: { params: Promise<{ id: 
     brandId: c.brand_id, brandName: c.brand, brandColor: c.brand_color,
     spend: Number(ad.spend), impressions: Number(ad.impressions), reach: Number(ad.reach),
     clicks: Number(ad.clicks), linkClicks: Number(ad.link_clicks), landingPageViews: Number(ad.landing_page_views),
-    leads: Number(ad.leads), purchases: Number(ad.purchases), revenue: Number(ad.revenue), days: Number(ad.rows),
+    leads: Number(ad.leads), purchases: Number(ad.purchases), messagingStarted: 0, revenue: Number(ad.revenue), days: Number(ad.rows),
+    objective: null,
   };
   const adK = kpis(adRow);
   const hasAds = Number(ad.rows) > 0;
@@ -106,7 +107,8 @@ export default async function CampagneDetailPage(props: { params: Promise<{ id: 
     campaignId: c.id, brandId: c.brand_id, brandName: c.brand, brandColor: c.brand_color,
     spend: Number(r.spend), impressions: Number(r.impressions), reach: Number(r.reach),
     clicks: Number(r.clicks), linkClicks: Number(r.link_clicks), landingPageViews: Number(r.landing_page_views),
-    leads: Number(r.leads), purchases: Number(r.purchases), revenue: Number(r.revenue), days: 0,
+    leads: Number(r.leads), purchases: Number(r.purchases), messagingStarted: 0, revenue: Number(r.revenue), days: 0,
+    objective: null,
   }));
 
   return (

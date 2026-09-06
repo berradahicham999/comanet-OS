@@ -1045,6 +1045,8 @@ export const adMetrics = pgTable(
     landingPageViews: integer("landing_page_views").notNull().default(0),
     leads: integer("leads").notNull().default(0),
     purchases: integer("purchases").notNull().default(0),
+    /** Conversations démarrées (Messenger/WhatsApp) — le résultat des campagnes « Messages ». */
+    messagingStarted: integer("messaging_started").notNull().default(0),
     revenue: numeric("revenue", { precision: 14, scale: 2 }).notNull().default("0"),
     /** Identifiants Meta/TikTok/Google : stables même si la campagne est renommée dans la régie. */
     externalCampaignId: text("external_campaign_id"),

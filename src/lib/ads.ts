@@ -28,8 +28,11 @@ export type AdRow = {
   landingPageViews: number;
   leads: number;
   purchases: number;
+  messagingStarted: number;
   revenue: number;
   days: number;
+  /** Objectif Meta de la campagne (OUTCOME_TRAFFIC, OUTCOME_AWARENESS…), relevé au dernier passage. */
+  objective: string | null;
 };
 
 export type AdKpis = AdRow & {
@@ -41,6 +44,7 @@ export type AdKpis = AdRow & {
   roas: number | null;
   frequency: number | null;
   costPerLead: number | null;
+  costPerMessage: number | null;
 };
 
 export function kpis(r: AdRow): AdKpis {
@@ -55,7 +59,42 @@ export function kpis(r: AdRow): AdKpis {
     roas: r.spend > 0 ? r.revenue / r.spend : null,
     frequency: r.reach > 0 ? r.impressions / r.reach : null,
     costPerLead: r.leads > 0 ? r.spend / r.leads : null,
+    costPerMessage: r.messagingStarted > 0 ? r.spend / r.messagingStarted : null,
   };
+}
+
+/**
+ * Le résultat qui compte pour CETTE campagne, selon son objectif Meta — pas systématiquement
+ * l'achat. La plupart des campagnes ici visent le trafic ou la messagerie, jamais la vente en
+ * ligne : leur afficher un CPA ou un ROAS qui ne sera jamais atteint masque ce qu'elles font
+ * réellement. Objectif inconnu (import fichier, campagne non relevée) → clics par défaut, la
+ * mesure la plus universelle.
+ */
+export type PrimaryResult = { label: string; value: number; formatted: string; sub: string | null };
+
+export function primaryResult(objective: string | null, r: AdKpis): PrimaryResult {
+  const o = (objective ?? "").toUpperCase();
+  const clicks = r.linkClicks || r.clicks;
+
+  if (o.includes("SALES") || o.includes("PURCHASE")) {
+    return { label: "Achats", value: r.purchases, formatted: String(r.purchases), sub: r.cpa !== null ? `CPA ${Math.round(r.cpa)} MAD` : "aucun achat suivi" };
+  }
+  if (o.includes("LEAD")) {
+    return { label: "Leads", value: r.leads, formatted: String(r.leads), sub: r.costPerLead !== null ? `${Math.round(r.costPerLead)} MAD / lead` : "aucun lead suivi" };
+  }
+  if (o.includes("AWARENESS")) {
+    return { label: "Impressions", value: r.impressions, formatted: r.impressions.toLocaleString("fr-FR"), sub: r.cpm !== null ? `CPM ${Math.round(r.cpm)} MAD` : null };
+  }
+  if (o.includes("ENGAGEMENT")) {
+    // Une campagne Messages (WhatsApp/Messenger) reste classée « Engagement » côté Meta : on ne
+    // le sait qu'en constatant des conversations démarrées, Meta ne le dit pas autrement ici.
+    if (r.messagingStarted > 0) {
+      return { label: "Messages démarrés", value: r.messagingStarted, formatted: String(r.messagingStarted), sub: r.costPerMessage !== null ? `${Math.round(r.costPerMessage)} MAD / message` : null };
+    }
+    return { label: "Clics", value: clicks, formatted: clicks.toLocaleString("fr-FR"), sub: r.ctr !== null ? `CTR ${r.ctr.toFixed(2)} %` : null };
+  }
+  // TRAFFIC, LINK_CLICKS, et tout objectif non reconnu.
+  return { label: "Clics", value: clicks, formatted: clicks.toLocaleString("fr-FR"), sub: r.ctr !== null ? `CTR ${r.ctr.toFixed(2)} %` : null };
 }
 
 /**
@@ -92,9 +131,16 @@ export async function adsByDim(dim: "campaign" | "ad" | "platform" | "brand", ra
       coalesce(sum(m.landing_page_views), 0)::float8 as landing_page_views,
       coalesce(sum(m.leads), 0)::float8 as leads,
       coalesce(sum(m.purchases), 0)::float8 as purchases,
+      coalesce(sum(m.messaging_started), 0)::float8 as messaging_started,
       coalesce(sum(m.revenue), 0)::float8 as revenue,
-      count(distinct m.date)::int as days
-    from ad_metrics m left join brands b on b.id = m.brand_id
+      count(distinct m.date)::int as days,
+      -- Objectif : celui du dernier état de diffusion relevé pour cette campagne de régie.
+      -- Une seule campagne par clé dans l'immense majorité des cas (dim = campaign/ad) ;
+      -- max() départage les rares cas où le nom a été réutilisé.
+      max(cs.objective) as objective
+    from ad_metrics m
+    left join brands b on b.id = m.brand_id
+    left join ad_campaign_states cs on cs.platform = m.platform and cs.external_campaign_id = m.external_campaign_id
     where ${where}
     group by 1 order by spend desc`);
   return (r.rows as Record<string, unknown>[]).map((x) => ({
@@ -105,7 +151,9 @@ export async function adsByDim(dim: "campaign" | "ad" | "platform" | "brand", ra
     brandColor: x.brand_color ? String(x.brand_color) : null,
     spend: Number(x.spend), impressions: Number(x.impressions), reach: Number(x.reach),
     clicks: Number(x.clicks), linkClicks: Number(x.link_clicks), landingPageViews: Number(x.landing_page_views),
-    leads: Number(x.leads), purchases: Number(x.purchases), revenue: Number(x.revenue), days: Number(x.days),
+    leads: Number(x.leads), purchases: Number(x.purchases), messagingStarted: Number(x.messaging_started),
+    revenue: Number(x.revenue), days: Number(x.days),
+    objective: x.objective ? String(x.objective) : null,
   }));
 }
 

@@ -64,6 +64,13 @@
       "when": 1789060000000,
       "tag": "0008_meta_intraday",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789060060000,
+      "tag": "0009_ad_messaging",
+      "breakpoints": true
     }
   ]
 }

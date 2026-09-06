@@ -8,7 +8,7 @@ import { resolvePeriod, PERIOD_OPTIONS, type PeriodParam } from "@/lib/periods";
 import { PageHeader, Card, Kpi, Badge, BrandDot, Section, Empty, Tabs } from "@/components/ui";
 import { SimpleLine } from "@/components/charts";
 import { fmtMAD, fmtNum, fmtPct, fmtDate, fmtDateShort, fmtTime, fmtAgo, delta } from "@/lib/format";
-import { adsByDim, kpis, diagnose, brandAverages, verdictMeta, type AdKpis } from "@/lib/ads";
+import { adsByDim, kpis, diagnose, brandAverages, verdictMeta, primaryResult, type AdKpis } from "@/lib/ads";
 import { accountsFreshness, intradayTotals, liveCampaigns } from "@/lib/meta/live";
 import { AD_PLATFORMS, platformLabel, deliveryStatus } from "@/lib/marketing-shared";
 import { refreshMetaNow } from "../actions";
@@ -277,8 +277,21 @@ export default async function AdsPage(props: { searchParams: Promise<{ brand?: s
                     <Badge tone={vm.tone} className="ml-auto">{vm.label}</Badge>
                     {row.campaignId && <Link href={`/marketing/campagnes/${row.campaignId}`} className="text-[12px] text-accent">Campagne 360 →</Link>}
                   </div>
-                  <div className="mt-1 text-[13px] font-medium">{diag.headline}</div>
+                  <div className="mt-1 flex items-center gap-2 text-[13px]">
+                    <span className="font-medium">{diag.headline}</span>
+                    {row.objective && <Badge tone="blue" className="text-[10.5px]">objectif : {row.objective.replace(/^OUTCOME_/, "").toLowerCase()}</Badge>}
+                  </div>
                   <div className="mt-2.5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-[12px]">
+                    {(() => {
+                      const res = primaryResult(row.objective, row);
+                      return (
+                        <div className="rounded-lg bg-accent-soft/40 px-2 py-1.5 min-w-0 border border-accent/20">
+                          <div className="text-accent text-[11px]">Résultat — {res.label}</div>
+                          <div className="font-semibold">{res.formatted}</div>
+                          {res.sub && <div className="text-[11px] text-faint">{res.sub}</div>}
+                        </div>
+                      );
+                    })()}
                     {diag.signals.map((s) => (
                       <div key={s.label} className="rounded-lg bg-surface-2 px-2 py-1.5 min-w-0">
                         <div className="text-muted text-[11px]">{s.label}</div>
@@ -305,14 +318,17 @@ export default async function AdsPage(props: { searchParams: Promise<{ brand?: s
         <Card className="min-w-0">
           <div className="overflow-x-auto">
             <table className="tbl text-[12.5px]">
-              <thead><tr><th>{dim === "campaign" ? "Campagne" : "Publicité"}</th><th>Régie</th><th>Marque</th><th className="num">Dépense</th><th className="num">Impr.</th><th className="num">CPM</th><th className="num">CTR</th><th className="num">CPC</th><th className="num">Achats</th><th className="num">CPA</th><th className="num">CA régie</th><th className="num">ROAS</th></tr></thead>
+              <thead><tr><th>{dim === "campaign" ? "Campagne" : "Publicité"}</th><th>Régie</th><th>Marque</th><th className="num">Dépense</th><th>Résultat (objectif)</th><th className="num">Impr.</th><th className="num">CPM</th><th className="num">CTR</th><th className="num">CPC</th><th className="num">Achats</th><th className="num">CPA</th><th className="num">CA régie</th><th className="num">ROAS</th></tr></thead>
               <tbody>
-                {cur.map((r: AdKpis) => (
+                {cur.map((r: AdKpis) => {
+                  const res = primaryResult(r.objective, r);
+                  return (
                   <tr key={r.key}>
                     <td className="max-w-[280px] truncate">{r.campaignId ? <Link href={`/marketing/campagnes/${r.campaignId}`} className="hover:underline">{r.campaignName}</Link> : r.campaignName}</td>
                     <td className="text-muted">{platformLabel(r.platform)}</td>
                     <td className="text-muted">{r.brandName ?? <span className="text-faint">non identifiée</span>}</td>
                     <td className="num font-medium">{fmtMAD(r.spend, { suffix: false })}</td>
+                    <td className="whitespace-nowrap"><span className="font-medium">{res.formatted}</span> <span className="text-faint text-[11px]">{res.label}</span></td>
                     <td className="num">{fmtNum(r.impressions)}</td>
                     <td className="num">{r.cpm !== null ? Math.round(r.cpm) : "—"}</td>
                     <td className="num">{r.ctr !== null ? r.ctr.toFixed(2) + " %" : "—"}</td>
@@ -322,7 +338,8 @@ export default async function AdsPage(props: { searchParams: Promise<{ brand?: s
                     <td className="num">{r.revenue ? fmtMAD(r.revenue, { suffix: false }) : "—"}</td>
                     <td className={`num font-medium ${r.roas !== null && r.roas >= 3 ? "text-green" : r.roas !== null && r.roas < 1 ? "text-red" : ""}`}>{r.roas !== null ? r.roas.toFixed(2) + "×" : "—"}</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

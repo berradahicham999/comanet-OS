@@ -236,6 +236,8 @@ export type MetaInsightRow = {
   leads: number;
   purchases: number;
   revenue: number;
+  /** Conversations démarrées (Messenger/WhatsApp) — le résultat des campagnes « Messages ». */
+  messagingStarted: number;
 };
 
 type Action = { action_type: string; value: string };
@@ -266,6 +268,12 @@ const pick = (actions: Action[] | undefined, types: string[]): number => {
 const PURCHASE_TYPES = ["omni_purchase", "purchase", "offsite_conversion.fb_pixel_purchase"];
 const LEAD_TYPES = ["lead", "offsite_conversion.fb_pixel_lead", "onsite_conversion.lead_grouped"];
 const LPV_TYPES = ["landing_page_view"];
+/** Meta remonte cette conversation sous plusieurs libellés selon la destination (Messenger, WhatsApp, Instagram). */
+const MESSAGING_TYPES = [
+  "onsite_conversion.messaging_conversation_started_7d",
+  "onsite_conversion.total_messaging_connection",
+  "onsite_conversion.messaging_first_reply",
+];
 
 const INSIGHT_FIELDS = [
   "date_start", "campaign_id", "campaign_name", "adset_id", "adset_name", "ad_id", "ad_name",
@@ -312,5 +320,6 @@ export async function fetchInsights(
     leads: Math.round(pick(r.actions, LEAD_TYPES)),
     purchases: Math.round(pick(r.actions, PURCHASE_TYPES)),
     revenue: pick(r.action_values, PURCHASE_TYPES),
+    messagingStarted: Math.round(pick(r.actions, MESSAGING_TYPES)),
   }));
 }
