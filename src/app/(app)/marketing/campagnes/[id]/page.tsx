@@ -9,7 +9,8 @@ import { fmtMAD, fmtNum, fmtPct, fmtDate, fmtDateShort, delta } from "@/lib/form
 import { CAMPAIGN_TYPES, CAMPAIGN_STATUS, campaignTypeLabel } from "@/lib/marketing-shared";
 import { campaignSales, campaignStock } from "@/lib/marketing";
 import { kpis, type AdRow } from "@/lib/ads";
-import { saveCampaign, deleteCampaign, setCampaignStatus, saveExpense, deleteExpense } from "../../actions";
+import { saveCampaign, deleteCampaign, setCampaignStatus, saveExpense, deleteExpense, linkAdCampaigns, unlinkAdCampaign } from "../../actions";
+import { linkedAdCampaigns, linkCandidates } from "@/lib/meta/links";
 import { BUDGET_CATEGORIES, BUDGET_CATEGORY_LABELS } from "@/lib/budget-categories";
 
 export const dynamic = "force-dynamic";
@@ -68,6 +69,8 @@ export default async function CampagneDetailPage(props: { params: Promise<{ id: 
     campaignSales(id),
     campaignStock(id),
   ]);
+
+  const [links, candidates] = await Promise.all([linkedAdCampaigns(id), linkCandidates(c.brand_id)]);
 
   type Expense = { id: string; label: string; category: string; status: string; amount: number; date: string; revenue: number | null; conversions: number | null };
   const expenses = expenseRes.rows as Expense[];
@@ -175,7 +178,7 @@ export default async function CampagneDetailPage(props: { params: Promise<{ id: 
       {/* ------------------------------------ Publicité ------------------------------------- */}
       <Section title="Publicité (régie)" description={hasAds ? `${fmtNum(Number(ad.rows))} lignes importées, du ${fmtDate(String(ad.first_day))} au ${fmtDate(String(ad.last_day))}.` : "Aucune donnée de régie rattachée à cette campagne."} action={<Link href="/marketing/ads" className="btn-secondary btn-sm">Digital Ads</Link>}>
         {!hasAds ? (
-          <Card><Empty title="Pas de données publicitaires" hint={<>Importez un export Meta / TikTok / Google depuis <Link href="/imports?type=ADS" className="text-accent">Imports</Link>. Les lignes dont le nom de campagne correspond à celle-ci y seront rattachées automatiquement.</>} /></Card>
+          <Card><Empty title="Pas de données publicitaires" hint={<>Rattachez ci-dessous les campagnes de régie qui portent cette opération, ou importez un export depuis <Link href="/imports?type=ADS" className="text-accent">Imports</Link>. Si aucun compte n&apos;est encore connecté, commencez par <Link href="/marketing/ads/comptes" className="text-accent">Comptes publicitaires</Link>.</>} /></Card>
         ) : (
           <Card>
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 text-[12.5px]">
@@ -207,6 +210,82 @@ export default async function CampagneDetailPage(props: { params: Promise<{ id: 
             )}
           </Card>
         )}
+      </Section>
+
+      {/* ------------------------- Rattachement aux campagnes de régie ---------------------- */}
+      <Section
+        title="Campagnes de régie rattachées"
+        description="Le rattachement porte sur l'identifiant de la campagne dans la régie : renommer la campagne côté Meta ne le casse pas. Une campagne de régie n'appartient qu'à une seule campagne COMANET."
+        action={<Link href="/marketing/ads/comptes" className="btn-ghost btn-sm">Comptes publicitaires</Link>}
+      >
+        <div className="grid lg:grid-cols-2 gap-4">
+          <Card title={`Rattachées (${links.length})`}>
+            {links.length === 0 ? (
+              <Empty title="Aucune campagne de régie rattachée" hint="Cochez à droite les campagnes Meta qui portent cette opération. Les chiffres déjà en base leur seront réappliqués immédiatement." />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="tbl text-[12.5px]">
+                  <thead><tr><th>Campagne de régie</th><th>Compte</th><th className="num">Dépense</th><th className="num">Achats</th><th>Période</th><th /></tr></thead>
+                  <tbody>
+                    {links.map((l) => (
+                      <tr key={l.linkId}>
+                        <td className="max-w-[240px]">
+                          <div className="truncate font-medium">{l.name}</div>
+                          <div className="text-[11px] text-faint">{l.externalCampaignId ? `ID ${l.externalCampaignId}` : "rattachée par nom — sensible au renommage"}</div>
+                        </td>
+                        <td className="text-muted">{l.accountName ?? "—"}</td>
+                        <td className="num font-medium">{l.rows ? fmtMAD(l.spend, { suffix: false }) : "—"}</td>
+                        <td className="num">{l.rows ? fmtNum(l.purchases) : "—"}</td>
+                        <td className="text-muted text-[11.5px]">{l.firstDay ? `${fmtDateShort(l.firstDay)} → ${fmtDateShort(l.lastDay!)}` : "aucune donnée"}</td>
+                        <td className="num">
+                          <form action={unlinkAdCampaign}>
+                            <input type="hidden" name="linkId" value={l.linkId} />
+                            <input type="hidden" name="campaignId" value={c.id} />
+                            <button className="btn-ghost btn-sm text-red" type="submit">Détacher</button>
+                          </form>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+
+          <Card title="À rattacher">
+            {candidates.length === 0 ? (
+              <Empty
+                title="Aucune campagne de régie disponible"
+                hint={<>Toutes les campagnes connues sont déjà rattachées, ou aucune donnée publicitaire n&apos;est encore en base. Connectez un compte depuis <Link href="/marketing/ads/comptes" className="text-accent">Comptes publicitaires</Link>.</>}
+              />
+            ) : (
+              <form action={linkAdCampaigns} className="space-y-2">
+                <input type="hidden" name="campaignId" value={c.id} />
+                <p className="text-[11.5px] text-faint">
+                  Les campagnes dont la marque correspond à {c.brand} sont proposées en premier. Les publications boostées (« Post: … ») n&apos;ont pas de marque dans leur nom : à rattacher à la main.
+                </p>
+                <div className="max-h-[420px] overflow-y-auto divide-y divide-line rounded-xl border border-line">
+                  {candidates.map((k) => (
+                    <label key={`${k.platform}|${k.externalCampaignId ?? k.name}`} className="flex items-start gap-2 px-3 py-2 hover:bg-accent-soft/20 cursor-pointer">
+                      <input type="checkbox" name="pick" value={`${k.platform}|${k.externalCampaignId ?? ""}|${k.name}`} className="mt-1" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[12.5px] font-medium truncate">{k.name}</span>
+                        <span className="block text-[11px] text-muted">
+                          {k.accountName ?? k.platform}
+                          {k.brandName ? ` · ${k.brandName}` : " · marque non identifiée"}
+                          {k.lastDay ? ` · dernier jour ${fmtDateShort(k.lastDay)}` : ""}
+                        </span>
+                      </span>
+                      <span className="text-[12px] font-medium whitespace-nowrap">{fmtMAD(k.spend, { compact: true })}</span>
+                      {k.suggested && <Badge tone="green">suggérée</Badge>}
+                    </label>
+                  ))}
+                </div>
+                <button className="btn-primary w-full" type="submit">Rattacher la sélection</button>
+              </form>
+            )}
+          </Card>
+        </div>
       </Section>
 
       {/* ------------------------------- Stock : garde-fou ---------------------------------- */}

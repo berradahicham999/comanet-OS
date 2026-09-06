@@ -1,5 +1,5 @@
-import type { UserRole } from "@/db/schema";
-import { canAccess, type ModuleKey } from "@/lib/access-shared";
+import { type ModuleKey } from "@/lib/access-shared";
+import { can, type PermissionSet } from "@/lib/permissions-shared";
 
 export type NavItem = {
   href: string;
@@ -45,7 +45,7 @@ export const NAV: NavGroup[] = [
     items: [
       { href: "/terrain", label: "Animations", icon: "Store", module: "terrain" },
       { href: "/terrain/saisie", label: "Saisie terrain", icon: "ClipboardList", module: "terrain" },
-      { href: "/terrain/animatrices", label: "Animatrices", icon: "Sparkles", module: "terrain" },
+      { href: "/terrain/animatrices", label: "Animatrices", icon: "Sparkles", module: "terrain_animatrices" },
     ],
   },
   {
@@ -53,13 +53,14 @@ export const NAV: NavGroup[] = [
     items: [
       { href: "/medical", label: "Dashboard médical", icon: "Stethoscope", module: "medical", exact: true },
       { href: "/medical/medecins", label: "Médecins", icon: "UserRound", module: "medical" },
-      { href: "/medical/delegues", label: "Délégués médicaux", icon: "IdCard", module: "medical" },
       { href: "/medical/visites", label: "Visites", icon: "CalendarCheck", module: "medical" },
+      { href: "/medical/visites/saisie", label: "Saisie visite", icon: "ClipboardList", module: "medical" },
       { href: "/medical/planning", label: "Planning / tournée", icon: "Map", module: "medical" },
       { href: "/medical/echantillons", label: "Échantillons", icon: "FlaskConical", module: "medical" },
-      { href: "/medical/secteurs", label: "Secteurs", icon: "LandPlot", module: "medical" },
-      { href: "/medical/specialites", label: "Spécialités", icon: "BriefcaseMedical", module: "medical" },
-      { href: "/medical/parametrage", label: "Paramétrage médical", icon: "SlidersHorizontal", module: "medical" },
+      { href: "/medical/delegues", label: "Délégués médicaux", icon: "IdCard", module: "medical_admin" },
+      { href: "/medical/secteurs", label: "Secteurs", icon: "LandPlot", module: "medical_admin" },
+      { href: "/medical/specialites", label: "Spécialités", icon: "BriefcaseMedical", module: "medical_admin" },
+      { href: "/medical/parametrage", label: "Paramétrage médical", icon: "SlidersHorizontal", module: "medical_admin" },
     ],
   },
   {
@@ -78,44 +79,26 @@ export const NAV: NavGroup[] = [
   },
 ];
 
-/** Pages Médical réservées manager/admin — masquées à un délégué médical. */
-const MEDICAL_MANAGER_ONLY = ["/medical/delegues", "/medical/secteurs", "/medical/specialites", "/medical/parametrage"];
-
-export function navForRole(role: UserRole): NavGroup[] {
+export function navForPermissions(perms: PermissionSet): NavGroup[] {
   return NAV.map((g) => ({
     ...g,
-    items: g.items.filter(
-      (i) =>
-        canAccess(role, i.module) &&
-        !(role === "ANIMATRICE" && i.href === "/terrain/animatrices") &&
-        !(role === "DELEGUE_MEDICAL" && MEDICAL_MANAGER_ONLY.includes(i.href)),
-    ),
+    items: g.items.filter((i) => can(perms, i.module, "view")),
   })).filter((g) => g.items.length > 0);
 }
 
-/** Onglets de la barre mobile (5 max). */
-export function mobileTabsForRole(role: UserRole): NavItem[] {
-  if (role === "ANIMATRICE") {
-    return [
-      { href: "/terrain/saisie", label: "Saisie", icon: "ClipboardList", module: "terrain" },
-      { href: "/terrain", label: "Animations", icon: "Store", module: "terrain" },
-      { href: "/taches", label: "Tâches", icon: "SquareCheck", module: "taches" },
-    ];
-  }
-  if (role === "DELEGUE_MEDICAL") {
-    return [
-      { href: "/medical/visites/saisie", label: "Saisie", icon: "ClipboardList", module: "medical" },
-      { href: "/medical/planning", label: "Planning", icon: "Map", module: "medical" },
-      { href: "/medical/medecins", label: "Médecins", icon: "UserRound", module: "medical" },
-      { href: "/taches", label: "Tâches", icon: "SquareCheck", module: "taches" },
-    ];
-  }
-  const all = navForRole(role).flatMap((g) => g.items);
-  const prefer = ["/", "/actions", "/taches", "/ventes", "/marketing", "/reglementaire", "/terrain", "/medical"];
+/**
+ * Onglets de la barre mobile (4 max). La page d'accueil de la personne vient en
+ * premier : c'est ce qui donne sa saisie à une animatrice ou à un délégué médical,
+ * sans avoir à tester leur rôle.
+ */
+export function mobileTabsForPermissions(perms: PermissionSet, homePath: string): NavItem[] {
+  const all = navForPermissions(perms).flatMap((g) => g.items);
+  const prefer = [homePath, "/", "/actions", "/taches", "/ventes", "/marketing", "/reglementaire", "/terrain", "/medical"];
   const picked: NavItem[] = [];
-  for (const p of prefer) {
-    const it = all.find((i) => i.href === p);
-    if (it && picked.length < 4) picked.push(it);
+  for (const href of prefer) {
+    if (picked.length >= 4) break;
+    const it = all.find((i) => i.href === href);
+    if (it && !picked.some((p) => p.href === it.href)) picked.push(it);
   }
   return picked;
 }

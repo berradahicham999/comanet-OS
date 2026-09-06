@@ -92,6 +92,31 @@ export function today() {
   return new Date(Date.UTC(y, m - 1, d, 12));
 }
 
+const tf = new Intl.DateTimeFormat("fr-FR", { timeZone: BUSINESS_TZ, hour: "2-digit", minute: "2-digit" });
+
+/** Heure d'un horodatage, dans le fuseau de l'entreprise. Les serveurs tournent en UTC. */
+export function fmtTime(v: string | Date | null | undefined) {
+  const d = toDate(v);
+  return d ? tf.format(d) : "—";
+}
+
+/**
+ * Ancienneté en clair : « à l'instant », « il y a 12 min », « il y a 3 h ».
+ * Sert à dire la fraîcheur d'une donnée, pas à dater un événement — pour ça, `fmtDate`.
+ */
+export function fmtAgo(v: string | Date | null | undefined) {
+  const d = toDate(v);
+  if (!d) return "jamais";
+  const seconds = Math.max(0, (Date.now() - d.getTime()) / 1000);
+  if (seconds < 90) return "à l'instant";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `il y a ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `il y a ${hours} h`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "hier" : `il y a ${days} jours`;
+}
+
 export function months(v: number) {
   if (!Number.isFinite(v)) return "∞";
   return `${nf1.format(v)} mois`;

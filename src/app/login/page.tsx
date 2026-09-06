@@ -1,13 +1,13 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
-import { homeFor } from "@/lib/access";
+import { homeForUser } from "@/lib/access";
 import { LoginForm } from "./login-form";
 
 export const metadata = { title: "Connexion" };
 
 export default async function LoginPage(props: { searchParams: Promise<{ next?: string }> }) {
   const session = await getSession();
-  if (session) redirect(homeFor(session.role));
+  if (session) redirect(await homeForUser());
   const { next } = await props.searchParams;
   return (
     <main className="flex-1 flex items-center justify-center p-6">

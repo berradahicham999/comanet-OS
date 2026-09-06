@@ -7,9 +7,11 @@ import { listBrands } from "@/lib/users";
 import { resolvePeriod, PERIOD_OPTIONS, type PeriodParam } from "@/lib/periods";
 import { PageHeader, Card, Kpi, Badge, BrandDot, Section, Empty, Tabs } from "@/components/ui";
 import { SimpleLine } from "@/components/charts";
-import { fmtMAD, fmtNum, fmtPct, fmtDate, fmtDateShort, delta } from "@/lib/format";
+import { fmtMAD, fmtNum, fmtPct, fmtDate, fmtDateShort, fmtTime, fmtAgo, delta } from "@/lib/format";
 import { adsByDim, kpis, diagnose, brandAverages, verdictMeta, type AdKpis } from "@/lib/ads";
-import { AD_PLATFORMS, platformLabel } from "@/lib/marketing-shared";
+import { accountsFreshness, intradayTotals, liveCampaigns } from "@/lib/meta/live";
+import { AD_PLATFORMS, platformLabel, deliveryStatus } from "@/lib/marketing-shared";
+import { refreshMetaNow } from "../actions";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Digital Ads" };
@@ -26,7 +28,7 @@ export default async function AdsPage(props: { searchParams: Promise<{ brand?: s
   const platform = sp.platform && sp.platform in AD_PLATFORMS ? sp.platform : null;
   const dim: "campaign" | "ad" = sp.dim === "ad" ? "ad" : "campaign";
 
-  const [curRows, refRows, byPlatform, daily, coverage] = await Promise.all([
+  const [curRows, refRows, byPlatform, daily, coverage, freshness, intraday, live] = await Promise.all([
     adsByDim(dim, period, { brandId, platform }),
     adsByDim(dim, period.prev, { brandId, platform }),
     adsByDim("platform", period, { brandId }),
@@ -34,16 +36,31 @@ export default async function AdsPage(props: { searchParams: Promise<{ brand?: s
       select date::text as date, coalesce(sum(spend),0)::float8 as spend, coalesce(sum(revenue),0)::float8 as revenue,
              coalesce(sum(purchases),0)::int as purchases, coalesce(sum(impressions),0)::float8 as impressions
       from ad_metrics
-      where date >= ${period.start}::date and date < ${period.end}::date
+      where date >= ${period.start}::date and date < ${period.end}::date and is_partial = false
         ${brandId ? sql`and brand_id = ${brandId}::uuid` : sql``} ${platform ? sql`and platform = ${platform}` : sql``}
       group by 1 order by 1`),
-    db.execute(sql`select min(date)::text as first_day, max(date)::text as last_day, count(*)::int as rows, count(distinct platform)::int as platforms from ad_metrics`),
+    // Les bornes affichées portent sur les journées closes ; `rows` compte tout, sinon un
+    // compte fraîchement connecté (une seule journée, en cours) tomberait sur l'écran vide.
+    db.execute(sql`
+      select min(date) filter (where not is_partial)::text as first_day,
+             max(date) filter (where not is_partial)::text as last_day,
+             count(*)::int as rows,
+             count(*) filter (where not is_partial)::int as closed_rows,
+             count(distinct platform)::int as platforms
+      from ad_metrics`),
+    accountsFreshness(),
+    intradayTotals({ brandId, platform }),
+    liveCampaigns({ brandId, platform }),
   ]);
 
   const cur = curRows.map(kpis);
   const prev = new Map(refRows.map((r) => [r.key, kpis(r)]));
   const avg = brandAverages(cur);
-  const cov = coverage.rows[0] as { first_day: string | null; last_day: string | null; rows: number; platforms: number };
+  const cov = coverage.rows[0] as { first_day: string | null; last_day: string | null; rows: number; closed_rows: number; platforms: number };
+  // Au moins un compte synchronisé par API : l'écran ne parle plus d'exports de fichiers.
+  const connected = freshness.length > 0;
+  const lastSync = freshness.reduce<string | null>((a, f) => (f.lastSyncAt && (!a || f.lastSyncAt > a) ? f.lastSyncAt : a), null);
+  const inError = freshness.filter((f) => f.syncStatus === "ERROR");
 
   const totals = cur.reduce((a, r) => ({
     spend: a.spend + r.spend, revenue: a.revenue + r.revenue, purchases: a.purchases + r.purchases,
@@ -71,18 +88,18 @@ export default async function AdsPage(props: { searchParams: Promise<{ brand?: s
   if (cov.rows === 0) {
     return (
       <>
-        <PageHeader eyebrow="Marketing Command Center" title="Digital Ads" subtitle="Analyse des campagnes Meta, TikTok et Google à partir des exports de régie." actions={<Link href="/imports?type=ADS" className="btn-primary btn-sm">Importer un export</Link>} />
+        <PageHeader eyebrow="Marketing Command Center" title="Digital Ads" subtitle="Dépenses et performance des campagnes Meta, en continu depuis la régie." actions={<><Link href="/marketing/ads/comptes" className="btn-primary btn-sm">Connecter Meta</Link><Link href="/imports?type=ADS" className="btn-secondary btn-sm">Importer un export</Link></>} />
         <Card>
           <Empty
-            title="Aucune donnée publicitaire importée"
+            title="Aucune donnée publicitaire"
             hint={
               <span className="block max-w-2xl">
-                Exportez depuis votre régie un tableau <b>par jour</b> (une ligne = un jour × une campagne, ou × une publicité si vous voulez le détail créative) avec au minimum : date, nom de campagne, montant dépensé — et si possible impressions, couverture, clics sur le lien, achats et valeur de conversion.
+                <b>Le plus simple : connecter le compte Meta.</b> La dépense et les conversions remontent alors toutes les heures, sans export à refaire. Deux prérequis, tous les deux sur l&apos;écran <i>Comptes publicitaires</i> : un jeton de lecture Meta, et le taux de conversion vers le dirham pour les comptes facturés en euros ou en dollars.
                 <br /><br />
-                Sur Meta : <i>Gestionnaire de publicités → Rapports → Ventilation par jour → Exporter</i>. Nommez vos campagnes en commençant par la marque (ex : « KLORANE — Acquisition mars ») pour que le rattachement soit automatique.
+                <b>Sinon, par fichier.</b> Exportez depuis votre régie un tableau <b>par jour</b> (une ligne = un jour × une campagne, ou × une publicité si vous voulez le détail créative) avec au minimum : date, nom de campagne, montant dépensé — et si possible impressions, couverture, clics sur le lien, achats et valeur de conversion. Sur Meta : <i>Gestionnaire de publicités → Rapports → Ventilation par jour → Exporter</i>.
               </span>
             }
-            action={<Link href="/imports?type=ADS" className="btn-primary btn-sm">Importer maintenant</Link>}
+            action={<Link href="/marketing/ads/comptes" className="btn-primary btn-sm">Connecter Meta</Link>}
           />
         </Card>
       </>
@@ -94,8 +111,12 @@ export default async function AdsPage(props: { searchParams: Promise<{ brand?: s
       <PageHeader
         eyebrow="Marketing Command Center"
         title="Digital Ads"
-        subtitle={`${period.label} · ${fmtNum(cov.rows)} lignes en base du ${fmtDate(cov.first_day)} au ${fmtDate(cov.last_day)}`}
-        actions={<><Link href="/marketing" className="btn-secondary btn-sm">Vue d&apos;ensemble</Link><Link href="/imports?type=ADS" className="btn-primary btn-sm">Importer un export</Link></>}
+        subtitle={
+          connected
+            ? `${period.label} · synchronisation Meta ${fmtAgo(lastSync)} · ${fmtNum(cov.closed_rows)} lignes closes jusqu'au ${fmtDate(cov.last_day)}`
+            : `${period.label} · ${fmtNum(cov.rows)} lignes importées du ${fmtDate(cov.first_day)} au ${fmtDate(cov.last_day)}`
+        }
+        actions={<><Link href="/marketing" className="btn-secondary btn-sm">Vue d&apos;ensemble</Link><Link href="/marketing/ads/comptes" className="btn-secondary btn-sm">Comptes</Link><Link href="/imports?type=ADS" className="btn-primary btn-sm">Importer un export</Link></>}
       >
         <form className="flex flex-wrap items-end gap-2 mb-3">
           {brandId && <input type="hidden" name="brand" value={brandId} />}
@@ -117,8 +138,103 @@ export default async function AdsPage(props: { searchParams: Promise<{ brand?: s
         <Tabs current={brandId ? `/marketing/ads?brand=${brandId}` : "/marketing/ads"} tabs={[{ href: "/marketing/ads", label: "Toutes les marques" }, ...brands.map((b) => ({ href: `/marketing/ads?brand=${b.id}`, label: b.name }))]} />
       </PageHeader>
 
+      {connected && (
+        <Section
+          title="Journée en cours"
+          description="Chiffres relevés dans la régie, non définitifs : la dépense est déjà enregistrée, les conversions remontent plus tard. Ils n'entrent dans aucune moyenne ni comparaison de cette page."
+          action={
+            <form action={refreshMetaNow}>
+              <button className="btn-secondary btn-sm" type="submit">Actualiser maintenant</button>
+            </form>
+          }
+        >
+          <Card>
+            {intraday ? (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                  <Kpi label="Dépense depuis ce matin" value={fmtMAD(intraday.spend)} sub={`relevée à ${fmtTime(intraday.syncedAt)}`} />
+                  <Kpi label="Impressions" value={fmtNum(intraday.impressions)} />
+                  <Kpi label="Clics" value={fmtNum(intraday.clicks)} sub={intraday.impressions > 0 ? `CTR ${fmtPct((intraday.clicks / intraday.impressions) * 100, 2)}` : undefined} />
+                  <Kpi label="Achats remontés" value={fmtNum(intraday.purchases)} sub="peut encore augmenter" />
+                  <Kpi label="CA remonté par la régie" value={fmtMAD(intraday.revenue)} sub="valeur de conversion déclarée" />
+                </div>
+                <p className="text-[11.5px] text-faint mt-2">
+                  Ni CPA ni ROAS ne sont calculés sur la journée en cours : la dépense est déjà comptée alors que les conversions arrivent plusieurs heures après, le rapport des deux serait faux. Journée du {intraday.dates.map((d) => fmtDate(d)).join(", ")}, découpée dans le fuseau de chaque compte publicitaire.
+                </p>
+              </>
+            ) : (
+              <Empty
+                title="Aucune diffusion enregistrée aujourd'hui"
+                hint="Soit rien ne tourne en ce moment, soit la première synchronisation de la journée n'a pas encore eu lieu. Le tableau d'état ci-dessous dit lequel des deux."
+              />
+            )}
+
+            <div className="mt-3 pt-3 border-t border-line flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[11.5px]">
+              <span className="text-muted">Dernier relevé par compte :</span>
+              {freshness.map((f) => (
+                <span key={f.id} className="inline-flex items-center gap-1.5">
+                  <Badge tone={f.syncStatus === "ERROR" ? "red" : f.syncing ? "blue" : "green"} dot>{f.name}</Badge>
+                  <span className="text-faint">{f.syncing ? "synchronisation en cours" : fmtAgo(f.lastSyncAt)}</span>
+                </span>
+              ))}
+            </div>
+
+            {inError.length > 0 && (
+              <div className="mt-3 rounded-xl border border-red/40 bg-red-soft/40 px-3 py-2 text-[12.5px] space-y-1">
+                {inError.map((f) => (
+                  <div key={f.id}><b>{f.name}</b> — {f.lastError}</div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </Section>
+      )}
+
+      {live.length > 0 && (
+        <Section
+          title="État de diffusion"
+          description="Relevé auprès de Meta à chaque synchronisation. Une campagne active qui n'a rien dépensé depuis ce matin est visible ici, alors qu'elle est absente de tous les chiffres."
+        >
+          <Card className="min-w-0">
+            <div className="overflow-x-auto">
+              <table className="tbl text-[12.5px]">
+                <thead>
+                  <tr>
+                    <th>Campagne</th><th>Compte</th><th>État</th>
+                    <th className="num">Budget / jour</th><th className="num">Dépensé aujourd&apos;hui</th>
+                    <th className="num">Rythme</th><th className="num">Achats</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {live.map((c) => {
+                    const st = deliveryStatus(c.effectiveStatus, c.status);
+                    // Un rythme au-delà de 100 % du budget quotidien n'est pas une anomalie :
+                    // Meta s'autorise à dépasser le budget d'un jour et compense sur la semaine.
+                    const pace = c.budgetPace;
+                    return (
+                      <tr key={c.externalCampaignId}>
+                        <td className="max-w-[280px] truncate">{c.name}</td>
+                        <td className="text-muted">{c.accountName ?? "—"}</td>
+                        <td><Badge tone={st.tone}>{st.label}</Badge></td>
+                        <td className="num">{c.dailyBudget !== null ? fmtMAD(c.dailyBudget, { suffix: false }) : <span className="text-faint" title="Budget porté par les ensembles de publicités, pas par la campagne">—</span>}</td>
+                        <td className="num font-medium">{c.spendToday > 0 ? fmtMAD(c.spendToday, { suffix: false }) : <span className="text-faint">—</span>}</td>
+                        <td className={`num ${pace !== null && pace >= 1 ? "text-orange" : ""}`}>{pace !== null ? fmtPct(pace * 100) : <span className="text-faint">non mesurable</span>}</td>
+                        <td className="num">{c.purchasesToday || <span className="text-faint">—</span>}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[11.5px] text-faint mt-2">
+              Le rythme est la part du budget quotidien déjà consommée à l&apos;heure du relevé. Il décrit ce qui s&apos;est passé, il n&apos;annonce pas la dépense de fin de journée. Sans budget au niveau de la campagne, il n&apos;est pas mesurable.
+            </p>
+          </Card>
+        </Section>
+      )}
+
       <div className="grid lg:grid-cols-3 gap-4">
-        <Card className="lg:col-span-2 min-w-0" title="Dépense et CA remonté, jour par jour">
+        <Card className="lg:col-span-2 min-w-0" title="Dépense et CA remonté, jour par jour (journées closes)">
           {chart.length > 1 ? <SimpleLine data={chart} xKey="date" yKey="spend" height={200} /> : <Empty title="Un seul jour de données sur la période" hint="Élargissez la période pour voir la tendance." />}
           <p className="text-[11.5px] text-faint mt-2">Le CA affiché est celui déclaré par la régie (valeur de conversion). Il ne correspond pas au CA facturé dans Sage et peut compter plusieurs fois un même achat selon la fenêtre d&apos;attribution de la plateforme.</p>
         </Card>

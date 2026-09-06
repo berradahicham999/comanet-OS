@@ -6,11 +6,15 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
   budgets, budgetLines, campaigns, campaignProducts, marketingExpenses, contentItems,
-  influencers, collaborations, adCreatives,
+  influencers, collaborations, adCreatives, campaignAdLinks, adAccounts,
   type BudgetCategory, type ContentStatus,
 } from "@/db/schema";
 import { requireAccess } from "@/lib/access";
 import { categoryFromLabel } from "@/lib/budget-categories";
+import { matchKeyFor, backfillLink, clearLink } from "@/lib/meta/links";
+import { syncAccount, syncAll } from "@/lib/meta/sync";
+import { hasMetaToken, listAccounts } from "@/lib/meta/client";
+import { getSettings, saveSettings } from "@/lib/settings";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim() || null;
 const num = (fd: FormData, k: string) => { const s = String(fd.get(k) ?? "").replace(/\s/g, "").replace(",", "."); const n = Number(s); return s === "" || Number.isNaN(n) ? null : n; };
@@ -217,4 +221,178 @@ export async function deleteContent(formData: FormData) {
   const id = str(formData, "id"); if (!id) return;
   await db.delete(contentItems).where(eq(contentItems.id, id));
   revalidatePath("/marketing/planning");
+}
+
+/* ------------------------------------------------------------------ */
+/* Régie Meta : rattachement et synchronisation                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Rattache une ou plusieurs campagnes de régie à une campagne COMANET.
+ *
+ * Chaque case cochée porte `platform|externalCampaignId|nom` : l'identifiant peut être vide
+ * (lignes venues d'un import fichier, qui n'en portent pas), auquel cas on rattache par nom.
+ */
+export async function linkAdCampaigns(formData: FormData) {
+  await requireAccess("marketing");
+  const campaignId = str(formData, "campaignId");
+  if (!campaignId) return;
+  const picks = formData.getAll("pick").map(String).filter(Boolean);
+  if (!picks.length) return;
+
+  for (const raw of picks) {
+    const sep = raw.indexOf("|");
+    const sep2 = raw.indexOf("|", sep + 1);
+    if (sep < 0 || sep2 < 0) continue;
+    const platform = raw.slice(0, sep);
+    const externalCampaignId = raw.slice(sep + 1, sep2) || null;
+    const name = raw.slice(sep2 + 1);
+    if (!platform || !name) continue;
+
+    await db
+      .insert(campaignAdLinks)
+      .values({
+        campaignId, platform, externalCampaignId, externalCampaignName: name,
+        matchKey: matchKeyFor(externalCampaignId, name),
+        accountId: str(formData, "accountId"),
+      })
+      // Une campagne de régie n'appartient qu'à une campagne COMANET : re-cocher la déplace.
+      .onConflictDoUpdate({
+        target: [campaignAdLinks.platform, campaignAdLinks.matchKey],
+        set: { campaignId, externalCampaignName: name, externalCampaignId },
+      });
+
+    await backfillLink({ campaignId, platform, externalCampaignId, externalCampaignName: name });
+  }
+  revalidatePath(`/marketing/campagnes/${campaignId}`);
+  revalidatePath("/marketing/campagnes");
+  revalidatePath("/marketing/ads");
+}
+
+export async function unlinkAdCampaign(formData: FormData) {
+  await requireAccess("marketing");
+  const linkId = str(formData, "linkId");
+  const campaignId = str(formData, "campaignId");
+  if (!linkId) return;
+  await clearLink(linkId);
+  if (campaignId) revalidatePath(`/marketing/campagnes/${campaignId}`);
+  revalidatePath("/marketing/campagnes");
+  revalidatePath("/marketing/ads");
+}
+
+/** Déclare (ou met à jour) un compte publicitaire Meta et son activation de synchronisation. */
+export async function saveAdAccount(formData: FormData) {
+  await requireAccess("marketing");
+  const externalId = str(formData, "externalId");
+  const name = str(formData, "name");
+  if (!externalId || !name) return;
+  const values = {
+    platform: "META",
+    name,
+    externalId: externalId.replace(/^act_/, ""),
+    brandId: str(formData, "brandId"),
+    businessId: str(formData, "businessId"),
+    businessName: str(formData, "businessName"),
+    currency: str(formData, "currency") ?? "MAD",
+    syncEnabled: formData.get("syncEnabled") === "on",
+  };
+  await db
+    .insert(adAccounts)
+    .values(values)
+    .onConflictDoUpdate({
+      target: [adAccounts.platform, adAccounts.externalId],
+      set: {
+        name: values.name, brandId: values.brandId, syncEnabled: values.syncEnabled,
+        businessId: values.businessId, businessName: values.businessName, currency: values.currency,
+      },
+    });
+  revalidatePath("/marketing/ads/comptes");
+}
+
+export async function setAdAccountSync(formData: FormData) {
+  await requireAccess("marketing");
+  const id = str(formData, "id");
+  if (!id) return;
+  const enabled = str(formData, "enabled") === "1";
+  await db.update(adAccounts).set({ syncEnabled: enabled }).where(eq(adAccounts.id, id));
+  revalidatePath("/marketing/ads/comptes");
+}
+
+/** Synchronisation immédiate d'un compte, sans attendre le passage quotidien. */
+export async function syncAdAccountNow(formData: FormData) {
+  await requireAccess("marketing");
+  const id = str(formData, "id");
+  if (!id) return;
+  const rows = await db
+    .select({ id: adAccounts.id, name: adAccounts.name, externalId: adAccounts.externalId, brandId: adAccounts.brandId, currency: adAccounts.currency })
+    .from(adAccounts)
+    .where(eq(adAccounts.id, id));
+  const a = rows[0];
+  if (!a?.externalId) return;
+  await syncAccount({ id: a.id, name: a.name, externalId: a.externalId, brandId: a.brandId, currency: a.currency });
+  revalidatePath("/marketing/ads/comptes");
+  revalidatePath("/marketing/ads");
+}
+
+/**
+ * Rafraîchissement de la journée en cours, depuis l'écran de reporting.
+ *
+ * Mode `intraday` : seules la veille et la journée du jour sont relues. C'est le geste qu'on
+ * fait plusieurs fois par jour ; relire 28 jours à chaque clic brûlerait le quota de l'API
+ * pour deux journées qui bougent. Un compte déjà en cours de synchronisation est ignoré par
+ * le verrou, sans erreur.
+ */
+export async function refreshMetaNow() {
+  await requireAccess("marketing");
+  if (!hasMetaToken()) return;
+  await syncAll({ mode: "intraday" });
+  revalidatePath("/marketing/ads");
+  revalidatePath("/marketing/ads/comptes");
+}
+
+/**
+ * Découverte des comptes auxquels le jeton donne accès, enregistrés sans être activés :
+ * activer une synchronisation reste un choix explicite (chaque compte consomme du quota).
+ */
+export async function discoverAdAccounts() {
+  await requireAccess("marketing");
+  if (!hasMetaToken()) return;
+  const found = await listAccounts();
+  for (const a of found) {
+    await db
+      .insert(adAccounts)
+      .values({
+        platform: "META", name: a.name, externalId: a.accountId, currency: a.currency,
+        timezone: a.timezone, businessId: a.businessId, businessName: a.businessName,
+      })
+      .onConflictDoUpdate({
+        target: [adAccounts.platform, adAccounts.externalId],
+        set: {
+          name: a.name, currency: a.currency, timezone: a.timezone,
+          businessId: a.businessId, businessName: a.businessName,
+        },
+      });
+  }
+  revalidatePath("/marketing/ads/comptes");
+}
+
+/**
+ * Taux de conversion vers le MAD.
+ *
+ * Meta facture les comptes COMANET en EUR et en USD. Aucun taux n'est deviné par
+ * l'application : tant qu'une devise n'a pas de taux ici, la synchronisation du compte
+ * concerné est refusée plutôt que de produire une dépense en dirhams inventée.
+ */
+export async function saveFxRates(formData: FormData) {
+  await requireAccess("marketing");
+  const cur = await getSettings();
+  const rates: Record<string, number> = { ...cur.fxRates };
+  for (const code of ["EUR", "USD"]) {
+    const v = num(formData, `fx_${code}`);
+    if (v !== null && v > 0) rates[code] = v;
+    else delete rates[code];
+  }
+  await saveSettings({ ...cur, fxRates: rates });
+  revalidatePath("/marketing/ads/comptes");
+  revalidatePath("/marketing/ads");
 }

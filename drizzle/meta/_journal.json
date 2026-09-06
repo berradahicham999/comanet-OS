@@ -43,6 +43,27 @@
       "when": 1788880000000,
       "tag": "0005_medical",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788940000000,
+      "tag": "0006_rbac",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789000000000,
+      "tag": "0007_meta_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789060000000,
+      "tag": "0008_meta_intraday",
+      "breakpoints": true
     }
   ]
 }

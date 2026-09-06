@@ -75,6 +75,31 @@ export const AD_VERDICTS = {
 };
 export type AdVerdict = keyof typeof AD_VERDICTS;
 
+/**
+ * État de diffusion réel d'une campagne, tel que Meta l'applique (`effective_status`).
+ *
+ * Ce n'est pas la même chose que ce que l'annonceur a demandé : un compte impayé ou une
+ * publicité refusée arrête la diffusion sans que le `status` de la campagne change.
+ */
+export const DELIVERY_STATUSES: Record<string, { label: string; tone: "green" | "gray" | "orange" | "red" | "blue"; delivering: boolean }> = {
+  ACTIVE: { label: "Diffusion active", tone: "green", delivering: true },
+  PAUSED: { label: "En pause", tone: "gray", delivering: false },
+  CAMPAIGN_PAUSED: { label: "Campagne en pause", tone: "gray", delivering: false },
+  ADSET_PAUSED: { label: "Ensemble de publicités en pause", tone: "gray", delivering: false },
+  IN_PROCESS: { label: "En cours de traitement", tone: "blue", delivering: false },
+  PENDING_REVIEW: { label: "En attente de validation", tone: "blue", delivering: false },
+  PREAPPROVED: { label: "Pré-validée", tone: "blue", delivering: false },
+  WITH_ISSUES: { label: "Problème de diffusion", tone: "orange", delivering: false },
+  DISAPPROVED: { label: "Refusée par Meta", tone: "red", delivering: false },
+  PENDING_BILLING_INFO: { label: "Moyen de paiement manquant", tone: "red", delivering: false },
+  ARCHIVED: { label: "Archivée", tone: "gray", delivering: false },
+  DELETED: { label: "Supprimée", tone: "gray", delivering: false },
+};
+
+export function deliveryStatus(effective: string | null, fallback: string) {
+  return DELIVERY_STATUSES[effective ?? fallback] ?? { label: effective ?? fallback, tone: "gray" as const, delivering: false };
+}
+
 export function campaignTypeLabel(t: string) {
   return CAMPAIGN_TYPES[t as CampaignType] ?? t;
 }

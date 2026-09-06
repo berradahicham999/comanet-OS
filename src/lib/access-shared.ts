@@ -1,44 +1,78 @@
-import type { UserRole } from "@/db/schema";
+/**
+ * Catalogue des modules de COMANET OS (partagé client/serveur).
+ *
+ * Ce fichier ne décide plus QUI a accès à QUOI : les droits vivent en base
+ * (`roles` → `role_permissions` → `user_roles`) et se résolvent via
+ * `src/lib/permissions.ts`. Il ne reste ici que la liste des modules, leurs
+ * libellés et leur regroupement, qui servent à semer et à afficher la matrice
+ * de permissions dans Paramètres.
+ */
+
+export const MODULE_KEYS = [
+  "cockpit",
+  "actions",
+  "ventes",
+  "clients",
+  "produits",
+  "marques",
+  "stock",
+  "terrain",
+  "terrain_animatrices",
+  "reglementaire",
+  "marketing",
+  "medical",
+  "medical_admin",
+  "taches",
+  "imports",
+  "parametres",
+  "recherche",
+] as const;
+
+export type ModuleKey = (typeof MODULE_KEYS)[number];
+
+export const MODULE_LABELS: Record<ModuleKey, string> = {
+  cockpit: "Cockpit",
+  actions: "Action Center",
+  ventes: "Ventes",
+  clients: "Clients",
+  produits: "Produits",
+  marques: "Marques",
+  stock: "Stock & achats",
+  terrain: "Terrain",
+  terrain_animatrices: "Terrain — animatrices",
+  reglementaire: "Réglementaire",
+  marketing: "Marketing",
+  medical: "Médical",
+  medical_admin: "Médical — administration",
+  taches: "Tâches",
+  imports: "Imports Sage",
+  parametres: "Paramètres",
+  recherche: "Recherche",
+};
+
+/** Les 7 grandes catégories, pour présenter la matrice de permissions. */
+export const MODULE_GROUPS: { title: string; modules: ModuleKey[] }[] = [
+  { title: "Pilotage", modules: ["cockpit", "actions", "recherche"] },
+  { title: "Commercial", modules: ["ventes", "clients", "produits", "marques", "stock"] },
+  { title: "Marketing", modules: ["marketing"] },
+  { title: "Terrain", modules: ["terrain", "terrain_animatrices"] },
+  { title: "Médical", modules: ["medical", "medical_admin"] },
+  { title: "Conformité & exécution", modules: ["reglementaire", "taches"] },
+  { title: "Système", modules: ["imports", "parametres"] },
+];
 
 /**
- * Modules de l'application et rôles autorisés (partagé client/serveur).
- * ADMIN (DG) a accès à tout.
+ * Description des modules dont la portée n'est pas évidente, affichée dans la matrice.
+ * Les deux modules « _admin » remplacent les exceptions qui étaient codées en dur par
+ * nom de rôle avant ce chantier.
  */
-export const MODULES = {
-  cockpit: ["ADMIN", "MARKETING", "TRADE", "REGLEMENTAIRE"],
-  actions: ["ADMIN", "MARKETING", "TRADE", "REGLEMENTAIRE"],
-  ventes: ["ADMIN", "TRADE", "MARKETING"],
-  clients: ["ADMIN", "TRADE"],
-  produits: ["ADMIN", "MARKETING", "TRADE", "REGLEMENTAIRE"],
-  marques: ["ADMIN", "MARKETING", "TRADE", "REGLEMENTAIRE"],
-  stock: ["ADMIN", "TRADE", "MARKETING"],
-  terrain: ["ADMIN", "TRADE", "ANIMATRICE"],
-  reglementaire: ["ADMIN", "REGLEMENTAIRE"],
-  marketing: ["ADMIN", "MARKETING"],
-  medical: ["ADMIN", "MANAGER_MEDICAL", "DELEGUE_MEDICAL"],
-  taches: ["ADMIN", "MARKETING", "TRADE", "REGLEMENTAIRE", "ANIMATRICE", "MANAGER_MEDICAL", "DELEGUE_MEDICAL"],
-  imports: ["ADMIN", "TRADE"],
-  parametres: ["ADMIN"],
-  recherche: ["ADMIN", "MARKETING", "TRADE", "REGLEMENTAIRE"],
-} as const satisfies Record<string, readonly UserRole[]>;
+export const MODULE_HINTS: Partial<Record<ModuleKey, string>> = {
+  terrain_animatrices: "Fiches et performances des animatrices, en plus de l'accès Terrain.",
+  medical_admin: "Délégués, secteurs, spécialités et paramétrage médical, en plus de l'accès Médical.",
+  parametres: "L'action « administrer » est requise pour modifier rôles, permissions et périmètres.",
+};
 
-export type ModuleKey = keyof typeof MODULES;
-
-export function canAccess(role: UserRole, module: ModuleKey) {
-  return role === "ADMIN" || (MODULES[module] as readonly UserRole[]).includes(role);
-}
-
-/** Page d'accueil par rôle. */
-export function homeFor(role: UserRole) {
-  if (role === "ANIMATRICE") return "/terrain/saisie";
-  if (role === "REGLEMENTAIRE") return "/reglementaire";
-  if (role === "MARKETING") return "/marketing";
-  if (role === "DELEGUE_MEDICAL") return "/medical/visites/saisie";
-  if (role === "MANAGER_MEDICAL") return "/medical";
-  return "/";
-}
-
-export const ROLE_LABELS: Record<UserRole, string> = {
+export const ROLE_LABELS: Record<string, string> = {
   ADMIN: "Admin / DG",
   MARKETING: "Marketing",
   REGLEMENTAIRE: "Réglementaire",

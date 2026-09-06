@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { createSession, destroySession, verifyCredentials } from "@/lib/auth";
-import { homeFor } from "@/lib/access";
+import { homeForUser } from "@/lib/access";
 
 export type LoginState = { error?: string };
 
@@ -14,7 +14,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   const user = await verifyCredentials(email, password);
   if (!user) return { error: "Identifiants incorrects." };
   await createSession(user);
-  redirect(next && next.startsWith("/") ? next : homeFor(user.role));
+  redirect(next && next.startsWith("/") ? next : await homeForUser());
 }
 
 export async function logoutAction() {

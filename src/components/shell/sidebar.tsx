@@ -1,9 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
-import { LogOut } from "lucide-react";
+import { LogOut, ChevronDown } from "lucide-react";
 import type { NavGroup } from "@/components/nav-config";
 import { NavIcon } from "./nav-icons";
 import { initials } from "@/lib/format";
@@ -15,6 +16,12 @@ export function isActive(pathname: string, href: string, exact?: boolean) {
   return pathname === href || pathname.startsWith(href + "/");
 }
 
+const COLLAPSE_KEY = "comanet-nav-collapsed";
+
+function groupIsActive(g: NavGroup, pathname: string) {
+  return g.items.some((it) => isActive(pathname, it.href, it.exact));
+}
+
 export function Sidebar({ groups, user, logout, onNavigate }: {
   groups: NavGroup[];
   user: SessionUser;
@@ -22,6 +29,29 @@ export function Sidebar({ groups, user, logout, onNavigate }: {
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(COLLAPSE_KEY);
+      if (raw) setCollapsed(JSON.parse(raw));
+    } catch {
+      // localStorage indisponible : catégories toutes dépliées par défaut
+    }
+  }, []);
+
+  function toggle(title: string) {
+    setCollapsed((prev) => {
+      const next = { ...prev, [title]: !prev[title] };
+      try {
+        window.localStorage.setItem(COLLAPSE_KEY, JSON.stringify(next));
+      } catch {
+        // ignoré si le stockage local est bloqué
+      }
+      return next;
+    });
+  }
+
   return (
     <div className="flex h-full flex-col">
       <Link href="/" onClick={onNavigate} className="flex items-center gap-2.5 px-4 h-14 shrink-0">
@@ -31,25 +61,43 @@ export function Sidebar({ groups, user, logout, onNavigate }: {
           <div className="text-[10.5px] text-muted uppercase tracking-[0.08em]">Intelligence platform</div>
         </div>
       </Link>
-      <nav className="flex-1 overflow-y-auto px-3 pb-4 space-y-4">
-        {groups.map((g) => (
-          <div key={g.title}>
-            <div className="label px-3 mb-1">{g.title}</div>
-            <div className="space-y-0.5">
-              {g.items.map((it) => {
-                // Un item plus spécifique (ex: /marketing/planning) ne doit pas activer /marketing
-                const moreSpecific = g.items.some((o) => o.href !== it.href && o.href.startsWith(it.href + "/") && isActive(pathname, o.href));
-                const active = isActive(pathname, it.href, it.exact) && !moreSpecific;
-                return (
-                  <Link key={it.href} href={it.href} onClick={onNavigate} className={clsx("nav-item", active && "nav-item-active")}>
-                    <NavIcon name={it.icon} size={17} strokeWidth={1.9} className={active ? "text-accent" : "text-muted"} />
-                    {it.label}
-                  </Link>
-                );
-              })}
+      <nav className="flex-1 overflow-y-auto px-3 pb-4 space-y-1">
+        {groups.map((g) => {
+          // Une catégorie contenant la page active reste dépliée même si elle a été repliée
+          const open = !collapsed[g.title] || groupIsActive(g, pathname);
+          return (
+            <div key={g.title} className="py-1">
+              <button
+                type="button"
+                onClick={() => toggle(g.title)}
+                aria-expanded={open}
+                className="w-full flex items-center justify-between px-3 py-1 rounded-md hover:bg-black/5 transition-colors"
+              >
+                <span className="label">{g.title}</span>
+                <ChevronDown
+                  size={14}
+                  strokeWidth={2}
+                  className={clsx("text-muted transition-transform", open ? "rotate-0" : "-rotate-90")}
+                />
+              </button>
+              {open && (
+                <div className="space-y-0.5 mt-1">
+                  {g.items.map((it) => {
+                    // Un item plus spécifique (ex: /marketing/planning) ne doit pas activer /marketing
+                    const moreSpecific = g.items.some((o) => o.href !== it.href && o.href.startsWith(it.href + "/") && isActive(pathname, o.href));
+                    const active = isActive(pathname, it.href, it.exact) && !moreSpecific;
+                    return (
+                      <Link key={it.href} href={it.href} onClick={onNavigate} className={clsx("nav-item", active && "nav-item-active")}>
+                        <NavIcon name={it.icon} size={17} strokeWidth={1.9} className={active ? "text-accent" : "text-muted"} />
+                        {it.label}
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </nav>
       <div className="border-t border-line p-3 flex items-center gap-2.5">
         <div className="h-8 w-8 rounded-full bg-accent-soft text-accent-2 text-xs font-semibold flex items-center justify-center shrink-0">

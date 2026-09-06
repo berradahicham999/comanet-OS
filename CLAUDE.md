@@ -41,6 +41,7 @@ src/components/       ui.tsx (design system), charts.tsx, nav-config.ts, shell/
 src/db/schema.ts      schéma Drizzle — source unique du modèle de données
 src/lib/              logique métier, une bibliothèque par domaine
 src/lib/import/       moteur d'import (parse → mapping → run → rollback)
+src/lib/meta/         connexion Meta Ads en lecture seule (client → sync → links)
 src/lib/rules/        moteur de recommandations (Action Center)
 drizzle/              migrations SQL + meta/_journal.json
 ```
@@ -65,7 +66,13 @@ nominatif, ou montant saisi à la main. Tout le reste s'affiche comme
 comparaison incomplète affiche « pas encore comparable » plutôt qu'un écart trompeur.
 Une donnée manquante s'affiche « — » ou « non mesurable » ; elle n'est jamais estimée.
 
-**Seuils dans `settings`**, pas en dur dans les règles.
+**Seuils dans `settings`**, pas en dur dans les règles. Les **secrets** (jetons de régie)
+restent en variables d'environnement, jamais en base.
+
+**Devises.** Les comptes publicitaires Meta facturent en EUR et en USD. `ad_metrics.spend` et
+`revenue` sont toujours en MAD, convertis avec un taux **saisi** dans `settings.fxRates` ; le
+montant d'origine, la devise et le taux appliqué sont conservés sur la ligne. Sans taux
+configuré, la synchronisation est refusée — un montant en dirhams n'est jamais deviné.
 
 **Français partout** : libellés, commentaires de code, messages d'erreur, noms de colonnes
 affichés. Les identifiants techniques restent en anglais.
@@ -88,6 +95,12 @@ Un seul moteur pour tous les types : `src/lib/import/`.
 
 Types : `SALES`, `CLIENTS`, `PRODUCTS`, `STOCK`, `OBJECTIVES`, `BUDGETS`, `REGULATORY`,
 `ANIMATIONS`, `ANIM_OBJECTIVES`, `ADS`.
+
+Pour les publicités, `src/lib/meta/` fait la même chose par API et suit les mêmes conventions
+(clé de dédoublonnage stable, lots, `import_id`/`source`). La synchro relit une **fenêtre
+glissante** de 28 jours : Meta révise ses conversions plusieurs jours après coup. Sur une
+période synchronisée, les lignes du même compte issues d'un import fichier sont supprimées —
+elles décriraient les mêmes journées sous une autre clé.
 
 Conventions à respecter pour tout nouvel import :
 

@@ -4,7 +4,7 @@ import * as s from "@/db/schema";
 import { saleLineHash } from "@/lib/hash";
 import { categoryFromLabel } from "@/lib/budget-categories";
 import { cleanText, inferClientType, normKey, toISODate, toNumber } from "./normalize";
-import { matchBrand, matchClient, matchProduct, type ClientCandidate, type ProductCandidate } from "./match";
+import { matchBrand, matchBrandInText, matchClient, matchProduct, type ClientCandidate, type ProductCandidate } from "./match";
 import { isComputedColumn, type ImportType } from "./fields";
 import { normalizeCity, animationKey, animatriceName, animatriceEmail } from "@/lib/animations-shared";
 import { normalizePlatform } from "@/lib/marketing-shared";
@@ -88,17 +88,7 @@ class Resolver {
 
   /** Marque citée à l'intérieur d'un libellé libre (nom de campagne publicitaire, par ex.). */
   brandInText(text: string | null): string | null {
-    if (!text) return null;
-    const direct = matchBrand(text, this.brands);
-    if (direct) return direct;
-    const key = normKey(text);
-    for (const b of this.brands) {
-      for (const cand of [b.name, ...b.aliases]) {
-        const k = normKey(cand);
-        if (k.length >= 3 && new RegExp(`(^|[^A-Z0-9])${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^A-Z0-9]|$)`).test(key)) return b.id;
-      }
-    }
-    return null;
+    return matchBrandInText(text, this.brands);
   }
 
   async createBrand(name: string) {

@@ -58,9 +58,16 @@ export function kpis(r: AdRow): AdKpis {
   };
 }
 
-/** Agrégat des métriques publicitaires sur une période, par campagne ou par publicité. */
-export async function adsByDim(dim: "campaign" | "ad" | "platform" | "brand", range: Range, filter?: { brandId?: string | null; platform?: string | null }): Promise<AdRow[]> {
+/**
+ * Agrégat des métriques publicitaires sur une période, par campagne ou par publicité.
+ *
+ * La journée en cours est exclue par défaut : sa dépense est déjà enregistrée alors que ses
+ * conversions arriveront plus tard, donc elle dégraderait mécaniquement tout CPA et tout ROAS
+ * comparés. Elle s'affiche à part, jamais mélangée à des périodes closes.
+ */
+export async function adsByDim(dim: "campaign" | "ad" | "platform" | "brand", range: Range, filter?: { brandId?: string | null; platform?: string | null; includePartial?: boolean }): Promise<AdRow[]> {
   const where = sql`m.date >= ${range.start}::date and m.date < ${range.end}::date
+    ${filter?.includePartial ? sql`` : sql`and m.is_partial = false`}
     ${filter?.brandId ? sql`and m.brand_id = ${filter.brandId}::uuid` : sql``}
     ${filter?.platform ? sql`and m.platform = ${filter.platform}` : sql``}`;
   const key =

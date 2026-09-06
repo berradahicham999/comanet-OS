@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireAccess } from "@/lib/access";
-import { canAccess, type ModuleKey } from "@/lib/access-shared";
+import { requireAccess, getUserPermissions, can } from "@/lib/access";
+import { type ModuleKey } from "@/lib/access-shared";
 import { PageHeader, Card, Badge, BrandDot } from "@/components/ui";
 import { normKey } from "@/lib/import/normalize";
 import { fmtMAD, fmtDateShort } from "@/lib/format";
@@ -11,7 +11,8 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Recherche" };
 
 export default async function RecherchePage(props: { searchParams: Promise<{ q?: string }> }) {
-  const user = await requireAccess("recherche");
+  await requireAccess("recherche");
+  const perms = await getUserPermissions();
   const { q = "" } = await props.searchParams;
   const key = normKey(q);
   if (!key) return <PageHeader eyebrow="Recherche universelle" title="Rechercher" subtitle="Produit, client, marque, dossier réglementaire, tâche, campagne, contenu…" />;
@@ -35,7 +36,7 @@ export default async function RecherchePage(props: { searchParams: Promise<{ q?:
     { title: "Tâches", module: "taches", rows: tasks.rows as R[], render: (r) => <Link href={`/taches/${r.id}`} className="card px-4 py-3 flex items-center gap-3 hover:border-line-2"><span className="font-medium flex-1 truncate">{r.title}</span><span className="text-[12px] text-muted">{r.assignee}</span><Badge tone="gray">{r.status}</Badge></Link> },
     { title: "Campagnes", module: "marketing", rows: campaigns.rows as R[], render: (r) => <Link href={`/marketing/campagnes/${r.id}`} className="card px-4 py-3 flex items-center gap-3 hover:border-line-2"><span className="font-medium flex-1 truncate">{r.name}</span><span className="text-[12px] text-muted">{r.brand}</span><Badge tone="gray">{r.status}</Badge></Link> },
     { title: "Contenus", module: "marketing", rows: contents.rows as R[], render: (r) => <Link href={`/marketing/planning?month=${String(r.date).slice(0, 7)}`} className="card px-4 py-3 flex items-center gap-3 hover:border-line-2"><span className="font-medium flex-1 truncate">{r.title}</span><span className="text-[12px] text-muted">{r.brand} · {fmtDateShort(r.date as string)}</span><Badge tone="gray">{r.status}</Badge></Link> },
-  ] as Section[]).filter((s) => canAccess(user.role, s.module));
+  ] as Section[]).filter((s) => can(perms, s.module, "view"));
   const total = sections.reduce((a, s) => a + s.rows.length, 0);
   return (
     <>

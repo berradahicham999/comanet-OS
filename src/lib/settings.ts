@@ -42,6 +42,17 @@ export type ComanetSettings = {
   medicalOverdueVisitDays: number;
   /** Nombre moyen d'échantillons distribués par visite (pour la prévision de stock). */
   medicalSamplesPerVisitDefault: number;
+  /**
+   * Taux de conversion vers le MAD, par devise (ex. { EUR: 10.85, USD: 9.9 }).
+   * Les comptes publicitaires COMANET facturent en EUR et en USD. Aucun taux n'est deviné :
+   * tant qu'une devise n'est pas renseignée ici, la synchronisation de ce compte est refusée
+   * plutôt que d'inventer un montant en dirhams.
+   */
+  fxRates: Record<string, number>;
+  /** Fenêtre d'attribution demandée à Meta. Un CA mesuré n'est comparable qu'à fenêtre égale. */
+  metaAttributionWindow: string;
+  /** Nombre de jours re-synchronisés à chaque passage : Meta révise ses conversions a posteriori. */
+  metaSyncWindowDays: number;
 };
 
 export const DEFAULT_SETTINGS: ComanetSettings = {
@@ -62,6 +73,9 @@ export const DEFAULT_SETTINGS: ComanetSettings = {
   medicalDefaultVisitFrequencyDays: 30,
   medicalOverdueVisitDays: 60,
   medicalSamplesPerVisitDefault: 1,
+  fxRates: {},
+  metaAttributionWindow: "7d_click,1d_view",
+  metaSyncWindowDays: 28,
 };
 
 export const SETTINGS_KEY = "comanet.rules";

@@ -117,3 +117,25 @@ export function matchBrand(
   }
   return null;
 }
+
+/**
+ * Marque citée à l'intérieur d'un libellé libre — nom de campagne publicitaire, par exemple :
+ * « TOF auracos march_26 », « Awareness gamarde sabo/solaire ». La marque peut se trouver
+ * n'importe où, d'où la recherche sur limites de mots plutôt qu'en préfixe.
+ */
+export function matchBrandInText(
+  text: string | null,
+  brands: { id: string; name: string; aliases: string[] }[],
+): string | null {
+  if (!text) return null;
+  const direct = matchBrand(text, brands);
+  if (direct) return direct;
+  const key = normKey(text);
+  for (const b of brands) {
+    for (const cand of [b.name, ...b.aliases]) {
+      const k = normKey(cand);
+      if (k.length >= 3 && new RegExp(`(^|[^A-Z0-9])${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^A-Z0-9]|$)`).test(key)) return b.id;
+    }
+  }
+  return null;
+}

@@ -24,6 +24,7 @@ import {
   uniqueIndex,
   primaryKey,
   customType,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 
@@ -31,6 +32,11 @@ import { relations, sql } from "drizzle-orm";
 /* Enums                                                               */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Rôle « legacy » : conservé pour la session et les contraintes existantes,
+ * tenu à jour sur le rôle système prioritaire. Les permissions réelles
+ * viennent de `user_roles` → `role_permissions`, jamais de cette colonne.
+ */
 export const userRoleEnum = pgEnum("user_role", [
   "ADMIN",
   "MARKETING",
@@ -40,6 +46,9 @@ export const userRoleEnum = pgEnum("user_role", [
   "DELEGUE_MEDICAL",
   "MANAGER_MEDICAL",
 ]);
+
+/** Étendue des données visibles : toutes, celles de son équipe, ou les siennes seules. */
+export const dataScopeEnum = pgEnum("data_scope", ["ALL", "TEAM", "OWN"]);
 
 export const clientTypeEnum = pgEnum("client_type", [
   "PHARMACIE",
@@ -190,9 +199,125 @@ export const users = pgTable("users", {
   role: userRoleEnum("role").notNull().default("TRADE"),
   /** Ville de rattachement (animatrices : sert au rapprochement avec les objectifs par ville). */
   city: text("city"),
+  phone: text("phone"),
+  jobTitle: text("job_title"),
+  /** Responsable hiérarchique — rend le périmètre « équipe » calculable pour tous les modules. */
+  managerId: uuid("manager_id").references((): AnyPgColumn => users.id, { onDelete: "set null" }),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/* ------------------------------------------------------------------ */
+/* Rôles, permissions, périmètres                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Rôles administrables depuis Paramètres. Les 7 rôles système (`isSystem`)
+ * reprennent les valeurs de `user_role` : renommables, jamais supprimables.
+ * `priority` départage la page d'accueil quand une personne cumule des rôles.
+ */
+export const roles = pgTable("roles", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  key: varchar("key", { length: 50 }).notNull().unique(),
+  name: text("name").notNull(),
+  description: text("description"),
+  homePath: text("home_path").notNull().default("/"),
+  priority: integer("priority").notNull().default(0),
+  isSystem: boolean("is_system").notNull().default(false),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const rolePermissions = pgTable(
+  "role_permissions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    roleId: uuid("role_id")
+      .notNull()
+      .references(() => roles.id, { onDelete: "cascade" }),
+    module: varchar("module", { length: 50 }).notNull(),
+    canView: boolean("can_view").notNull().default(false),
+    canCreate: boolean("can_create").notNull().default(false),
+    canEdit: boolean("can_edit").notNull().default(false),
+    canDelete: boolean("can_delete").notNull().default(false),
+    canExport: boolean("can_export").notNull().default(false),
+    canAdmin: boolean("can_admin").notNull().default(false),
+  },
+  (t) => [
+    uniqueIndex("role_permissions_role_module_uq").on(t.roleId, t.module),
+    index("role_permissions_role_idx").on(t.roleId),
+  ],
+);
+
+/** Une personne peut cumuler plusieurs rôles : ses droits sont l'union des leurs. */
+export const userRoles = pgTable(
+  "user_roles",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    roleId: uuid("role_id")
+      .notNull()
+      .references(() => roles.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.roleId] }), index("user_roles_role_idx").on(t.roleId)],
+);
+
+/**
+ * Périmètre de données. `module` à NULL = périmètre global de la personne ;
+ * une valeur = exception pour ce module précis. Tableaux vides = aucune restriction.
+ */
+export const userScopes = pgTable(
+  "user_scopes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    module: varchar("module", { length: 50 }),
+    dataScope: dataScopeEnum("data_scope").notNull().default("ALL"),
+    brandIds: uuid("brand_ids").array().notNull().default(sql`'{}'::uuid[]`),
+    cities: text("cities").array().notNull().default(sql`'{}'::text[]`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("user_scopes_user_module_uq").on(
+      t.userId,
+      sql`coalesce(${t.module}, '*')`,
+    ),
+    index("user_scopes_user_idx").on(t.userId),
+  ],
+);
+
+/**
+ * Journal d'activité. `actorName` est dénormalisé pour que le journal reste
+ * lisible après la suppression d'un utilisateur.
+ */
+export const auditLogs = pgTable(
+  "audit_logs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorName: text("actor_name").notNull(),
+    action: varchar("action", { length: 50 }).notNull(),
+    module: varchar("module", { length: 50 }),
+    entity: varchar("entity", { length: 50 }).notNull(),
+    entityId: uuid("entity_id"),
+    entityLabel: text("entity_label"),
+    oldValue: jsonb("old_value"),
+    newValue: jsonb("new_value"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("audit_logs_created_idx").on(t.createdAt.desc()),
+    index("audit_logs_actor_idx").on(t.actorId),
+    index("audit_logs_entity_idx").on(t.entity, t.entityId),
+    index("audit_logs_action_idx").on(t.action),
+  ],
+);
 
 /* ------------------------------------------------------------------ */
 /* Marques & produits                                                  */
@@ -871,13 +996,32 @@ export const adAccounts = pgTable(
     externalId: text("external_id"),
     brandId: uuid("brand_id").references(() => brands.id, { onDelete: "set null" }),
     currency: text("currency").notNull().default("MAD"),
+    /** Business Manager propriétaire — un jeton ne couvre que les comptes de son business. */
+    businessId: text("business_id"),
+    businessName: text("business_name"),
+    /** Fuseau du compte publicitaire : les journées de la régie y sont découpées, PAS en Africa/Casablanca. */
+    timezone: text("timezone"),
+    /** Synchronisation automatique activée (nécessite external_id + un jeton valide). */
+    syncEnabled: boolean("sync_enabled").notNull().default(false),
     lastSyncAt: timestamp("last_sync_at", { withTimezone: true }),
+    /**
+     * Verrou : posé au début d'une synchronisation, levé à la fin. Le cron horaire et le
+     * bouton « Actualiser » peuvent tomber en même temps sur le même compte ; sans verrou,
+     * deux passages liraient la même fenêtre et doubleraient la consommation de quota.
+     */
+    syncStartedAt: timestamp("sync_started_at", { withTimezone: true }),
     syncStatus: text("sync_status").notNull().default("MANUAL"), // MANUAL | OK | ERROR
     lastError: text("last_error"),
     importedRows: integer("imported_rows").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("ad_accounts_uq").on(t.platform, t.name), index("ad_accounts_brand_idx").on(t.brandId)],
+  (t) => [
+    uniqueIndex("ad_accounts_uq").on(t.platform, t.name),
+    // Un compte est identifié par son id de régie, pas par son nom : renommer un compte dans
+    // Ads Manager doit mettre à jour la ligne existante, pas en créer une seconde.
+    uniqueIndex("ad_accounts_external_uq").on(t.platform, t.externalId),
+    index("ad_accounts_brand_idx").on(t.brandId),
+  ],
 );
 
 /** Une ligne = une journée × une publicité (ou campagne si le fichier n'a pas le détail). */
@@ -902,18 +1046,83 @@ export const adMetrics = pgTable(
     leads: integer("leads").notNull().default(0),
     purchases: integer("purchases").notNull().default(0),
     revenue: numeric("revenue", { precision: 14, scale: 2 }).notNull().default("0"),
+    /** Identifiants Meta/TikTok/Google : stables même si la campagne est renommée dans la régie. */
+    externalCampaignId: text("external_campaign_id"),
+    externalAdsetId: text("external_adset_id"),
+    externalAdId: text("external_ad_id"),
+    /** Devise d'origine du compte publicitaire (EUR, USD…). `spend` et `revenue` sont TOUJOURS en MAD. */
+    currency: text("currency").notNull().default("MAD"),
+    /** Montants tels que remontés par la régie, avant conversion — trace d'audit. */
+    spendOriginal: numeric("spend_original", { precision: 14, scale: 2 }),
+    revenueOriginal: numeric("revenue_original", { precision: 14, scale: 2 }),
+    /** Taux appliqué pour obtenir les MAD (1 si la devise est déjà le MAD). Jamais deviné : saisi en Paramètres. */
+    fxRate: numeric("fx_rate", { precision: 12, scale: 6 }),
+    /** IMPORT (fichier de régie) | API (synchronisation automatique). */
+    source: text("source").notNull().default("IMPORT"),
+    /** Fenêtre d'attribution demandée à la régie (ex. « 7d_click,1d_view ») : sans elle, un CA n'est pas comparable. */
+    attributionWindow: text("attribution_window"),
+    /**
+     * Journée non close au moment de la lecture. Une ligne partielle n'entre JAMAIS dans une
+     * moyenne, un écart ou un CPA de référence : la dépense de la journée est déjà là, les
+     * conversions arrivent après. Elle s'affiche à part, avec son heure de relevé.
+     */
+    isPartial: boolean("is_partial").notNull().default(false),
+    /** Heure du dernier relevé de cette ligne — c'est la fraîcheur affichée à l'écran. */
+    syncedAt: timestamp("synced_at", { withTimezone: true }),
     dedupeKey: text("dedupe_key").notNull(),
     importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex("ad_metrics_dedupe_uq").on(t.dedupeKey),
+    index("ad_metrics_partial_idx").on(t.date, t.isPartial),
+    index("ad_metrics_external_campaign_idx").on(t.platform, t.externalCampaignId),
+    index("ad_metrics_source_idx").on(t.accountId, t.date, t.source),
     index("ad_metrics_date_idx").on(t.date),
     index("ad_metrics_brand_idx").on(t.brandId, t.date),
     index("ad_metrics_campaign_idx").on(t.campaignName),
     index("ad_metrics_account_idx").on(t.accountId),
     index("ad_metrics_campaign_id_idx").on(t.campaignId),
     index("ad_metrics_import_idx").on(t.importId),
+  ],
+);
+
+/**
+ * État de diffusion courant d'une campagne de régie — un instantané, pas un historique.
+ *
+ * `ad_metrics` est le journal des métriques par jour ; il ne dit pas si une campagne tourne
+ * encore à cet instant. C'est pourtant la question de la journée en cours : une campagne en
+ * pause ou à budget épuisé n'apparaît nulle part dans les chiffres, elle apparaît par son
+ * absence. Une ligne par campagne de régie, remplacée à chaque passage.
+ */
+export const adCampaignStates = pgTable(
+  "ad_campaign_states",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    platform: text("platform").notNull(),
+    externalCampaignId: text("external_campaign_id").notNull(),
+    accountId: uuid("account_id").references(() => adAccounts.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** Ce que l'annonceur a demandé (ACTIVE | PAUSED | ARCHIVED…). */
+    status: text("status").notNull(),
+    /** Ce que Meta applique réellement — un compte impayé met en pause sans changer `status`. */
+    effectiveStatus: text("effective_status"),
+    objective: text("objective"),
+    /** Budgets convertis en MAD avec le taux saisi, comme les dépenses. Jamais devinés. */
+    dailyBudget: numeric("daily_budget", { precision: 14, scale: 2 }),
+    lifetimeBudget: numeric("lifetime_budget", { precision: 14, scale: 2 }),
+    budgetRemaining: numeric("budget_remaining", { precision: 14, scale: 2 }),
+    /** Budget quotidien tel que remonté par la régie, avant conversion — trace d'audit. */
+    dailyBudgetOriginal: numeric("daily_budget_original", { precision: 14, scale: 2 }),
+    currency: text("currency").notNull().default("MAD"),
+    fxRate: numeric("fx_rate", { precision: 12, scale: 6 }),
+    startTime: timestamp("start_time", { withTimezone: true }),
+    stopTime: timestamp("stop_time", { withTimezone: true }),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("ad_campaign_states_uq").on(t.platform, t.externalCampaignId),
+    index("ad_campaign_states_account_idx").on(t.accountId),
   ],
 );
 
@@ -935,6 +1144,36 @@ export const adCreatives = pgTable(
     uniqueIndex("ad_creatives_uq").on(t.platform, t.adName),
     index("ad_creatives_product_idx").on(t.productId),
     index("ad_creatives_content_idx").on(t.contentId),
+  ],
+);
+
+/**
+ * Rattachement d'une campagne de régie à une campagne COMANET.
+ *
+ * Une campagne COMANET couvre souvent plusieurs campagnes Meta (prospection + retargeting),
+ * et les noms de régie ne suivent aucune convention (« gamarde », « Post: "…" »). On rattache
+ * donc sur l'identifiant externe quand il est connu (stable au renommage), sur le nom normalisé
+ * sinon — d'où `match_key`, qui porte l'un ou l'autre.
+ */
+export const campaignAdLinks = pgTable(
+  "campaign_ad_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    campaignId: uuid("campaign_id").notNull().references(() => campaigns.id, { onDelete: "cascade" }),
+    platform: text("platform").notNull(), // META | TIKTOK | GOOGLE
+    /** Identifiant de campagne dans la régie, s'il est connu (synchronisation API). */
+    externalCampaignId: text("external_campaign_id"),
+    /** Libellé au moment du rattachement, pour l'affichage. */
+    externalCampaignName: text("external_campaign_name").notNull(),
+    /** `external_campaign_id` s'il existe, sinon le nom normalisé. Une campagne de régie ne peut être rattachée qu'une fois. */
+    matchKey: text("match_key").notNull(),
+    accountId: uuid("account_id").references(() => adAccounts.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("campaign_ad_links_uq").on(t.platform, t.matchKey),
+    index("campaign_ad_links_campaign_idx").on(t.campaignId),
+    index("campaign_ad_links_account_idx").on(t.accountId),
   ],
 );
 
@@ -1198,6 +1437,12 @@ export const campaignRelations = relations(campaigns, ({ one, many }) => ({
   expenses: many(marketingExpenses),
   collaborations: many(collaborations),
   activations: many(activations),
+  adLinks: many(campaignAdLinks),
+}));
+
+export const campaignAdLinkRelations = relations(campaignAdLinks, ({ one }) => ({
+  campaign: one(campaigns, { fields: [campaignAdLinks.campaignId], references: [campaigns.id] }),
+  account: one(adAccounts, { fields: [campaignAdLinks.accountId], references: [adAccounts.id] }),
 }));
 
 export const campaignProductsRelations = relations(campaignProducts, ({ one }) => ({
@@ -1258,6 +1503,34 @@ export const contentRelations = relations(contentItems, ({ one }) => ({
   responsible: one(users, { fields: [contentItems.responsibleId], references: [users.id] }),
 }));
 
+export const usersRelations = relations(users, ({ one, many }) => ({
+  manager: one(users, { fields: [users.managerId], references: [users.id], relationName: "manager" }),
+  roles: many(userRoles),
+  scopes: many(userScopes),
+}));
+
+export const rolesRelations = relations(roles, ({ many }) => ({
+  permissions: many(rolePermissions),
+  users: many(userRoles),
+}));
+
+export const rolePermissionsRelations = relations(rolePermissions, ({ one }) => ({
+  role: one(roles, { fields: [rolePermissions.roleId], references: [roles.id] }),
+}));
+
+export const userRolesRelations = relations(userRoles, ({ one }) => ({
+  user: one(users, { fields: [userRoles.userId], references: [users.id] }),
+  role: one(roles, { fields: [userRoles.roleId], references: [roles.id] }),
+}));
+
+export const userScopesRelations = relations(userScopes, ({ one }) => ({
+  user: one(users, { fields: [userScopes.userId], references: [users.id] }),
+}));
+
+export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
+  actor: one(users, { fields: [auditLogs.actorId], references: [users.id] }),
+}));
+
 export const medicalDelegatesRelations = relations(medicalDelegates, ({ one, many }) => ({
   user: one(users, { fields: [medicalDelegates.userId], references: [users.id] }),
   manager: one(users, { fields: [medicalDelegates.managerId], references: [users.id] }),
@@ -1316,6 +1589,7 @@ export type AnimationObjective = typeof animationObjectives.$inferSelect;
 export type Campaign = typeof campaigns.$inferSelect;
 export type AdAccount = typeof adAccounts.$inferSelect;
 export type AdMetric = typeof adMetrics.$inferSelect;
+export type CampaignAdLink = typeof campaignAdLinks.$inferSelect;
 export type Influencer = typeof influencers.$inferSelect;
 export type Collaboration = typeof collaborations.$inferSelect;
 export type Activation = typeof activations.$inferSelect;
@@ -1332,7 +1606,13 @@ export type Doctor = typeof doctors.$inferSelect;
 export type DoctorVisit = typeof doctorVisits.$inferSelect;
 export type SampleMovement = typeof sampleMovements.$inferSelect;
 
+export type Role = typeof roles.$inferSelect;
+export type RolePermission = typeof rolePermissions.$inferSelect;
+export type UserScope = typeof userScopes.$inferSelect;
+export type AuditLog = typeof auditLogs.$inferSelect;
+
 export type UserRole = (typeof userRoleEnum.enumValues)[number];
+export type DataScope = (typeof dataScopeEnum.enumValues)[number];
 export type TaskStatus = (typeof taskStatusEnum.enumValues)[number];
 export type TaskPriority = (typeof taskPriorityEnum.enumValues)[number];
 export type BudgetCategory = (typeof budgetCategoryEnum.enumValues)[number];

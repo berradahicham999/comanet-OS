@@ -99,7 +99,61 @@ neutraliser complètement, supprimer `SETUP_KEY` dans Vercel : seuls les Admin c
 Vercel → projet → *Settings* → *Domains* → ajouter `os.comanet.ma`, puis créer chez le registrar l'enregistrement
 DNS indiqué (`CNAME os → cname.vercel-dns.com`). Le certificat HTTPS est automatique.
 
-## 7. Dépannage
+## 7. Connecter Meta Ads (lecture seule)
+
+COMANET OS lit les dépenses et les conversions de la régie. Il **n'écrit jamais** dans Meta :
+mettre en pause ou rebudgéter une campagne reste un geste dans Ads Manager.
+
+### a. Créer le jeton (une fois, dans Business Manager)
+
+1. [developers.facebook.com](https://developers.facebook.com/apps) → **Créer une app** → type *Business*.
+2. Business Manager → *Paramètres de l'entreprise* → **Utilisateurs système** → en créer un
+   (rôle *Employé* suffit) → **Ajouter des ressources** → cocher le ou les comptes publicitaires.
+3. **Générer un nouveau jeton** → choisir l'app → cocher **`ads_read` uniquement**.
+   Un jeton d'utilisateur système n'expire pas.
+4. Vercel → *Settings* → *Environment Variables* → `META_ACCESS_TOKEN` = le jeton,
+   plus `CRON_SECRET` (chaîne aléatoire, ex. `openssl rand -hex 24`). Redéployer.
+
+> **Un jeton ne couvre que les comptes de son business.** Les comptes COMANET sont répartis sur
+> plusieurs Business Managers (Comanet, RLI GROUP, Ainhoa Maroc, Gamarde, alphascience). Un compte
+> hors périmètre remonte une erreur d'autorisation sur sa ligne, sans bloquer les autres comptes.
+> Pour tout couvrir : rattacher les comptes au même business, ou créer un utilisateur système par business.
+
+### b. Renseigner les taux de change
+
+Les comptes publicitaires facturent en **EUR** et en **USD**, pas en MAD.
+`/marketing/ads/comptes` → *Taux de conversion vers le MAD*. **Sans taux, la synchronisation du
+compte concerné est refusée** : l'application n'invente jamais un montant en dirhams. Le taux
+appliqué et le montant d'origine sont conservés sur chaque ligne — changer le taux ne réécrit pas
+l'historique.
+
+### c. Activer les comptes
+
+`/marketing/ads/comptes` → **Découvrir mes comptes** (interroge Meta et enregistre tout, sans rien
+activer) → activer la synchro compte par compte.
+
+### d. Rattacher les campagnes
+
+`/marketing/campagnes/<campagne>` → *Campagnes de régie rattachées*. Le rattachement porte sur
+l'**identifiant** Meta : renommer la campagne côté régie ne le casse pas. Les chiffres déjà en base
+sont réappliqués immédiatement.
+
+Le rapprochement automatique par nom reste actif mais ne peut pas être fiable seul : les campagnes
+Meta ne suivent aucune convention (« gamarde », « TOF auracos march_26 », « Post: "…" ») et
+plusieurs marques cohabitent dans un même compte.
+
+### e. Fonctionnement
+
+| Point | Comportement |
+|---|---|
+| Cadence | `vercel.json` → cron quotidien à 6 h UTC sur `/api/cron/meta` |
+| Fenêtre | 28 jours glissants relus à chaque passage (Meta révise ses conversions après coup) |
+| Journée en cours | jamais comptée — incomplète, elle gonflerait le coût par achat |
+| Attribution | `7d_click,1d_view` par défaut ; deux périodes ne sont comparables qu'à fenêtre égale |
+| Doublons | sur une période synchronisée, les lignes du même compte issues d'un import fichier sont supprimées |
+| Si le passage dépasse la durée maximale | `/api/cron/meta?account=<uuid>` synchronise un seul compte, pour étaler la charge |
+
+## 8. Dépannage
 
 | Symptôme | Cause probable / solution |
 |---|---|
@@ -120,3 +174,6 @@ DNS indiqué (`CNAME os → cname.vercel-dns.com`). Le certificat HTTPS est auto
 | `SETUP_KEY` | recommandé | accès à `/installation` sans compte |
 | `DATABASE_POOL_MAX` | non | connexions par instance (défaut : 5 sur Vercel) |
 | `BUSINESS_TZ` | non | fuseau métier (défaut : `Africa/Casablanca`) |
+| `META_ACCESS_TOKEN` | pour la synchro Meta | jeton d'utilisateur système, permission `ads_read` seule. Jamais stocké en base. |
+| `CRON_SECRET` | pour la synchro Meta | protège `/api/cron/meta`, route publique sur Internet |
+| `META_API_VERSION` | non | version d'API épinglée (défaut : `v23.0`) |
