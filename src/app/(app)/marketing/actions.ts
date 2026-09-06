@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   budgets, budgetLines, campaigns, campaignProducts, marketingExpenses, contentItems,
@@ -390,7 +390,10 @@ export async function discoverAdAccounts() {
         target: [adAccounts.platform, adAccounts.externalId],
         set: {
           name: a.name, currency: a.currency, timezone: a.timezone,
-          businessId: a.businessId, businessName: a.businessName,
+          // Le business n'est plus lu (permission trop large) : ne jamais écraser
+          // avec du vide ce qui a pu être renseigné à la main.
+          businessId: sql`coalesce(excluded.business_id, ad_accounts.business_id)`,
+          businessName: sql`coalesce(excluded.business_name, ad_accounts.business_name)`,
         },
       });
   }

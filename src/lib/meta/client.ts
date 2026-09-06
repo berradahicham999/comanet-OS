@@ -115,27 +115,35 @@ export type MetaAccount = {
   status: number;
 };
 
-const ACCOUNT_FIELDS = "id,account_id,name,currency,timezone_name,account_status,business{id,name}";
+/**
+ * Champs lisibles avec la seule permission `ads_read`.
+ *
+ * `business{id,name}` en est volontairement absent : Meta exige `business_management` pour ce
+ * champ, une permission qui ouvre l'administration du Business Manager — hors de proportion
+ * pour afficher un nom. Le business reste donc inconnu de l'application, ce qui ne coûte
+ * qu'un repère d'affichage.
+ */
+const ACCOUNT_FIELDS = "id,account_id,name,currency,timezone_name,account_status";
 
 /** Comptes auxquels le jeton donne accès. Sert à proposer une liste à l'écran de configuration. */
 export async function listAccounts(): Promise<MetaAccount[]> {
-  type Raw = { id: string; account_id: string; name: string; currency: string; timezone_name: string; account_status: number; business?: { id: string; name: string } };
+  type Raw = { id: string; account_id: string; name: string; currency: string; timezone_name: string; account_status: number };
   const rows = await paginate<Raw>("me/adaccounts", { fields: ACCOUNT_FIELDS });
   return rows.map((r) => ({
     id: r.id, accountId: r.account_id, name: r.name, currency: r.currency,
     timezone: r.timezone_name, status: r.account_status,
-    businessId: r.business?.id ?? null, businessName: r.business?.name ?? null,
+    businessId: null, businessName: null,
   }));
 }
 
 export async function getAccount(externalId: string): Promise<MetaAccount> {
   const act = externalId.startsWith("act_") ? externalId : `act_${externalId}`;
-  type Raw = { id: string; account_id: string; name: string; currency: string; timezone_name: string; account_status: number; business?: { id: string; name: string } };
+  type Raw = { id: string; account_id: string; name: string; currency: string; timezone_name: string; account_status: number };
   const r = await callObject<Raw>(buildUrl(act, { fields: ACCOUNT_FIELDS }));
   return {
     id: r.id, accountId: r.account_id, name: r.name, currency: r.currency,
     timezone: r.timezone_name, status: r.account_status,
-    businessId: r.business?.id ?? null, businessName: r.business?.name ?? null,
+    businessId: null, businessName: null,
   };
 }
 

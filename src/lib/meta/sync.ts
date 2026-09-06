@@ -261,10 +261,14 @@ export async function syncAccount(
       );
     }
 
+    // Le business n'est plus lisible avec la seule permission `ads_read` : `coalesce` évite
+    // d'effacer une valeur saisie à la main par une absence d'information.
     await db.execute(sql`
       update ad_accounts
-      set currency = ${currency}, timezone = ${remote.timezone}, business_id = ${remote.businessId},
-          business_name = ${remote.businessName}, name = ${remote.name}
+      set currency = ${currency}, timezone = ${remote.timezone},
+          business_id = coalesce(${remote.businessId}::text, business_id),
+          business_name = coalesce(${remote.businessName}::text, business_name),
+          name = ${remote.name}
       where id = ${account.id}::uuid`);
 
     // La journée « en cours » est celle du compte publicitaire, pas celle du serveur.
