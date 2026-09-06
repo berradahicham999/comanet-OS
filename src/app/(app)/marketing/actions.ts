@@ -13,7 +13,7 @@ import { requireAccess } from "@/lib/access";
 import { categoryFromLabel } from "@/lib/budget-categories";
 import { matchKeyFor, backfillLink, clearLink } from "@/lib/meta/links";
 import { syncAccount, syncAll } from "@/lib/meta/sync";
-import { hasMetaToken, listAccounts } from "@/lib/meta/client";
+import { hasMetaToken, listAccounts, MetaError } from "@/lib/meta/client";
 import { getSettings, saveSettings } from "@/lib/settings";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim() || null;
@@ -227,6 +227,8 @@ export async function deleteContent(formData: FormData) {
 /* Régie Meta : rattachement et synchronisation                        */
 /* ------------------------------------------------------------------ */
 
+const COMPTES = "/marketing/ads/comptes";
+
 /**
  * Rattache une ou plusieurs campagnes de régie à une campagne COMANET.
  *
@@ -356,8 +358,27 @@ export async function refreshMetaNow() {
  */
 export async function discoverAdAccounts() {
   await requireAccess("marketing");
-  if (!hasMetaToken()) return;
-  const found = await listAccounts();
+  if (!hasMetaToken()) {
+    redirect(`${COMPTES}?erreur=${encodeURIComponent("Aucun jeton Meta n'est configuré : ajoutez META_ACCESS_TOKEN aux variables d'environnement, puis redéployez.")}`);
+  }
+
+  // Meta refuse pour des raisons très concrètes (jeton expiré, permission absente, compte hors
+  // du business émetteur). Sans ce filet, l'erreur remontait en page 500 anonyme : Hicham
+  // voyait « A server error occurred » là où Meta disait précisément ce qui manquait.
+  let found: Awaited<ReturnType<typeof listAccounts>> = [];
+  let echec: string | null = null;
+  try {
+    found = await listAccounts();
+  } catch (err) {
+    echec =
+      err instanceof MetaError
+        ? err.isAuth
+          ? `Jeton refusé par Meta : ${err.message}. Vérifiez qu'il porte la permission « ads_read » et qu'il n'a pas été copié avec un espace en trop.`
+          : `Meta : ${err.message}`
+        : err instanceof Error ? err.message : String(err);
+  }
+  if (echec) redirect(`${COMPTES}?erreur=${encodeURIComponent(echec)}`);
+
   for (const a of found) {
     await db
       .insert(adAccounts)
@@ -374,6 +395,9 @@ export async function discoverAdAccounts() {
       });
   }
   revalidatePath("/marketing/ads/comptes");
+  // Zéro compte n'est pas une erreur de l'application : le jeton est valide mais ne donne accès
+  // à rien. Le dire explicitement évite de chercher la panne du mauvais côté.
+  redirect(`${COMPTES}?decouverts=${found.length}`);
 }
 
 /**

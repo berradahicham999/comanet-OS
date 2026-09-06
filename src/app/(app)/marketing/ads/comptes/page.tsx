@@ -20,8 +20,13 @@ type Account = {
   last_sync_at: string | null; rows: number; last_day: string | null;
 };
 
-export default async function ComptesPublicitairesPage() {
+export default async function ComptesPublicitairesPage(props: { searchParams: Promise<{ erreur?: string; decouverts?: string }> }) {
   await requireAccess("marketing");
+  // La découverte des comptes rend compte par l'URL : elle s'exécute côté serveur et n'a pas
+  // d'autre moyen de parler à cet écran.
+  const sp = await props.searchParams;
+  const erreur = sp.erreur?.trim() || null;
+  const decouverts = sp.decouverts !== undefined ? Number(sp.decouverts) : null;
   const [accountsRes, brands, settings] = await Promise.all([
     db.execute(sql`
       select a.id, a.name, a.platform, a.external_id, a.currency, a.timezone, a.business_name,
@@ -49,6 +54,40 @@ export default async function ComptesPublicitairesPage() {
         subtitle="Connexion en lecture seule à la régie Meta. COMANET OS lit les dépenses et les conversions ; il ne modifie jamais une campagne — mettre en pause ou rebudgéter reste un geste dans Ads Manager."
         actions={<Link href="/marketing/ads" className="btn-secondary btn-sm">Digital Ads</Link>}
       />
+
+      {erreur && (
+        <Card className="mb-4 border-red/50">
+          <div className="text-[13px]">
+            <b className="text-red">La découverte des comptes a échoué.</b>
+            <p className="mt-1 text-ink-2">{erreur}</p>
+          </div>
+        </Card>
+      )}
+
+      {decouverts !== null && !Number.isNaN(decouverts) && (
+        <Card className={`mb-4 ${decouverts === 0 ? "border-orange/50" : "border-green/50"}`}>
+          <div className="text-[13px]">
+            {decouverts === 0 ? (
+              <>
+                <b className="text-orange">Le jeton est valide, mais ne donne accès à aucun compte publicitaire.</b>
+                <p className="mt-1 text-ink-2">
+                  Dans le Business Manager, ouvrez la fiche de l&apos;utilisateur système qui a émis ce jeton, puis
+                  <i> Ajouter des ressources → Comptes publicitaires</i> : cochez les comptes concernés avec le droit
+                  « Afficher les performances ». Un jeton ne voit que les comptes qui lui ont été explicitement attribués.
+                </p>
+              </>
+            ) : (
+              <>
+                <b className="text-green">{fmtNum(decouverts)} compte(s) découvert(s).</b>
+                <p className="mt-1 text-ink-2">
+                  Aucun n&apos;est activé : la synchronisation reste un choix explicite, chaque compte activé consomme
+                  du quota d&apos;API et est relu chaque heure.
+                </p>
+              </>
+            )}
+          </div>
+        </Card>
+      )}
 
       {!tokenOk && (
         <Card className="mb-4 border-orange/50">
