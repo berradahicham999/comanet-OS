@@ -42,7 +42,7 @@ export default async function ParametresPage(props: { searchParams: Promise<{ ta
   return (
     <>
       <PageHeader eyebrow="Administration" title="Paramètres" subtitle="Seuils des règles, objectifs et données de démonstration. Les comptes et leurs droits se gèrent dans « Utilisateurs & droits ». Aucune règle métier n'est codée en dur : tout se règle ici.">
-        <Tabs current={`/parametres?tab=${tab}`} tabs={[{ href: "/parametres?tab=regles", label: "Règles & seuils" }, { href: "/parametres?tab=objectifs", label: "Objectifs" }, { href: "/parametres/utilisateurs", label: "Utilisateurs & droits" }, { href: "/parametres/modeles", label: "Modèles de rôle" }, { href: "/parametres?tab=demo", label: "Données de démo" }]} />
+        <Tabs current={`/parametres?tab=${tab}`} tabs={[{ href: "/parametres?tab=regles", label: "Règles & seuils" }, { href: "/parametres?tab=objectifs", label: "Objectifs" }, { href: "/parametres/utilisateurs", label: "Utilisateurs & droits" }, { href: "/parametres/modeles", label: "Modèles de rôle" }, { href: "/parametres/contenus", label: "Contenus" }, { href: "/parametres?tab=demo", label: "Données de démo" }]} />
       </PageHeader>
 
       {tab === "regles" && (

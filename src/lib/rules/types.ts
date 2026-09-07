@@ -36,7 +36,7 @@ export type Recommendation = {
   impact?: string;
   /** Tâche proposée. */
   task: { title: string; dueInDays: number; role: UserRole; priority?: TaskPriority };
-  entity?: { type: "product" | "client" | "brand" | "regulatory" | "campaign" | "task" | "user" | "doctor"; id: string; href: string };
+  entity?: { type: "product" | "client" | "brand" | "regulatory" | "campaign" | "task" | "user" | "doctor" | "content"; id: string; href: string };
   brandId?: string | null;
   /** Enjeu (MAD) pour ordonner les recommandations de même priorité. */
   score?: number;
