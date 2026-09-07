@@ -35,6 +35,7 @@ export function irreversibleReason(type: string): string {
     case "ANIM_OBJECTIVES": return "Les objectifs d'animation sont remplacés, pas ajoutés : recharger le bon fichier écrase simplement ceux-ci.";
     case "BUDGETS": return "Les budgets et lignes de plan sont remplacés, pas ajoutés : recharger le bon fichier écrase simplement ceux-ci. Les lignes se corrigent aussi une par une depuis Marketing → Budgets.";
     case "REGULATORY": return "Un dossier réglementaire peut avoir été créé par un import antérieur puis mis à jour par celui-ci : le supprimer effacerait aussi l'historique et les corrections saisies dans l'application. Recharger le bon fichier corrige les données ; un dossier isolé se supprime depuis sa fiche.";
+    case "INVENTORY": return "L'inventaire importé crée des articles et des mouvements d'entrée ou d'ajustement, qui ont pu être suivis de sorties vers des activations : on ne revient pas en arrière automatiquement. Recharger le bon fichier ajuste les stocks ; un article isolé se corrige ou se désactive depuis sa fiche.";
     case "MEDECINS": return "Cet import met à jour le référentiel médecins. Les fiches modifiées ne peuvent pas revenir à leur état précédent automatiquement : corrigez-les depuis la fiche médecin.";
     default: return "Ce type d'import ne peut pas être annulé automatiquement.";
   }

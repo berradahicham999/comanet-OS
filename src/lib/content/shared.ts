@@ -68,8 +68,11 @@ export function checkTransition(
   return { ok: true };
 }
 
-/** Transitions proposées depuis un statut, avec leur disponibilité pour la personne. */
-export function nextTransitions(refs: Pick<ContentRefs, "statuses" | "transitions">, from: string, isValidator: boolean) {
+/**
+ * Transitions proposées depuis un statut, avec leur disponibilité pour la personne.
+ * Générique sur le référentiel de statuts : sert au planning éditorial et aux activations.
+ */
+export function nextTransitions<S extends { key: string; sort: number; active: boolean }>(refs: { statuses: S[]; transitions: TransitionRef[] }, from: string, isValidator: boolean) {
   const order = new Map(refs.statuses.map((s) => [s.key, s.sort]));
   return refs.transitions
     .filter((t) => t.fromKey === from && refs.statuses.some((s) => s.key === t.toKey && s.active))

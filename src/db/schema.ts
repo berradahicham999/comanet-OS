@@ -25,6 +25,7 @@ import {
   uniqueIndex,
   primaryKey,
   customType,
+  check,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
@@ -70,6 +71,7 @@ export const importTypeEnum = pgEnum("import_type", [
   "ANIM_OBJECTIVES",
   "ADS",
   "MEDECINS",
+  "INVENTORY",
 ]);
 
 export const importStatusEnum = pgEnum("import_status", [
@@ -424,8 +426,12 @@ export const permissionAuditLogs = pgTable(
     actorName: text("actor_name").notNull(),
     targetUserId: uuid("target_user_id").references(() => users.id, { onDelete: "set null" }),
     targetUserName: text("target_user_name").notNull(),
-    /** PERMISSIONS | SCOPE | ASSIGNMENTS | FLAGS | SUSPEND | REACTIVATE | TEMPLATE_APPLIED | DUPLICATED | CREATED | TEMPLATE_EDITED */
-    change: varchar("change", { length: 30 }).notNull(),
+    /**
+     * Étiquettes concaténées par « + » : PERMISSIONS, SCOPE, ASSIGNMENTS, FLAGS, SUSPEND, REACTIVATE,
+     * TEMPLATE_APPLIED, DUPLICATED, CREATED, TEMPLATE_EDITED, TEMPLATE_DELETED. Sans limite de
+     * longueur : une modification complète en cumule cinq.
+     */
+    change: text("change").notNull(),
     before: jsonb("before"),
     after: jsonb("after"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1426,41 +1432,374 @@ export const collaborations = pgTable(
 /* Activations marketing                                               */
 /* ------------------------------------------------------------------ */
 
+/* Référentiels du module Activations : tout est modifiable depuis /parametres/activations. */
+
+export const activationTypes = pgTable("activation_types", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  icon: text("icon"),
+  sort: integer("sort").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+  /** Module qui pilote ce type par défaut : `marketing` (équipe marketing) ou `clients` (trade). */
+  defaultModule: text("default_module").notNull().default("marketing"),
+  defaultBudgetCategory: budgetCategoryEnum("default_budget_category").notNull().default("AUTRES"),
+  /** Checklist de préparation par défaut, une entrée par étape. */
+  defaultChecklist: jsonb("default_checklist").$type<string[]>().notNull().default([]),
+});
+
+export const activationStatuses = pgTable("activation_statuses", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  tone: text("tone").notNull().default("gray"),
+  sort: integer("sort").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+  awaitingValidation: boolean("awaiting_validation").notNull().default(false),
+  /** Le budget de l'activation est engagé dans le Command Center. */
+  isValidated: boolean("is_validated").notNull().default(false),
+  isRunning: boolean("is_running").notNull().default(false),
+  isDone: boolean("is_done").notNull().default(false),
+  isMeasured: boolean("is_measured").notNull().default(false),
+  isArchived: boolean("is_archived").notNull().default(false),
+  isCancelled: boolean("is_cancelled").notNull().default(false),
+});
+
+export const activationStatusTransitions = pgTable(
+  "activation_status_transitions",
+  {
+    fromKey: text("from_key").notNull().references(() => activationStatuses.key, { onDelete: "cascade" }),
+    toKey: text("to_key").notNull().references(() => activationStatuses.key, { onDelete: "cascade" }),
+    requiresValidator: boolean("requires_validator").notNull().default(false),
+    requiresComment: boolean("requires_comment").notNull().default(false),
+    label: text("label"),
+  },
+  (t) => [primaryKey({ columns: [t.fromKey, t.toKey] })],
+);
+
+export const activationObjectives = pgTable("activation_objectives", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  sort: integer("sort").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+});
+
+export const activationTargets = pgTable("activation_targets", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  sort: integer("sort").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+});
+
+/** Postes budgétaires d'une activation, chacun rattaché à une catégorie du budget marketing. */
+export const activationCostItems = pgTable("activation_cost_items", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  budgetCategory: budgetCategoryEnum("budget_category").notNull().default("AUTRES"),
+  sort: integer("sort").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+});
+
+/** Catégories d'articles d'inventaire (PLV, échantillon, goodie, print). */
+export const inventoryCategories = pgTable("inventory_categories", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  budgetCategory: budgetCategoryEnum("budget_category").notNull().default("PLV"),
+  sort: integer("sort").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+});
+
+export type ActivationTemplateDefaults = {
+  objectiveKey?: string; targetKey?: string; description?: string;
+  /** Jours de préparation avant la date de début. */
+  prepOffsetDays?: number;
+  /** Durée par défaut, en jours (1 = une journée). */
+  durationDays?: number;
+  budgetLines?: { costItemKey: string; label?: string; planned?: number }[];
+  checklist?: string[];
+};
+
+export const activationTemplates = pgTable(
+  "activation_templates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    typeKey: text("type_key").references(() => activationTypes.key, { onDelete: "set null" }),
+    brandId: uuid("brand_id").references(() => brands.id, { onDelete: "set null" }),
+    defaults: jsonb("defaults").$type<ActivationTemplateDefaults>().notNull().default({}),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("activation_templates_type_idx").on(t.typeKey)],
+);
+
+/**
+ * Activations marketing hors digital (événement, PLV, sampling, salon…).
+ *
+ * `type` et `status` sont des CLÉS vers les tables de référence ci-dessus. `brand_id`,
+ * `product_id` et `client_id` restent le « principal » (compatibilité des vues existantes),
+ * la liste complète vit dans `activation_brands` / `activation_products` / `activation_clients`.
+ * Le statut n'est modifié que par `src/lib/activations/workflow.ts`.
+ */
 export const activations = pgTable(
   "activations",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     name: text("name").notNull(),
-    /** EVENEMENT | SPONSORING | PLV | SHOOTING | SALON | SAMPLING | GOODIES | PARTENARIAT… */
-    type: text("type").notNull().default("EVENEMENT"),
+    type: text("type").notNull().default("AUTRE").references(() => activationTypes.key),
     brandId: uuid("brand_id").references(() => brands.id, { onDelete: "set null" }),
     productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
     campaignId: uuid("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
     clientId: uuid("client_id").references(() => clients.id, { onDelete: "set null" }),
+    /** Début (date de l'activation). */
     date: date("date").notNull(),
     endDate: date("end_date"),
+    /** Début de la préparation (checklist). */
+    prepDate: date("prep_date"),
     place: text("place"),
     city: text("city"),
     responsibleId: uuid("responsible_id").references(() => users.id, { onDelete: "set null" }),
+    validatorId: uuid("validator_id").references(() => users.id, { onDelete: "set null" }),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    /** Texte libre historique (compatibilité) ; l'objectif structuré est `objective_key`. */
     objective: text("objective"),
+    objectiveKey: text("objective_key").references(() => activationObjectives.key, { onDelete: "set null" }),
+    targetKey: text("target_key").references(() => activationTargets.key, { onDelete: "set null" }),
+    description: text("description"),
+    templateId: uuid("template_id").references(() => activationTemplates.id, { onDelete: "set null" }),
+    /** Animation Terrain liée (lien, jamais une copie). */
+    linkedAnimationId: uuid("linked_animation_id").references(() => animations.id, { onDelete: "set null" }),
+    /** Somme des lignes budgétaires prévues (maintenue par `src/lib/activations/budget.ts`). */
     budgetPlanned: numeric("budget_planned", { precision: 14, scale: 2 }).notNull().default("0"),
-    status: text("status").notNull().default("PLANNED"), // PLANNED | ACTIVE | DONE | CANCELLED
+    status: text("status").notNull().default("IDEE").references(() => activationStatuses.key),
+    /* Résultats saisis après l'activation — légers, jamais obligatoires. */
     participants: integer("participants"),
     leads: integer("leads"),
     samples: integer("samples"),
     newClients: integer("new_clients"),
+    pharmaciesReached: integer("pharmacies_reached"),
+    ordersOnSite: integer("orders_on_site"),
+    ordersAmount: numeric("orders_amount", { precision: 14, scale: 2 }),
+    pressMentions: integer("press_mentions"),
+    /** CA réellement mesuré (commandes prises sur place, code promo…). Jamais estimé. */
     attributedRevenue: numeric("attributed_revenue", { precision: 14, scale: 2 }),
     results: text("results"),
+    publishedLink: text("published_link"),
+    resultsAt: timestamp("results_at", { withTimezone: true }),
     notes: text("notes"),
+    validatedAt: timestamp("validated_at", { withTimezone: true }),
+    measuredAt: timestamp("measured_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("activations_date_idx").on(t.date),
+    index("activations_status_idx").on(t.status, t.date),
+    index("activations_type_idx").on(t.type),
+    index("activations_city_idx").on(t.city),
     index("activations_brand_idx").on(t.brandId),
     index("activations_product_idx").on(t.productId),
     index("activations_campaign_idx").on(t.campaignId),
     index("activations_client_idx").on(t.clientId),
     index("activations_responsible_idx").on(t.responsibleId),
+    index("activations_validator_idx").on(t.validatorId),
+    index("activations_created_by_idx").on(t.createdById),
+    index("activations_animation_idx").on(t.linkedAnimationId),
+  ],
+);
+
+export const activationBrands = pgTable(
+  "activation_brands",
+  {
+    activationId: uuid("activation_id").notNull().references(() => activations.id, { onDelete: "cascade" }),
+    brandId: uuid("brand_id").notNull().references(() => brands.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.activationId, t.brandId] }), index("activation_brands_brand_idx").on(t.brandId)],
+);
+
+export const activationProducts = pgTable(
+  "activation_products",
+  {
+    activationId: uuid("activation_id").notNull().references(() => activations.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.activationId, t.productId] }), index("activation_products_product_idx").on(t.productId)],
+);
+
+export const activationClients = pgTable(
+  "activation_clients",
+  {
+    activationId: uuid("activation_id").notNull().references(() => activations.id, { onDelete: "cascade" }),
+    clientId: uuid("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.activationId, t.clientId] }), index("activation_clients_client_idx").on(t.clientId)],
+);
+
+export const activationContributors = pgTable(
+  "activation_contributors",
+  {
+    activationId: uuid("activation_id").notNull().references(() => activations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.activationId, t.userId] }), index("activation_contributors_user_idx").on(t.userId)],
+);
+
+/**
+ * Lignes budgétaires d'une activation : prévu (proposition), engagé (devis / bon de commande),
+ * dépensé (facture). Chaque ligne est reflétée dans `marketing_expenses` par
+ * `src/lib/activations/budget.ts` (`activation_ref = 'LINE:<id>'`) dès que l'activation est validée.
+ */
+export const activationBudgetLines = pgTable(
+  "activation_budget_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    activationId: uuid("activation_id").notNull().references(() => activations.id, { onDelete: "cascade" }),
+    costItemKey: text("cost_item_key").notNull().references(() => activationCostItems.key),
+    /** Marque imputée (par défaut la marque principale de l'activation). */
+    brandId: uuid("brand_id").references(() => brands.id, { onDelete: "set null" }),
+    label: text("label").notNull(),
+    planned: numeric("planned", { precision: 14, scale: 2 }).notNull().default("0"),
+    committed: numeric("committed", { precision: 14, scale: 2 }).notNull().default("0"),
+    spent: numeric("spent", { precision: 14, scale: 2 }).notNull().default("0"),
+    supplier: text("supplier"),
+    quoteRef: text("quote_ref"),
+    invoiceRef: text("invoice_ref"),
+    date: date("date"),
+    notes: text("notes"),
+    sort: integer("sort").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("activation_budget_lines_activation_idx").on(t.activationId, t.sort), index("activation_budget_lines_brand_idx").on(t.brandId)],
+);
+
+export const activationChecklistItems = pgTable(
+  "activation_checklist_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    activationId: uuid("activation_id").notNull().references(() => activations.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    done: boolean("done").notNull().default(false),
+    doneAt: timestamp("done_at", { withTimezone: true }),
+    doneById: uuid("done_by_id").references(() => users.id, { onDelete: "set null" }),
+    dueDate: date("due_date"),
+    assigneeId: uuid("assignee_id").references(() => users.id, { onDelete: "set null" }),
+    sort: integer("sort").notNull().default(0),
+  },
+  (t) => [
+    index("activation_checklist_activation_idx").on(t.activationId, t.sort),
+    index("activation_checklist_assignee_idx").on(t.assigneeId),
+    index("activation_checklist_done_by_idx").on(t.doneById),
+  ],
+);
+
+export const activationComments = pgTable(
+  "activation_comments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    activationId: uuid("activation_id").notNull().references(() => activations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("activation_comments_activation_idx").on(t.activationId, t.createdAt), index("activation_comments_user_idx").on(t.userId)],
+);
+
+/** Historique des statuts d'une activation : qui, quand, commentaire. Jamais purgé. */
+export const activationStatusHistory = pgTable(
+  "activation_status_history",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    activationId: uuid("activation_id").notNull().references(() => activations.id, { onDelete: "cascade" }),
+    fromStatus: text("from_status"),
+    toStatus: text("to_status").notNull(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    comment: text("comment"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("activation_status_history_activation_idx").on(t.activationId, t.createdAt), index("activation_status_history_user_idx").on(t.userId)],
+);
+
+/* ------------------------------------------------------------------ */
+/* Inventaire matériel (PLV, échantillons, goodies, print)             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Article d'inventaire. `stock` est le stock courant, maintenu à chaque mouvement dans la
+ * même transaction (`src/lib/activations/inventory.ts`). Distinct des échantillons médicaux
+ * des délégués (`sample_movements`), qui suivent une logique par délégué.
+ */
+export const inventoryItems = pgTable(
+  "inventory_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    sku: text("sku"),
+    categoryKey: text("category_key").notNull().references(() => inventoryCategories.key),
+    brandId: uuid("brand_id").references(() => brands.id, { onDelete: "set null" }),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
+    unit: text("unit").notNull().default("pièce"),
+    unitCost: numeric("unit_cost", { precision: 12, scale: 2 }).notNull().default("0"),
+    stock: integer("stock").notNull().default(0),
+    alertThreshold: integer("alert_threshold"),
+    location: text("location"),
+    notes: text("notes"),
+    active: boolean("active").notNull().default(true),
+    importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("inventory_items_name_uq").on(sql`lower(${t.name})`, sql`coalesce(${t.brandId}, '00000000-0000-0000-0000-000000000000'::uuid)`),
+    index("inventory_items_brand_idx").on(t.brandId),
+    index("inventory_items_product_idx").on(t.productId),
+    index("inventory_items_category_idx").on(t.categoryKey),
+    index("inventory_items_import_idx").on(t.importId),
+  ],
+);
+
+/** Mouvement signé : ENTREE (+), SORTIE (−, liée à une activation ou libre), AJUSTEMENT (±). */
+export const inventoryMovements = pgTable(
+  "inventory_movements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    itemId: uuid("item_id").notNull().references(() => inventoryItems.id, { onDelete: "cascade" }),
+    type: text("type").notNull(), // ENTREE | SORTIE | AJUSTEMENT
+    quantity: integer("quantity").notNull(),
+    unitCost: numeric("unit_cost", { precision: 12, scale: 2 }),
+    activationId: uuid("activation_id").references(() => activations.id, { onDelete: "set null" }),
+    clientId: uuid("client_id").references(() => clients.id, { onDelete: "set null" }),
+    reason: text("reason"),
+    date: date("date").notNull(),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("inventory_movements_item_idx").on(t.itemId, t.date),
+    index("inventory_movements_activation_idx").on(t.activationId),
+    index("inventory_movements_client_idx").on(t.clientId),
+    index("inventory_movements_user_idx").on(t.createdById),
+    index("inventory_movements_import_idx").on(t.importId),
+  ],
+);
+
+/** Matériel consommé par une activation : article × quantité, valorisé au coût du moment. */
+export const activationMaterials = pgTable(
+  "activation_materials",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    activationId: uuid("activation_id").notNull().references(() => activations.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id").notNull().references(() => inventoryItems.id, { onDelete: "cascade" }),
+    quantity: integer("quantity").notNull(),
+    unitCost: numeric("unit_cost", { precision: 12, scale: 2 }).notNull().default("0"),
+    movementId: uuid("movement_id").references(() => inventoryMovements.id, { onDelete: "set null" }),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("activation_materials_activation_idx").on(t.activationId),
+    index("activation_materials_item_idx").on(t.itemId),
+    index("activation_materials_movement_idx").on(t.movementId),
+    index("activation_materials_user_idx").on(t.createdById),
   ],
 );
 
@@ -1473,6 +1812,8 @@ export const marketingExpenses = pgTable(
       .references(() => brands.id, { onDelete: "cascade" }),
     campaignId: uuid("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
     activationId: uuid("activation_id").references(() => activations.id, { onDelete: "set null" }),
+    /** Origine dans l'activation (`LINE:<id>` ou `MATERIAL:<catégorie>`) : synchronisation idempotente. */
+    activationRef: text("activation_ref"),
     collaborationId: uuid("collaboration_id").references(() => collaborations.id, { onDelete: "set null" }),
     productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
     category: budgetCategoryEnum("category").notNull(),
@@ -1489,6 +1830,7 @@ export const marketingExpenses = pgTable(
     index("expenses_brand_date_idx").on(t.brandId, t.date),
     index("marketing_expenses_campaign_idx").on(t.campaignId),
     index("marketing_expenses_activation_idx").on(t.activationId),
+    uniqueIndex("marketing_expenses_activation_ref_uq").on(t.activationId, t.activationRef).where(sql`${t.activationRef} is not null`),
     index("marketing_expenses_collaboration_idx").on(t.collaborationId),
     index("marketing_expenses_product_idx").on(t.productId),
   ],
@@ -1688,13 +2030,20 @@ export const contentComments = pgTable(
   (t) => [index("content_comments_content_idx").on(t.contentId, t.createdAt), index("content_comments_user_idx").on(t.userId)],
 );
 
-/** Livrables (versionnés) et références d'un contenu. Le fichier est stocké en base (`data`). */
+/**
+ * Fichiers versionnés (livrables, références, devis, factures, photos…). Le fichier est stocké
+ * en base (`data`). Table polymorphe : exactement un propriétaire parmi contenu, activation,
+ * article d'inventaire (contrainte `content_assets_owner_ck`). Seul `src/lib/content/assets.ts`
+ * lit ou écrit `data`.
+ */
 export const contentAssets = pgTable(
   "content_assets",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    contentId: uuid("content_id").notNull().references(() => contentItems.id, { onDelete: "cascade" }),
-    kind: text("kind").notNull().default("LIVRABLE"), // LIVRABLE | REFERENCE
+    contentId: uuid("content_id").references(() => contentItems.id, { onDelete: "cascade" }),
+    activationId: uuid("activation_id").references(() => activations.id, { onDelete: "cascade" }),
+    inventoryItemId: uuid("inventory_item_id").references(() => inventoryItems.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull().default("LIVRABLE"), // LIVRABLE | REFERENCE | DEVIS | FACTURE | VISUEL | PHOTO | COMPTE_RENDU
     name: text("name").notNull(),
     mime: text("mime").notNull().default("application/octet-stream"),
     size: integer("size").notNull().default(0),
@@ -1703,7 +2052,13 @@ export const contentAssets = pgTable(
     uploadedById: uuid("uploaded_by_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("content_assets_content_idx").on(t.contentId, t.kind, t.version), index("content_assets_user_idx").on(t.uploadedById)],
+  (t) => [
+    index("content_assets_content_idx").on(t.contentId, t.kind, t.version),
+    index("content_assets_activation_idx").on(t.activationId, t.kind, t.version),
+    index("content_assets_inventory_idx").on(t.inventoryItemId, t.kind, t.version),
+    index("content_assets_user_idx").on(t.uploadedById),
+    check("content_assets_owner_ck", sql`((${t.contentId} is not null)::int + (${t.activationId} is not null)::int + (${t.inventoryItemId} is not null)::int) = 1`),
+  ],
 );
 
 /* ------------------------------------------------------------------ */
@@ -1923,12 +2278,76 @@ export const collaborationRelations = relations(collaborations, ({ one }) => ({
   campaign: one(campaigns, { fields: [collaborations.campaignId], references: [campaigns.id] }),
 }));
 
-export const activationRelations = relations(activations, ({ one }) => ({
+export const activationRelations = relations(activations, ({ one, many }) => ({
   brand: one(brands, { fields: [activations.brandId], references: [brands.id] }),
   product: one(products, { fields: [activations.productId], references: [products.id] }),
   campaign: one(campaigns, { fields: [activations.campaignId], references: [campaigns.id] }),
   client: one(clients, { fields: [activations.clientId], references: [clients.id] }),
   responsible: one(users, { fields: [activations.responsibleId], references: [users.id] }),
+  validator: one(users, { fields: [activations.validatorId], references: [users.id] }),
+  typeRef: one(activationTypes, { fields: [activations.type], references: [activationTypes.key] }),
+  statusRef: one(activationStatuses, { fields: [activations.status], references: [activationStatuses.key] }),
+  template: one(activationTemplates, { fields: [activations.templateId], references: [activationTemplates.id] }),
+  linkedAnimation: one(animations, { fields: [activations.linkedAnimationId], references: [animations.id] }),
+  brands: many(activationBrands),
+  products: many(activationProducts),
+  clients: many(activationClients),
+  contributors: many(activationContributors),
+  budgetLines: many(activationBudgetLines),
+  checklist: many(activationChecklistItems),
+  comments: many(activationComments),
+  history: many(activationStatusHistory),
+  materials: many(activationMaterials),
+}));
+
+export const activationBrandsRelations = relations(activationBrands, ({ one }) => ({
+  activation: one(activations, { fields: [activationBrands.activationId], references: [activations.id] }),
+  brand: one(brands, { fields: [activationBrands.brandId], references: [brands.id] }),
+}));
+export const activationProductsRelations = relations(activationProducts, ({ one }) => ({
+  activation: one(activations, { fields: [activationProducts.activationId], references: [activations.id] }),
+  product: one(products, { fields: [activationProducts.productId], references: [products.id] }),
+}));
+export const activationClientsRelations = relations(activationClients, ({ one }) => ({
+  activation: one(activations, { fields: [activationClients.activationId], references: [activations.id] }),
+  client: one(clients, { fields: [activationClients.clientId], references: [clients.id] }),
+}));
+export const activationContributorsRelations = relations(activationContributors, ({ one }) => ({
+  activation: one(activations, { fields: [activationContributors.activationId], references: [activations.id] }),
+  user: one(users, { fields: [activationContributors.userId], references: [users.id] }),
+}));
+export const activationBudgetLinesRelations = relations(activationBudgetLines, ({ one }) => ({
+  activation: one(activations, { fields: [activationBudgetLines.activationId], references: [activations.id] }),
+  costItem: one(activationCostItems, { fields: [activationBudgetLines.costItemKey], references: [activationCostItems.key] }),
+  brand: one(brands, { fields: [activationBudgetLines.brandId], references: [brands.id] }),
+}));
+export const activationChecklistItemsRelations = relations(activationChecklistItems, ({ one }) => ({
+  activation: one(activations, { fields: [activationChecklistItems.activationId], references: [activations.id] }),
+  assignee: one(users, { fields: [activationChecklistItems.assigneeId], references: [users.id] }),
+}));
+export const activationCommentsRelations = relations(activationComments, ({ one }) => ({
+  activation: one(activations, { fields: [activationComments.activationId], references: [activations.id] }),
+  user: one(users, { fields: [activationComments.userId], references: [users.id] }),
+}));
+export const activationStatusHistoryRelations = relations(activationStatusHistory, ({ one }) => ({
+  activation: one(activations, { fields: [activationStatusHistory.activationId], references: [activations.id] }),
+  user: one(users, { fields: [activationStatusHistory.userId], references: [users.id] }),
+}));
+export const activationMaterialsRelations = relations(activationMaterials, ({ one }) => ({
+  activation: one(activations, { fields: [activationMaterials.activationId], references: [activations.id] }),
+  item: one(inventoryItems, { fields: [activationMaterials.itemId], references: [inventoryItems.id] }),
+  movement: one(inventoryMovements, { fields: [activationMaterials.movementId], references: [inventoryMovements.id] }),
+}));
+export const inventoryItemsRelations = relations(inventoryItems, ({ one, many }) => ({
+  category: one(inventoryCategories, { fields: [inventoryItems.categoryKey], references: [inventoryCategories.key] }),
+  brand: one(brands, { fields: [inventoryItems.brandId], references: [brands.id] }),
+  product: one(products, { fields: [inventoryItems.productId], references: [products.id] }),
+  movements: many(inventoryMovements),
+}));
+export const inventoryMovementsRelations = relations(inventoryMovements, ({ one }) => ({
+  item: one(inventoryItems, { fields: [inventoryMovements.itemId], references: [inventoryItems.id] }),
+  activation: one(activations, { fields: [inventoryMovements.activationId], references: [activations.id] }),
+  client: one(clients, { fields: [inventoryMovements.clientId], references: [clients.id] }),
 }));
 
 export const adMetricsRelations = relations(adMetrics, ({ one }) => ({
@@ -2064,6 +2483,13 @@ export type CampaignAdLink = typeof campaignAdLinks.$inferSelect;
 export type Influencer = typeof influencers.$inferSelect;
 export type Collaboration = typeof collaborations.$inferSelect;
 export type Activation = typeof activations.$inferSelect;
+export type ActivationType = typeof activationTypes.$inferSelect;
+export type ActivationStatus = typeof activationStatuses.$inferSelect;
+export type ActivationTemplate = typeof activationTemplates.$inferSelect;
+export type ActivationBudgetLine = typeof activationBudgetLines.$inferSelect;
+export type ActivationChecklistItem = typeof activationChecklistItems.$inferSelect;
+export type InventoryItem = typeof inventoryItems.$inferSelect;
+export type InventoryMovement = typeof inventoryMovements.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
 export type MarketingExpense = typeof marketingExpenses.$inferSelect;
 export type ContentItem = typeof contentItems.$inferSelect;
