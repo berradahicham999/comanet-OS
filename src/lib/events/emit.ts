@@ -110,3 +110,47 @@ export async function obsoleteEvent(tx: DbLike, dedupeKey: string): Promise<bool
     .returning({ id: events.id });
   return rows.length > 0;
 }
+
+/**
+ * Émission en lot — pour l'import, qui charge jusqu'à 1 400 journées d'un coup.
+ *
+ * Écrit par paquets de 200, comme l'upsert des animations : une requête par ligne mettait
+ * dix minutes là où le lot met une seconde et demie. Même sémantique d'upsert que
+ * `emitEvent()` : ré-émettre un fait le met à jour au lieu de le dupliquer.
+ */
+export async function emitEvents(tx: DbLike, inputs: EmitInput[]): Promise<number> {
+  if (!inputs.length) return 0;
+  let written = 0;
+  for (let i = 0; i < inputs.length; i += 200) {
+    const chunk = inputs.slice(i, i + 200);
+    const rows = await tx
+      .insert(events)
+      .values(chunk.map((input) => ({
+        type: input.type,
+        entityType: input.entityType,
+        entityId: input.entityId,
+        dedupeKey: input.dedupeKey,
+        payload: input.payload,
+        source: input.source,
+        occurredAt: input.occurredAt,
+        status: input.status ?? "pending",
+      })))
+      .onConflictDoUpdate({
+        target: events.dedupeKey,
+        set: {
+          payload: sql`excluded.payload`,
+          source: sql`excluded.source`,
+          occurredAt: sql`excluded.occurred_at`,
+          entityId: sql`excluded.entity_id`,
+          status: sql`excluded.status`,
+          revision: sql`${events.revision} + 1`,
+          attempts: 0,
+          error: null,
+          processedAt: null,
+        },
+      })
+      .returning({ id: events.id });
+    written += rows.length;
+  }
+  return written;
+}

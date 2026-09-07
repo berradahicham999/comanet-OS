@@ -7,6 +7,7 @@ import { cleanText, inferClientType, normKey, toISODate, toNumber } from "./norm
 import { matchBrand, matchBrandInText, matchClient, matchProduct, type ClientCandidate, type ProductCandidate } from "./match";
 import { isComputedColumn, type ImportType } from "./fields";
 import { normalizeCity, animationKey, animatriceName, animatriceEmail } from "@/lib/animations-shared";
+import { emitEvents, eventKey, EVENT_TYPES, EVENT_SOURCES, type EmitInput } from "@/lib/events/emit";
 import { normalizePlatform } from "@/lib/marketing-shared";
 import {
   VARIANT_TYPES, normalizeBool, normalizeDocumentType, normalizeObservation,
@@ -762,15 +763,35 @@ async function importAnimations(rows: Record<string, unknown>[], mapping: Mappin
     });
   }
 
+  /*
+   * La saisie humaine gagne toujours sur le fichier (Phase 1, protection de la bascule
+   * WhatsApp → application). Une animation dont `source = 'saisie'` n'est jamais remplacée
+   * par l'import : ce dernier complète au plus les champs vides et journalise le conflit,
+   * sans jamais purger ni réinsérer ses lignes produit.
+   */
+  const pendingKeys = pending.map((p) => p.key);
+  const existingRows = pendingKeys.length
+    ? ((await db.execute(sql`
+        select id::text as id, dedupe_key, source, city, animatrice_id::text as animatrice_id
+        from animations where dedupe_key in (${sql.join(pendingKeys.map((k) => sql`${k}`), sql`, `)})`))
+        .rows as { id: string; dedupe_key: string; source: string; city: string | null; animatrice_id: string | null }[])
+    : [];
+  const existingByKey = new Map(existingRows.map((r) => [r.dedupe_key, r]));
+
+  const protectedItems: typeof pending = [];
+  const toUpsert: typeof pending = [];
+  for (const p of pending) {
+    if (existingByKey.get(p.key)?.source === "saisie") protectedItems.push(p);
+    else toUpsert.push(p);
+  }
+
   const idByKey = new Map<string, string>();
-  const existingKeys = new Set(
-    ((await db.execute(sql`select dedupe_key from animations where dedupe_key is not null`)).rows as { dedupe_key: string }[]).map((x) => x.dedupe_key),
-  );
-  for (let i = 0; i < pending.length; i += 200) {
-    const chunk = pending.slice(i, i + 200);
+  const existingKeysForUpsert = new Set(toUpsert.filter((p) => existingByKey.has(p.key)).map((p) => p.key));
+  for (let i = 0; i < toUpsert.length; i += 200) {
+    const chunk = toUpsert.slice(i, i + 200);
     const inserted = await db
       .insert(s.animations)
-      .values(chunk.map((p) => p.values))
+      .values(chunk.map((p) => ({ ...p.values, source: "import" })))
       .onConflictDoUpdate({
         target: s.animations.dedupeKey,
         // l'index unique est partiel : le prédicat doit être répété pour que Postgres l'identifie
@@ -778,14 +799,45 @@ async function importAnimations(rows: Record<string, unknown>[], mapping: Mappin
         set: {
           clientId: sql`excluded.client_id`, animatriceId: sql`excluded.animatrice_id`, city: sql`excluded.city`,
           days: sql`excluded.days`, status: sql`excluded.status`, customersAdvised: sql`excluded.customers_advised`,
-          cost: sql`excluded.cost`, importId: sql`excluded.import_id`,
+          cost: sql`excluded.cost`, importId: sql`excluded.import_id`, source: sql`excluded.source`,
         },
       })
       .returning({ id: s.animations.id, key: s.animations.dedupeKey });
     for (const row of inserted) if (row.key) idByKey.set(row.key, row.id);
   }
-  out.inserted += pending.filter((p) => !existingKeys.has(p.key)).length;
-  out.updated += pending.filter((p) => existingKeys.has(p.key)).length;
+  out.inserted += toUpsert.filter((p) => !existingKeysForUpsert.has(p.key)).length;
+  out.updated += toUpsert.filter((p) => existingKeysForUpsert.has(p.key)).length;
+
+  // Animations protégées : compléter les seuls champs absents, ne jamais toucher aux lignes —
+  // elles ne sont volontairement PAS ajoutées à `idByKey`, ce qui les exclut aussi de la purge
+  // et de la réinsertion des lignes produit à l'étape suivante.
+  if (protectedItems.length) {
+    const conflictEvents: EmitInput[] = [];
+    for (const p of protectedItems) {
+      const ex = existingByKey.get(p.key)!;
+      await db.execute(sql`
+        update animations set
+          city = coalesce(nullif(city, ''), ${p.values.city}),
+          animatrice_id = coalesce(animatrice_id, ${p.values.animatriceId}::uuid)
+        where id = ${ex.id}::uuid`);
+      conflictEvents.push({
+        type: EVENT_TYPES.ANIMATION_IMPORT_CONFLICT,
+        entityType: "animation",
+        entityId: ex.id,
+        dedupeKey: eventKey(EVENT_TYPES.ANIMATION_IMPORT_CONFLICT, ex.id),
+        source: EVENT_SOURCES.IMPORT_ANIMATIONS,
+        occurredAt: new Date(`${p.values.date}T12:00:00Z`),
+        status: "done",
+        payload: {
+          animationId: ex.id, dedupeKey: p.key, importId,
+          message: "Animation saisie dans l'application : la saisie a été conservée, seuls les champs vides ont été complétés. Les lignes produit du fichier n'ont pas été appliquées.",
+          importAttempted: { city: p.values.city, animatriceId: p.values.animatriceId, days: p.values.days, cost: p.values.cost, lignesProposees: p.lines.length },
+        },
+      });
+    }
+    await emitEvents(db, conflictEvents);
+    out.warnings.push(`${protectedItems.length} animation(s) saisie(s) dans l'application ont été rencontrées dans ce fichier : la saisie a été conservée, seuls les champs vides ont été complétés. Détail dans le journal des événements (Paramètres → Événements).`);
+  }
 
   /* 5) Lignes produit : purge puis insertion en masse. */
   const ids = [...idByKey.values()];
