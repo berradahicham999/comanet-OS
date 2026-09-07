@@ -10,7 +10,7 @@ import { parseSheet } from "@/lib/import/parse";
 import { runImport } from "@/lib/import/run";
 import { FIELDS, IMPORT_MODULE, missingRequired, type ImportType } from "@/lib/import/fields";
 import { appendUploadChunk, createUploadFile, MAX_UPLOAD_BYTES, UPLOAD_CHUNK_BYTES, purgeStaleUploads } from "@/lib/import/upload";
-import { isReversible, rollbackRows } from "@/lib/import/rollback";
+import { isReversible, rollbackRows, rollbackOrphans } from "@/lib/import/rollback";
 
 /**
  * Étape 1 : téléversement par morceaux (voir src/lib/chunked-upload.ts) → stockage temporaire en base
@@ -67,8 +67,9 @@ export async function runImportAction(formData: FormData) {
 
 /**
  * Annule un import : supprime les enregistrements qu'il a créés (ventes, photos de stock,
- * journées d'animation, lignes de régie). Les produits, clients et marques créés au passage
- * sont conservés — ils peuvent être utilisés ailleurs.
+ * journées d'animation, lignes de régie), puis les produits, clients et alias créés au passage
+ * s'ils ne sont plus référencés nulle part. Une fiche utilisée par un autre import ou une
+ * saisie est conservée. Les marques créées sont toujours conservées.
  */
 export async function rollbackImport(formData: FormData) {
   await requireAnyModule();
@@ -83,8 +84,10 @@ export async function rollbackImport(formData: FormData) {
   if (!isReversible(imp.type)) redirect(`/imports/${id}?error=` + encodeURIComponent("Ce type d'import ne peut pas être annulé."));
 
   let removed = 0;
+  let orphans = { products: 0, clients: 0, aliases: 0 };
   try {
     removed = await rollbackRows(id, imp.type);
+    orphans = await rollbackOrphans(id);
   } catch (e) {
     redirect(`/imports/${id}?error=` + encodeURIComponent(`Annulation impossible : ${(e as Error).message}`));
   }
@@ -92,10 +95,44 @@ export async function rollbackImport(formData: FormData) {
     .update(imports)
     .set({
       status: "FAILED",
-      warnings: [...imp.warnings, `Import annulé le ${new Date().toLocaleDateString("fr-FR")} : ${removed} enregistrement(s) supprimé(s).`],
+      warnings: [
+        ...imp.warnings,
+        `Import annulé le ${new Date().toLocaleDateString("fr-FR")} : ${removed} enregistrement(s) supprimé(s).`,
+        ...(orphans.products || orphans.clients || orphans.aliases
+          ? [`Fiches créées par cet import et retirées : ${orphans.products} produit(s), ${orphans.clients} client(s), ${orphans.aliases} alias.`]
+          : []),
+      ],
     })
     .where(eq(imports.id, id));
 
   for (const p of ["/imports", "/", "/ventes", "/stock", "/terrain", "/marketing", "/marketing/ads", "/produits", "/clients", "/actions"]) revalidatePath(p);
   redirect(`/imports?annule=${removed}`);
+}
+
+/**
+ * Retire les fiches (produits, clients, alias) créées par un import déjà annulé et utilisées
+ * nulle part. Sert aux imports annulés avant que l'annulation ne s'en charge elle-même.
+ */
+export async function cleanupImportOrphans(formData: FormData) {
+  await requireAnyModule();
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+  const imp = await db.query.imports.findFirst({ where: eq(imports.id, id) });
+  if (!imp) redirect("/imports?error=" + encodeURIComponent("Import introuvable."));
+  const access = await getAccess();
+  if (!access || !(access.perms[IMPORT_MODULE[imp.type as ImportType]]?.validate || access.perms.administration.validate)) {
+    redirect(`/imports/${id}?error=` + encodeURIComponent("Retirer ces fiches demande le droit « Valider » sur le module de l'import."));
+  }
+  if (imp.status !== "FAILED") redirect(`/imports/${id}?error=` + encodeURIComponent("Annulez d'abord l'import : tant que ses lignes existent, ses fiches ne sont pas orphelines."));
+  let orphans = { products: 0, clients: 0, aliases: 0 };
+  try {
+    orphans = await rollbackOrphans(id);
+  } catch (e) {
+    redirect(`/imports/${id}?error=` + encodeURIComponent(`Nettoyage impossible : ${(e as Error).message}`));
+  }
+  await db.update(imports).set({
+    warnings: [...imp.warnings, `Fiches orphelines retirées le ${new Date().toLocaleDateString("fr-FR")} : ${orphans.products} produit(s), ${orphans.clients} client(s), ${orphans.aliases} alias.`],
+  }).where(eq(imports.id, id));
+  for (const p of ["/imports", `/imports/${id}`, "/stock", "/produits", "/clients", "/"]) revalidatePath(p);
+  redirect(`/imports/${id}`);
 }
