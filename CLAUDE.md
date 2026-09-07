@@ -16,6 +16,7 @@ Tailwind CSS 4 · Drizzle ORM · PostgreSQL (Supabase, région Frankfurt) · dé
 
 ```bash
 npm run dev            # développement
+npm test               # tests unitaires (node:test via tsx, aucune base requise)
 npm run build          # build de production (à passer avant tout commit)
 npx tsc --noEmit       # vérification de types (rapide, à passer souvent)
 npm run lint
@@ -65,6 +66,23 @@ nominatif, ou montant saisi à la main. Tout le reste s'affiche comme
 « **corrélation observée** », jamais « cette campagne a généré X MAD ». Une fenêtre de
 comparaison incomplète affiche « pas encore comparable » plutôt qu'un écart trompeur.
 Une donnée manquante s'affiche « — » ou « non mesurable » ; elle n'est jamais estimée.
+
+**Une notion métier = une seule fonction.** Les définitions officielles vivent chacune dans
+un module dédié et sont utilisées partout (pages, règles, cockpit, exports). Ne jamais
+recalculer une de ces notions à la main dans une page ou une requête :
+
+| Notion | Module officiel | Points d'entrée |
+|---|---|---|
+| CA sell-out (TTC, prix public) | `src/lib/sellout.ts` | `selloutAmountSql()`, `selloutSumSql()`, `lineSellout()` |
+| Couverture de stock, commande conseillée | `src/lib/stock-math.ts` + `src/lib/stock.ts` | `computeCoverage()`, `productStocks()`, `isUnderTension()` |
+| Budget marketing consommé | `src/lib/budget.ts` | `budgetConsumption()`, `budgetConsumptionByBrand()` |
+| Dépense publicitaire (priorité régie → saisie) | `src/lib/ad-spend.ts` | `adSpend()` |
+| Verdict publicitaire | `src/lib/ads.ts` | `diagnose(cur, ref, brandAvg, settings.ads)` |
+| Score animatrice | `src/lib/animations.ts` | `animatriceScores()` — source unique |
+| Clé de commande, commercial, canal | `src/lib/analytics.ts` | `ORDER_KEY`, `SALES_REP`, `SALES_CHANNEL` |
+| Ville, clé d'animation | `src/lib/animations-shared.ts` | `normalizeCity()`, `cityKey()`, `animationKey()` |
+
+`tests/definitions-uniques.test.ts` échoue si une seconde définition réapparaît.
 
 **Seuils dans `settings`**, pas en dur dans les règles. Les **secrets** (jetons de régie)
 restent en variables d'environnement, jamais en base.

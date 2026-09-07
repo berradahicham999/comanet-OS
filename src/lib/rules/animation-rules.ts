@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { iso, addDays, startOfMonth, fmtMAD, fmtNum } from "@/lib/format";
 import { animatriceScores } from "@/lib/animations";
+import { selloutSumSql } from "@/lib/sellout";
 import type { Rule, Recommendation } from "./types";
 
 /**
@@ -55,8 +56,8 @@ export const animationPerformanceRule: Rule = {
     // Villes très en retard sur leur objectif : arbitrage de tournée, pas de coaching individuel.
     const cityRows = await db.execute(sql`
       with real as (
-        select a.city, coalesce(sum(l.quantity_sold), 0)::float8 as units, coalesce(sum(l.amount), 0)::float8 as revenue, sum(a.days)::float8 as days
-        from animations a left join animation_lines l on l.animation_id = a.id
+        select a.city, coalesce(sum(l.quantity_sold), 0)::float8 as units, ${selloutSumSql("l", "p")} as revenue, sum(a.days)::float8 as days
+        from animations a left join animation_lines l on l.animation_id = a.id left join products p on p.id = l.product_id
         where a.status = 'DONE' and a.date >= ${range.start}::date and a.date < ${range.end}::date and a.city is not null
         group by a.city
       ),

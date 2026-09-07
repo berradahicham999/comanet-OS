@@ -5,6 +5,7 @@ import { requireAccess } from "@/lib/access";
 import { getRefDate } from "@/lib/ref-date";
 import { byDim, periodRange, shiftRange, annualObjective, totals } from "@/lib/analytics";
 import { listBrands } from "@/lib/users";
+import { budgetConsumptionByBrand } from "@/lib/budget";
 import { PageHeader, Card, BrandDot, Delta, Progress, Badge } from "@/components/ui";
 import { fmtMAD, fmtNum, fmtPct, delta } from "@/lib/format";
 
@@ -21,13 +22,14 @@ export default async function MarquesPage() {
     byDim("brand", ytd.start, ytd.end),
     byDim("brand", ytdN1.start, ytdN1.end),
     db.execute(sql`select brand_id, count(*)::int as n from products where active group by brand_id`),
-    db.execute(sql`select b.brand_id, b.amount::float8 as amount, coalesce((select sum(amount) from marketing_expenses e where e.brand_id = b.brand_id and extract(year from e.date) = ${year} and e.status in ('COMMITTED','SPENT')),0)::float8 as engaged from budgets b where b.year = ${year}`),
+    budgetConsumptionByBrand(year),
   ]);
   const objectives = await Promise.all(brands.map((b) => annualObjective(year, b.id)));
   const total = await totals(ytd.start, ytd.end);
   const curMap = new Map(cur.map((r) => [r.id, r])), prevMap = new Map(prev.map((r) => [r.id, r.amount]));
   const countMap = new Map((counts.rows as { brand_id: string; n: number }[]).map((r) => [r.brand_id, r.n]));
-  const budgetMap = new Map((budgets.rows as { brand_id: string; amount: number; engaged: number }[]).map((r) => [r.brand_id, r]));
+  // Budget consommé : définition officielle unique (`src/lib/budget.ts`).
+  const budgetMap = budgets;
 
   return (
     <>
@@ -46,7 +48,7 @@ export default async function MarquesPage() {
                 <div className="text-right text-[12px] text-muted"><div className="flex items-center gap-1 justify-end"><Delta value={delta(amount, prevMap.get(b.id) ?? 0)} /> vs N-1</div><div>{fmtPct(total.amount ? (amount / total.amount) * 100 : 0)} du total</div></div>
               </div>
               {obj ? (<><div className="mt-3 flex justify-between text-[12px]"><span className="text-muted">Objectif {year} : {fmtMAD(obj, { compact: true })}</span><span className="font-medium">{fmtPct((amount / obj) * 100)}</span></div><Progress value={(amount / obj) * 100} tone={amount / obj >= 0.6 ? "accent" : "orange"} className="mt-1" /></>) : <div className="mt-3 text-[12px] text-faint">Pas d&apos;objectif {year}</div>}
-              {bud && <div className="mt-2 text-[12px] text-muted">Budget marketing {fmtMAD(bud.amount, { compact: true })} · engagé {fmtPct(bud.amount ? (bud.engaged / bud.amount) * 100 : 0)}</div>}
+              {bud?.hasBudget && <div className="mt-2 text-[12px] text-muted">Budget marketing {fmtMAD(bud.annual, { compact: true })} · consommé {bud.consumedPct === null ? "—" : fmtPct(bud.consumedPct)}</div>}
               <div className="mt-2 text-[12px] text-muted">{fmtNum(c?.quantity ?? 0)} unités · {c?.clients ?? 0} clients</div>
             </Card>
           );

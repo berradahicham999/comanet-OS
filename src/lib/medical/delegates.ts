@@ -1,7 +1,7 @@
 import "server-only";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { iso, startOfMonth, addMonths, addDays } from "@/lib/format";
+import { iso, startOfMonth, addMonths, addDays, mondayOf } from "@/lib/format";
 import { listDoctors, type DoctorRow } from "./doctors";
 
 export type DelegatePerf = {
@@ -16,11 +16,6 @@ export type DelegatePerf = {
   assignedDoctors: number;
   activeDoctors: number;
 };
-
-function mondayOf(d: Date) {
-  const dow = (d.getUTCDay() + 6) % 7; // 0 = lundi
-  return addDays(d, -dow);
-}
 
 /** Performance de l'équipe de délégués médicaux sur le mois en cours. */
 export async function delegatePerformance(ref: Date): Promise<DelegatePerf[]> {

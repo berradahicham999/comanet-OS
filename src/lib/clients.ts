@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { getSettings, type ComanetSettings } from "./settings";
+import { ORDER_KEY } from "./analytics";
 import { addDays, addMonths, daysBetween, iso, startOfMonth, today } from "./format";
 
 export type Segment = "CROISSANCE" | "STABLE" | "A_RISQUE" | "INACTIF" | "NOUVEAU";
@@ -62,7 +63,7 @@ export async function clientIntel(opts: { clientId?: string } = {}, ref?: Date):
         sum(case when s.date >= ${m12}::date then s.amount else 0 end)::float8 as revenue12,
         sum(case when s.date >= ${m3}::date then s.amount else 0 end)::float8 as revenue3,
         sum(case when s.date >= ${m6}::date and s.date < ${m3}::date then s.amount else 0 end)::float8 as revenue_prev3,
-        count(distinct case when s.date >= ${m12}::date then coalesce(s.invoice_ref, s.date::text) end)::int as orders12,
+        count(distinct case when s.date >= ${m12}::date then ${ORDER_KEY} end)::int as orders12,
         sum(case when s.date >= ${m12}::date then s.quantity else 0 end)::float8 as qty12,
         max(s.date)::text as last_order, min(s.date)::text as first_order,
         count(distinct case when s.date >= ${m12}::date then p.brand_id end)::int as brand_count,

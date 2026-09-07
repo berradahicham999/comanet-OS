@@ -7,6 +7,7 @@
 import { sql, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { cityKey } from "./animations-shared";
+import { selloutAmountSql, selloutSumSql } from "./sellout";
 
 export type Range = { start: string; end: string };
 
@@ -18,9 +19,12 @@ export async function animationTotals(range: Range, filter?: { animatriceId?: st
   const where = buildWhere(range, filter);
   const r = await db.execute(sql`
     with anim as (select a.* from animations a where ${where}),
-    lines as (select al.* from animation_lines al join anim on anim.id = al.animation_id)
+    lines as (
+      select al.*, ${selloutAmountSql("al", "lp")} as sellout
+      from animation_lines al join anim on anim.id = al.animation_id left join products lp on lp.id = al.product_id
+    )
     select
-      coalesce((select sum(amount) from lines), 0)::float8 as revenue,
+      coalesce((select sum(sellout) from lines), 0)::float8 as revenue,
       coalesce((select sum(quantity_sold) from lines), 0)::float8 as units,
       coalesce((select sum(days) from anim), 0)::float8 as days,
       (select count(*) from anim)::int as animations,
@@ -74,9 +78,9 @@ export async function animationsByDim(dim: "animatrice" | "city" | "pos" | "bran
   const color = dim === "brand" || dim === "product" ? sql`max(b.color)` : sql`null::text`;
   // Pour les dimensions portées par les lignes, le CA vient directement de la jointure ;
   // pour les autres, il faut agréger les lignes de chaque animation.
-  const revenue = dim === "brand" || dim === "product" ? sql`coalesce(sum(l.amount), 0)::float8` : sql`coalesce(sum(la.revenue), 0)::float8`;
+  const revenue = dim === "brand" || dim === "product" ? selloutSumSql("l", "p") : sql`coalesce(sum(la.revenue), 0)::float8`;
   const units = dim === "brand" || dim === "product" ? sql`coalesce(sum(l.quantity_sold), 0)::float8` : sql`coalesce(sum(la.units), 0)::float8`;
-  const lineAgg = dim === "brand" || dim === "product" ? sql`` : sql`left join lateral (select coalesce(sum(amount),0)::float8 as revenue, coalesce(sum(quantity_sold),0)::float8 as units from animation_lines where animation_id = a.id) la on true`;
+  const lineAgg = dim === "brand" || dim === "product" ? sql`` : sql`left join lateral (select ${selloutSumSql("al", "lp")} as revenue, coalesce(sum(al.quantity_sold),0)::float8 as units from animation_lines al left join products lp on lp.id = al.product_id where al.animation_id = a.id) la on true`;
 
   const r = await db.execute(sql`
     with cur as (
@@ -113,7 +117,7 @@ export async function animationDaily(range: Range, filter?: { animatriceId?: str
       coalesce(sum(la.units), 0)::float8 as units,
       coalesce(sum(a.days), 0)::float8 as days
     from animations a
-    left join lateral (select coalesce(sum(amount),0)::float8 as revenue, coalesce(sum(quantity_sold),0)::float8 as units from animation_lines where animation_id = a.id) la on true
+    left join lateral (select ${selloutSumSql("al", "lp")} as revenue, coalesce(sum(al.quantity_sold),0)::float8 as units from animation_lines al left join products lp on lp.id = al.product_id where al.animation_id = a.id) la on true
     where ${where}
     group by a.date order by a.date`);
   return (r.rows as Record<string, unknown>[]).map((x) => ({ date: String(x.date), revenue: Number(x.revenue), units: Number(x.units), days: Number(x.days) }));
@@ -126,7 +130,7 @@ export async function animationMonthly(endExclusive: string, months = 13, filter
       coalesce(sum(la.revenue), 0)::float8 as revenue,
       coalesce(sum(la.units), 0)::float8 as units
     from animations a
-    left join lateral (select coalesce(sum(amount),0)::float8 as revenue, coalesce(sum(quantity_sold),0)::float8 as units from animation_lines where animation_id = a.id) la on true
+    left join lateral (select ${selloutSumSql("al", "lp")} as revenue, coalesce(sum(al.quantity_sold),0)::float8 as units from animation_lines al left join products lp on lp.id = al.product_id where al.animation_id = a.id) la on true
     where a.status = 'DONE' and a.date < ${endExclusive}::date
       and a.date >= (date_trunc('month', ${endExclusive}::date) - interval '${sql.raw(String(months - 1))} months')
       ${filter?.animatriceId ? sql`and a.animatrice_id = ${filter.animatriceId}::uuid` : sql``}
@@ -197,13 +201,13 @@ export async function animatriceScores(range: Range, prev: Range, year: number):
       with anim as (
         select a.*, coalesce(la.revenue, 0) as revenue, coalesce(la.units, 0) as units
         from animations a
-        left join lateral (select coalesce(sum(amount),0)::float8 as revenue, coalesce(sum(quantity_sold),0)::float8 as units from animation_lines where animation_id = a.id) la on true
+        left join lateral (select ${selloutSumSql("al", "lp")} as revenue, coalesce(sum(al.quantity_sold),0)::float8 as units from animation_lines al left join products lp on lp.id = al.product_id where al.animation_id = a.id) la on true
         where a.status = 'DONE' and a.date >= ${range.start}::date and a.date < ${range.end}::date
       ),
       prev as (
         select a.animatrice_id, coalesce(sum(la.revenue), 0)::float8 as revenue, coalesce(sum(a.days), 0)::float8 as days
         from animations a
-        left join lateral (select coalesce(sum(amount),0)::float8 as revenue from animation_lines where animation_id = a.id) la on true
+        left join lateral (select ${selloutSumSql("al", "lp")} as revenue from animation_lines al left join products lp on lp.id = al.product_id where al.animation_id = a.id) la on true
         where a.status = 'DONE' and a.date >= ${prev.start}::date and a.date < ${prev.end}::date
         group by 1
       ),
@@ -419,11 +423,11 @@ export async function bestOf(range: Range) {
     with anim as (
       select a.*, coalesce(la.revenue, 0) as revenue, coalesce(la.units, 0) as units
       from animations a
-      left join lateral (select coalesce(sum(amount),0)::float8 as revenue, coalesce(sum(quantity_sold),0)::float8 as units from animation_lines where animation_id = a.id) la on true
+      left join lateral (select ${selloutSumSql("al", "lp")} as revenue, coalesce(sum(al.quantity_sold),0)::float8 as units from animation_lines al left join products lp on lp.id = al.product_id where al.animation_id = a.id) la on true
       where a.status = 'DONE' and a.date >= ${range.start}::date and a.date < ${range.end}::date
     )
     select
-      (select json_build_object('name', p.name, 'units', sum(l.quantity_sold), 'revenue', sum(l.amount))
+      (select json_build_object('name', p.name, 'units', sum(l.quantity_sold), 'revenue', ${selloutSumSql("l", "p")})
        from anim a join animation_lines l on l.animation_id = a.id join products p on p.id = l.product_id
        group by p.name order by sum(l.quantity_sold) desc limit 1) as product,
       (select json_build_object('name', u.name, 'revenue', sum(a.revenue), 'days', sum(a.days))
@@ -432,9 +436,9 @@ export async function bestOf(range: Range) {
        from anim a join clients c on c.id = a.client_id group by c.name order by sum(a.revenue) desc limit 1) as pos,
       (select json_build_object('name', a.city, 'revenue', sum(a.revenue))
        from anim a where a.city is not null group by a.city order by sum(a.revenue) desc limit 1) as city,
-      (select json_build_object('name', b.name, 'units', sum(l.quantity_sold), 'revenue', sum(l.amount))
+      (select json_build_object('name', b.name, 'units', sum(l.quantity_sold), 'revenue', ${selloutSumSql("l", "p")})
        from anim a join animation_lines l on l.animation_id = a.id join products p on p.id = l.product_id join brands b on b.id = p.brand_id
-       group by b.name order by sum(l.amount) desc limit 1) as brand,
+       group by b.name order by ${selloutSumSql("l", "p")} desc limit 1) as brand,
       (select json_build_object('date', a.date::text, 'revenue', sum(a.revenue))
        from anim a group by a.date order by sum(a.revenue) desc limit 1) as day`);
   return r.rows[0] as Record<string, { name?: string; date?: string; units?: number; revenue?: number; days?: number; city?: string } | null>;

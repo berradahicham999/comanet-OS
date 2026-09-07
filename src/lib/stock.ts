@@ -1,9 +1,22 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { getSettings, type ComanetSettings } from "./settings";
+import { getSettings } from "./settings";
 import { addDays, iso, today } from "./format";
+import {
+  computeCoverage,
+  coverageLevel,
+  isUnderTension,
+  marginPct,
+  trendPct,
+  DAYS_PER_MONTH,
+  LEVEL_LABEL,
+  type CoverageLevel,
+} from "./stock-math";
 
-export type CoverageLevel = "green" | "yellow" | "orange" | "red" | "none" | "unknown";
+// Les formules vivent dans `stock-math.ts` (pures et testées) ; ce fichier ne fait que lire
+// la base et les appliquer. Réexportées ici : les pages importent historiquement `@/lib/stock`.
+export { coverageLevel, LEVEL_LABEL, isUnderTension };
+export type { CoverageLevel };
 
 export type ProductStock = {
   productId: string;
@@ -35,34 +48,23 @@ export type ProductStock = {
   fieldStockAvg: number | null; // stock rayon moyen constaté 30 j
 };
 
-export function coverageLevel(months: number | null, s: ComanetSettings): CoverageLevel {
-  if (months === null) return "none";
-  if (months >= s.coverage.green) return "green";
-  if (months >= s.coverage.yellow) return "yellow";
-  if (months >= s.coverage.orange) return "orange";
-  return "red";
-}
-
-export const LEVEL_LABEL: Record<CoverageLevel, string> = {
-  green: "Confortable",
-  yellow: "À surveiller",
-  orange: "Tendu",
-  red: "Critique",
-  none: "Pas de rotation",
-  unknown: "Stock non renseigné",
-};
-
 /**
- * Calcule la couverture et la recommandation d'achat pour tous les produits (ou un seul).
- * Vente moyenne = moyenne des N derniers mois complets (paramètre avgSalesMonths).
+ * Couverture et recommandation d'achat pour tous les produits (ou un sous-ensemble).
+ * Définition et cas limites : voir l'en-tête de `src/lib/stock-math.ts`.
+ *
+ * `ref` est la date de référence des ventes (dernier import), pas « aujourd'hui ».
  */
-export async function productStocks(opts: { productId?: string; brandId?: string } = {}, ref?: Date): Promise<ProductStock[]> {
+export async function productStocks(
+  opts: { productId?: string; brandId?: string; productIds?: string[] } = {},
+  ref?: Date,
+): Promise<ProductStock[]> {
+  if (opts.productIds && opts.productIds.length === 0) return [];
   const s = await getSettings();
   const t = ref ?? today();
   // moyenne mensuelle = ventes des N derniers mois glissants (jusqu'à la date de référence) / N
-  const avgStart = iso(addDays(t, -30 * s.avgSalesMonths));
+  const avgStart = iso(addDays(t, -DAYS_PER_MONTH * s.avgSalesMonths));
   const avgEnd = iso(addDays(t, 1));
-  const lastMonthStart = iso(addDays(t, -30));
+  const lastMonthStart = iso(addDays(t, -DAYS_PER_MONTH));
   const d30 = iso(addDays(t, -30));
 
   const r = await db.execute(sql`
@@ -97,19 +99,19 @@ export async function productStocks(opts: { productId?: string; brandId?: string
     where p.active
       ${opts.productId ? sql`and p.id = ${opts.productId}::uuid` : sql``}
       ${opts.brandId ? sql`and p.brand_id = ${opts.brandId}::uuid` : sql``}
+      ${opts.productIds ? sql`and p.id in (${sql.join(opts.productIds.map((x) => sql`${x}::uuid`), sql`, `)})` : sql``}
     order by b.name, p.name`);
 
   return (r.rows as Record<string, unknown>[]).map((row) => {
     const stockKnown = row.stock_date !== null && row.stock_date !== undefined;
     const stock = Number(row.stock), onOrder = Number(row.on_order), avg = Number(row.avg_monthly);
     const lastMonthQty = row.last_month_qty === null ? null : Number(row.last_month_qty);
-    const coverage = stockKnown && avg > 0 ? stock / avg : null;
-    const leadTimeDays = Number(row.lead_time_days), safety = Number(row.safety_stock_days), moq = row.moq === null ? null : Number(row.moq);
-    // Stock cible = couverture du délai fournisseur + stock de sécurité + 1 mois de revue
-    const targetMonths = leadTimeDays / 30 + safety / 30 + 1;
-    const targetStock = Math.round(avg * targetMonths);
-    let rec = stockKnown ? Math.max(0, targetStock - stock - onOrder) : 0;
-    if (moq && rec > 0) rec = Math.ceil(rec / moq) * moq;
+    const leadTimeDays = Number(row.lead_time_days), safety = Number(row.safety_stock_days);
+    const moq = row.moq === null ? null : Number(row.moq);
+    const cov = computeCoverage(
+      { stock, stockKnown, onOrder, avgMonthly: avg, leadTimeDays, safetyStockDays: safety, moq },
+      s.coverage,
+    );
     const cost = row.cost_price === null ? null : Number(row.cost_price);
     const pw = row.price_wholesale === null ? null : Number(row.price_wholesale);
     return {
@@ -117,12 +119,13 @@ export async function productStocks(opts: { productId?: string; brandId?: string
       brandId: row.brand_id ? String(row.brand_id) : null, brandName: row.brand_name ? String(row.brand_name) : null,
       brandColor: row.brand_color ? String(row.brand_color) : null, category: row.category ? String(row.category) : null,
       stock, stockKnown, onOrder, stockDate: row.stock_date ? String(row.stock_date) : null,
-      avgMonthly: avg, trendPct: avg > 0 && lastMonthQty !== null ? ((lastMonthQty - avg) / avg) * 100 : null,
-      coverageMonths: coverage, level: !stockKnown ? "unknown" : coverageLevel(coverage, s),
-      stockoutDate: coverage !== null ? iso(addDays(t, Math.round(coverage * 30))) : null,
-      leadTimeDays, safetyStockDays: safety, moq, recommendedOrder: Math.round(rec), targetStock,
+      avgMonthly: avg, trendPct: trendPct(lastMonthQty, avg),
+      coverageMonths: cov.coverageMonths, level: cov.level,
+      stockoutDate: cov.daysToStockout === null ? null : iso(addDays(t, cov.daysToStockout)),
+      leadTimeDays, safetyStockDays: safety, moq,
+      recommendedOrder: cov.recommendedOrder, targetStock: cov.targetStock,
       costPrice: cost, priceWholesale: pw,
-      marginPct: cost && pw ? ((pw - cost) / pw) * 100 : null,
+      marginPct: marginPct(cost, pw),
       stockValue: stock * (cost ?? 0),
       fieldSellOut30d: Number(row.field_sold), fieldStockAvg: row.field_stock_avg === null ? null : Number(row.field_stock_avg),
     };

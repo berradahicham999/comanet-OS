@@ -7,6 +7,7 @@ import { getSettings } from "@/lib/settings";
 import { listBrands } from "@/lib/users";
 import { PageHeader, Card, Badge, BrandDot, Progress, Tabs, Section } from "@/components/ui";
 import { BUDGET_CATEGORIES, BUDGET_CATEGORY_LABELS } from "@/lib/budget-categories";
+import { budgetConsumptionByBrand, AD_SPEND_SOURCE_LABEL } from "@/lib/budget";
 import { fmtMAD, fmtPct, fmtDate, fmtDateShort, iso } from "@/lib/format";
 import { CAMPAIGN_STATUS } from "@/lib/marketing-shared";
 import { saveBudget, saveBudgetLine, deleteBudgetLine, saveExpense, deleteExpense } from "../actions";
@@ -25,7 +26,8 @@ export default async function MarketingBudgetsPage(props: { searchParams: Promis
   const activeBrands = brands.filter((b) => b.active);
   const brandId = sp.brand && activeBrands.some((b) => b.id === sp.brand) ? sp.brand : null;
 
-  const [budgetRows, lineRows, expenseRows, campaignRows, marginRows] = await Promise.all([
+  const [consumption, budgetRows, lineRows, expenseRows, campaignRows, marginRows] = await Promise.all([
+    budgetConsumptionByBrand(year),
     db.execute(sql`select brand_id, amount::float8 as amount, reference_revenue::float8 as ref, pct_of_revenue::float8 as pct from budgets where year = ${year}`),
     db.execute(sql`select id, brand_id, label, category::text as category, amount::float8 as amount from budget_lines where year = ${year} order by amount desc`),
     db.execute(sql`select e.id, e.brand_id, e.label, e.category::text as category, e.status::text as status, e.amount::float8 as amount, e.date::text as date, e.attributed_revenue::float8 as revenue, e.conversions, e.campaign_id, c.name as campaign from marketing_expenses e left join campaigns c on c.id = e.campaign_id where extract(year from e.date) = ${year} order by e.date desc`),
@@ -41,10 +43,17 @@ export default async function MarketingBudgetsPage(props: { searchParams: Promis
   const brandsToShow = brandId ? activeBrands.filter((b) => b.id === brandId) : activeBrands;
   const lines = lineRows.rows as Line[], expenses = expenseRows.rows as Expense[], campaigns = campaignRows.rows as Campaign[];
 
+  // Consommation : définition officielle unique (`src/lib/budget.ts`), la même que le cockpit,
+  // /marketing et la règle `budget-overrun`. « Engagé » inclut donc la dépense de régie.
+  const consumed = (id: string) => consumption.get(id)?.consumed ?? 0;
   const totals = { budget: 0, planned: 0, engaged: 0, spent: 0, revenue: 0 };
   for (const b of activeBrands) {
-    totals.budget += budgetsBy.get(b.id)?.amount ?? 0;
-    for (const e of expenses.filter((e) => e.brand_id === b.id)) { totals.planned += e.amount; if (e.status !== "PLANNED") totals.engaged += e.amount; if (e.status === "SPENT") totals.spent += e.amount; totals.revenue += e.revenue ?? 0; }
+    const c = consumption.get(b.id);
+    totals.budget += c?.annual ?? 0;
+    totals.engaged += c?.consumed ?? 0;
+    totals.spent += c?.spent ?? 0;
+    totals.planned += c?.planned ?? 0;
+    for (const e of expenses.filter((e) => e.brand_id === b.id)) totals.revenue += e.revenue ?? 0;
   }
 
   return (
@@ -66,7 +75,8 @@ export default async function MarketingBudgetsPage(props: { searchParams: Promis
           const bud = budgetsBy.get(b.id);
           const bl = lines.filter((l) => l.brand_id === b.id);
           const ex = expenses.filter((e) => e.brand_id === b.id);
-          const planned = ex.reduce((a, e) => a + e.amount, 0), engaged = ex.filter((e) => e.status !== "PLANNED").reduce((a, e) => a + e.amount, 0), spent = ex.filter((e) => e.status === "SPENT").reduce((a, e) => a + e.amount, 0);
+          const c = consumption.get(b.id);
+          const planned = c?.planned ?? 0, engaged = consumed(b.id), spent = c?.spent ?? 0;
           const revenue = ex.reduce((a, e) => a + (e.revenue ?? 0), 0);
           const margin = marginBy.get(b.id) ?? settings.defaultMarginPct;
           const grossMargin = revenue * (margin / 100);
@@ -82,7 +92,7 @@ export default async function MarketingBudgetsPage(props: { searchParams: Promis
                 <div className="ml-auto flex flex-wrap gap-x-5 gap-y-1 text-[12px]">
                   <span><span className="text-muted">Budget </span><b>{bud ? fmtMAD(bud.amount, { compact: true }) : "—"}</b>{bud?.pct ? <span className="text-faint"> ({fmtPct(bud.pct)} du CA réf.)</span> : null}</span>
                   <span><span className="text-muted">Prévu </span><b>{fmtMAD(planned, { compact: true })}</b></span>
-                  <span><span className="text-muted">Engagé </span><b>{fmtMAD(engaged, { compact: true })}</b></span>
+                  <span><span className="text-muted">Engagé </span><b>{fmtMAD(engaged, { compact: true })}</b>{c && c.adSpend !== 0 ? <span className="text-faint"> (dont {fmtMAD(c.adSpend, { compact: true })} de publicité, {AD_SPEND_SOURCE_LABEL[c.adSource]})</span> : null}</span>
                   <span><span className="text-muted">Dépensé </span><b>{fmtMAD(spent, { compact: true })}</b></span>
                   <span><span className="text-muted">Restant </span><b className={bud && bud.amount - engaged < 0 ? "text-red" : "text-green"}>{bud ? fmtMAD(bud.amount - engaged, { compact: true }) : "—"}</b></span>
                 </div>

@@ -78,6 +78,16 @@ export function startOfMonth(d: Date) {
 export function addMonths(d: Date, m: number) {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + m, 1));
 }
+/**
+ * Lundi de la semaine d'une date (semaine ISO, lundi = premier jour).
+ * Définition unique : elle était recopiée à l'identique dans `medical/dashboard.ts`
+ * et `medical/delegates.ts`.
+ */
+export function mondayOf(d: Date) {
+  const dow = (d.getUTCDay() + 6) % 7; // 0 = lundi
+  return addDays(d, -dow);
+}
+
 export function daysBetween(a: Date, b: Date) {
   return Math.round((b.getTime() - a.getTime()) / 86400000);
 }

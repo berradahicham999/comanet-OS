@@ -49,3 +49,24 @@ export function animatriceEmail(raw: string) {
   const slug = strip(raw).toLowerCase().replace(/\s+/g, ".");
   return `${slug}@animatrice.comanet.ma`;
 }
+
+/* ------------------------------------------------------------------ */
+/* Messages de la saisie d'animation                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Codes rendus dans l'URL par `saveAnimation()` et affichés en bannière.
+ * Ils vivent ici parce qu'un fichier « use server » ne peut exporter que des fonctions async.
+ */
+export const ANIMATION_ERRORS: Record<string, string> = {
+  client: "Point de vente manquant ou inconnu.",
+  date: "Date invalide.",
+  nombre: "Une valeur numérique est invalide (coût, durée, clientes conseillées ou échantillons).",
+  quantite: "Quantité vendue invalide : elle doit être un nombre entier positif ou nul.",
+  stock: "Stock rayon invalide : il doit être un nombre entier positif ou nul.",
+  doublon: "Une animation existe déjà pour ce point de vente, cette date et cette animatrice. Voici la fiche existante : modifiez-la plutôt que d'en créer une seconde.",
+};
+
+export const ANIMATION_WARNINGS: Record<string, string> = {
+  prix: "Animation enregistrée. Attention : certains produits n'ont pas de prix public, leur chiffre d'affaires n'est donc pas mesurable. Renseignez le prix public sur la fiche produit.",
+};

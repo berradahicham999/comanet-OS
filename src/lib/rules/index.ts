@@ -8,7 +8,7 @@ import { clientIntel } from "@/lib/clients";
 import { getRefDate } from "@/lib/ref-date";
 import { today as realToday } from "@/lib/format";
 import { PRIORITY_ORDER, type RecommendationWithState, type Rule, type RuleContext } from "./types";
-import { stockCoverageRule, overstockRule, scaleCautionRule } from "./stock-rules";
+import { stockCoverageRule, overstockRule } from "./stock-rules";
 import { regulatoryExpiryRule } from "./regulatory-rules";
 import { clientRules, brandDropRule, dataQualityRule } from "./commercial-rules";
 import { budgetRule, adsRule, influenceRule, campaignStockRule } from "./marketing-rules";
@@ -21,7 +21,6 @@ export * from "./types";
 /** Registre des règles — ajouter une règle = l'ajouter ici. */
 export const RULES: Rule[] = [
   stockCoverageRule,
-  scaleCautionRule,
   regulatoryExpiryRule,
   brandDropRule,
   adsRule,

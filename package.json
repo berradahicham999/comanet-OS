@@ -13,7 +13,9 @@
     "db:studio": "drizzle-kit studio",
     "db:seed:base": "tsx src/db/seed-base.ts",
     "db:seed:demo": "tsx src/db/seed-demo.ts",
-    "db:import": "tsx scripts/import-workbook.ts"
+    "db:import": "tsx scripts/import-workbook.ts",
+    "test": "DATABASE_URL=${DATABASE_URL:-postgresql://tests:tests@127.0.0.1:5432/tests} tsx --test \"tests/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

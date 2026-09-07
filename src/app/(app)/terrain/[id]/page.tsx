@@ -10,12 +10,14 @@ import { PageHeader, Card, Badge, Delta } from "@/components/ui";
 import { AnimationForm } from "@/components/animation-form";
 import { saveAnimation, deleteAnimation } from "../actions";
 import { fmtMAD, fmtNum, fmtDate, iso, delta } from "@/lib/format";
+import { ANIMATION_ERRORS, ANIMATION_WARNINGS } from "@/lib/animations-shared";
 
 export const dynamic = "force-dynamic";
 
-export default async function AnimationPage(props: { params: Promise<{ id: string }> }) {
+export default async function AnimationPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; warn?: string }> }) {
   const user = await requireAccess("terrain");
   const { id } = await props.params;
+  const sp = await props.searchParams;
   const anim = await db.query.animations.findFirst({ where: eq(animationsTable.id, id), with: { client: true, animatrice: true, brand: true, lines: { with: { product: true } } } });
   if (!anim) notFound();
   if (user.role === "ANIMATRICE" && anim.animatriceId !== user.id) notFound();
@@ -32,6 +34,8 @@ export default async function AnimationPage(props: { params: Promise<{ id: strin
 
   return (
     <>
+      {sp.error && <div className="mb-4 rounded-2xl bg-red-soft border border-red/30 px-4 py-3 text-[13px] text-red font-medium">{ANIMATION_ERRORS[sp.error] ?? "Enregistrement impossible."}</div>}
+      {sp.warn && <div className="mb-4 rounded-2xl bg-orange-soft border border-orange/30 px-4 py-3 text-[13px] text-orange font-medium">{ANIMATION_WARNINGS[sp.warn] ?? "Animation enregistrée avec des réserves."}</div>}
       <PageHeader eyebrow={<Link href="/terrain" className="hover:underline">Animations</Link>} title={`${anim.client.name} — ${fmtDate(anim.date)}`} subtitle={[anim.animatrice?.name, anim.brand?.name ?? "Multi-marques", anim.client.city].filter(Boolean).join(" · ")}
         actions={<>{anim.status === "PLANNED" && <Badge tone="blue">Prévue</Badge>}{user.role !== "ANIMATRICE" && <form action={deleteAnimation}><input type="hidden" name="id" value={id} /><button className="btn-ghost btn-sm text-red" type="submit">Supprimer</button></form>}</>} />
 

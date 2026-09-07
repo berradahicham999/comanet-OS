@@ -1,7 +1,7 @@
 import "server-only";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { iso, startOfMonth, addMonths, addDays } from "@/lib/format";
+import { iso, startOfMonth, addMonths, addDays, mondayOf } from "@/lib/format";
 import { listDoctors } from "./doctors";
 import { delegatePerformance, type DelegatePerf } from "./delegates";
 
@@ -24,11 +24,6 @@ export type MedicalDashboard = {
   bySector: SectorBreakdown[];
   bySpecialty: SpecialtyBreakdown[];
 };
-
-function mondayOf(d: Date) {
-  const dow = (d.getUTCDay() + 6) % 7;
-  return addDays(d, -dow);
-}
 
 export async function medicalDashboard(ref: Date): Promise<MedicalDashboard> {
   const monthStart = iso(startOfMonth(ref));

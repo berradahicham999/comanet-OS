@@ -6,7 +6,7 @@ import { clients as clientsTable, tasks as tasksTable } from "@/db/schema";
 import { requireAccess } from "@/lib/access";
 import { clientIntel, SEGMENT_META } from "@/lib/clients";
 import { getRefDate } from "@/lib/ref-date";
-import { monthlySeries } from "@/lib/analytics";
+import { monthlySeries, ORDER_KEY } from "@/lib/analytics";
 import { PageHeader, Card, Badge, Delta, Section, PriorityBadge, StatusBadge } from "@/components/ui";
 import { MonthlyRevenueChart } from "@/components/charts";
 import { fmtMAD, fmtNum, fmtDate, fmtDateShort, addDays, iso } from "@/lib/format";
@@ -28,7 +28,7 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
     db.execute(sql`
       select p.id, p.name, b.name as brand, b.color,
         sum(s.quantity)::float8 as qty, sum(s.amount)::float8 as amount, max(s.date)::text as last_date,
-        count(distinct coalesce(s.invoice_ref, s.date::text))::int as orders
+        count(distinct ${ORDER_KEY})::int as orders
       from sales s join products p on p.id = s.product_id left join brands b on b.id = p.brand_id
       where s.client_id = ${id}::uuid and s.date >= ${iso(addDays(ref, -365))}::date
       group by p.id, p.name, b.name, b.color order by amount desc`),

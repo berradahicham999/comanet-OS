@@ -5,6 +5,9 @@ import { productStocks, stockSummary } from "./stock";
 import { getRecommendations } from "./rules";
 import { getRefDate } from "./ref-date";
 import { addDays, iso, today } from "./format";
+import { budgetConsumption } from "./budget";
+import { adSpend } from "./ad-spend";
+import { selloutSumSql } from "./sellout";
 
 export async function cockpitData() {
   const refDate = await getRefDate();
@@ -58,22 +61,30 @@ export async function cockpitData() {
   };
 }
 
+/**
+ * Bloc budget du cockpit — relais vers `src/lib/budget.ts`, définition officielle unique.
+ * `engaged` inclut désormais la dépense de régie, comme sur /marketing et dans l'Action Center :
+ * avant cette unification, le cockpit l'ignorait et affichait une consommation plus basse.
+ */
 export async function marketingBlock(year: number) {
-  const r = await db.execute(sql`
-    select coalesce(sum(bu.amount),0)::float8 as budget,
-      (select coalesce(sum(amount),0)::float8 from marketing_expenses where extract(year from date) = ${year} and status in ('COMMITTED','SPENT')) as engaged,
-      (select coalesce(sum(amount),0)::float8 from marketing_expenses where extract(year from date) = ${year} and status = 'SPENT') as spent,
-      (select coalesce(sum(amount),0)::float8 from marketing_expenses where extract(year from date) = ${year}) as planned
-    from budgets bu where bu.year = ${year}`);
-  const row = r.rows[0] as { budget: number; engaged: number; spent: number; planned: number };
-  return { ...row, available: row.budget - row.engaged };
+  const c = await budgetConsumption(year);
+  return {
+    budget: c.annual,
+    engaged: c.consumed,
+    spent: c.spent,
+    planned: c.planned,
+    available: c.hasBudget ? c.annual - c.consumed : 0,
+    hasBudget: c.hasBudget,
+    consumedPct: c.consumedPct,
+    adSource: c.adSource,
+  };
 }
 
 async function terrainBlock(ref: Date, d30: string, tomorrow: string) {
   const day = iso(ref);
   const [todayAnims, sales7, top] = await Promise.all([
     db.execute(sql`select a.id, a.status::text as status, c.name as client, c.city, u.name as animatrice, b.name as brand from animations a join clients c on c.id = a.client_id left join users u on u.id = a.animatrice_id left join brands b on b.id = a.brand_id where a.date = ${day}::date order by a.status`),
-    db.execute(sql`select coalesce(sum(al.quantity_sold),0)::int as units, coalesce(sum(al.amount),0)::float8 as revenue, count(distinct a.id)::int as animations from animations a join animation_lines al on al.animation_id = a.id where a.status = 'DONE' and a.date >= ${iso(addDays(ref, -7))}::date and a.date < ${tomorrow}::date`),
+    db.execute(sql`select coalesce(sum(al.quantity_sold),0)::int as units, ${selloutSumSql("al", "p")} as revenue, count(distinct a.id)::int as animations from animations a join animation_lines al on al.animation_id = a.id left join products p on p.id = al.product_id where a.status = 'DONE' and a.date >= ${iso(addDays(ref, -7))}::date and a.date < ${tomorrow}::date`),
     db.execute(sql`
       with lines as (
         select a.animatrice_id, a.client_id, al.product_id, al.quantity_sold from animations a join animation_lines al on al.animation_id = a.id
@@ -95,12 +106,14 @@ async function terrainBlock(ref: Date, d30: string, tomorrow: string) {
   };
 }
 
+/**
+ * Bloc publicitaire du cockpit — relais vers `src/lib/ad-spend.ts`.
+ * Lisait `marketing_expenses` pendant que /marketing/ads lisait `ad_metrics` : les deux
+ * écrans pouvaient afficher deux ROAS différents le même jour. Une seule source désormais.
+ */
 async function digitalBlock(d30: string, tomorrow: string) {
-  const r = await db.execute(sql`
-    select coalesce(sum(amount),0)::float8 as spend, coalesce(sum(attributed_revenue),0)::float8 as revenue, coalesce(sum(conversions),0)::float8 as conversions
-    from marketing_expenses where category in ('META','TIKTOK','GOOGLE','DIGITAL') and date >= ${d30}::date and date < ${tomorrow}::date`);
-  const row = r.rows[0] as { spend: number; revenue: number; conversions: number };
-  return { ...row, roas: row.spend ? row.revenue / row.spend : null, cpa: row.conversions ? row.spend / row.conversions : null };
+  const a = await adSpend({ start: d30, end: tomorrow });
+  return { spend: a.spend, revenue: a.revenue, conversions: a.conversions, roas: a.roas, cpa: a.cpa, source: a.source };
 }
 
 async function regulatoryBlock(ref: Date) {

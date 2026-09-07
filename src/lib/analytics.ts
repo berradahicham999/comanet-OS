@@ -22,13 +22,31 @@ function whereClause(start: string, end: string, f: SalesFilter = {}): SQL {
   if (f.productId) parts.push(sql`s.product_id = ${f.productId}::uuid`);
   if (f.clientId) parts.push(sql`s.client_id = ${f.clientId}::uuid`);
   if (f.city) parts.push(sql`c.city = ${f.city}`);
-  if (f.channel) parts.push(sql`coalesce(s.site, c.channel) = ${f.channel}`);
-  if (f.salesRep) parts.push(sql`coalesce(s.sales_rep, c.sales_rep) = ${f.salesRep}`);
+  if (f.channel) parts.push(sql`${SALES_CHANNEL} = ${f.channel}`);
+  if (f.salesRep) parts.push(sql`${SALES_REP} = ${f.salesRep}`);
   if (f.clientType) parts.push(sql`c.type = ${f.clientType}::client_type`);
   return sql.join(parts, sql` and `);
 }
 
 const FROM = sql`from sales s join products p on p.id = s.product_id join clients c on c.id = s.client_id left join brands b on b.id = p.brand_id`;
+
+/**
+ * CLÉ DE COMMANDE — définition officielle et unique.
+ *
+ * Une commande, c'est une facture. Quand la ligne ne porte pas de numéro de facture, on
+ * retombe sur le couple (client, date) : le même client, le même jour, c'est la même
+ * commande. La clé de repli était `sales.id` ici (chaque ligne comptait pour une commande,
+ * ce qui gonflait le nombre de commandes de /ventes) et `sales.date` dans `clientIntel()`
+ * (deux clients servis le même jour se confondaient dès qu'on sortait d'un périmètre client).
+ */
+export const ORDER_KEY = sql`coalesce(s.invoice_ref, s.client_id::text || ':' || s.date::text)`;
+
+/**
+ * COMMERCIAL ET CANAL — résolution officielle.
+ * La ligne de vente prime sur la fiche client : c'est ce qui a été facturé.
+ */
+export const SALES_REP = sql`coalesce(s.sales_rep, c.sales_rep)`;
+export const SALES_CHANNEL = sql`coalesce(s.site, c.channel)`;
 
 /* ------------------------------------------------------------------ */
 /* Agrégats                                                            */
@@ -40,7 +58,7 @@ export async function totals(start: string, end: string, f: SalesFilter = {}): P
   const r = await db.execute(sql`
     select coalesce(sum(s.amount),0)::float8 as amount,
            coalesce(sum(s.quantity),0)::float8 as quantity,
-           count(distinct coalesce(s.invoice_ref, s.id::text))::int as orders,
+           count(distinct ${ORDER_KEY})::int as orders,
            count(distinct s.client_id)::int as clients,
            count(*)::int as lines
     ${FROM} where ${whereClause(start, end, f)}`);
@@ -55,8 +73,8 @@ const DIM_SQL: Record<Dim, { id: SQL; name: SQL; extra?: SQL }> = {
   product: { id: sql`s.product_id::text`, name: sql`p.name`, extra: sql`max(coalesce(b.name,''))` },
   client: { id: sql`s.client_id::text`, name: sql`c.name`, extra: sql`max(coalesce(c.city,''))` },
   city: { id: sql`coalesce(c.city,'—')`, name: sql`coalesce(c.city,'Non renseignée')` },
-  channel: { id: sql`coalesce(s.site, c.channel, '—')`, name: sql`coalesce(s.site, c.channel, 'Non renseigné')` },
-  rep: { id: sql`coalesce(s.sales_rep, c.sales_rep, '—')`, name: sql`coalesce(s.sales_rep, c.sales_rep, 'Non affecté')` },
+  channel: { id: sql`coalesce(${SALES_CHANNEL}, '—')`, name: sql`coalesce(${SALES_CHANNEL}, 'Non renseigné')` },
+  rep: { id: sql`coalesce(${SALES_REP}, '—')`, name: sql`coalesce(${SALES_REP}, 'Non affecté')` },
   clientType: { id: sql`c.type::text`, name: sql`c.type::text` },
 };
 
@@ -68,7 +86,7 @@ export async function byDim(dim: Dim, start: string, end: string, f: SalesFilter
     select ${d.id} as id, ${d.name} as name, ${d.extra ?? sql`null`} as extra,
            coalesce(sum(s.amount),0)::float8 as amount,
            coalesce(sum(s.quantity),0)::float8 as quantity,
-           count(distinct coalesce(s.invoice_ref, s.id::text))::int as orders,
+           count(distinct ${ORDER_KEY})::int as orders,
            count(distinct s.client_id)::int as clients
     ${FROM} where ${whereClause(start, end, f)}
     group by 1, 2 order by amount desc limit ${limit}`);
@@ -84,7 +102,7 @@ export async function monthlySeries(monthsBack: number, f: SalesFilter = {}, ref
     select to_char(s.date, 'YYYY-MM') as month,
            coalesce(sum(s.amount),0)::float8 as amount,
            coalesce(sum(s.quantity),0)::float8 as quantity,
-           count(distinct coalesce(s.invoice_ref, s.id::text))::int as orders
+           count(distinct ${ORDER_KEY})::int as orders
     ${FROM} where ${whereClause(start, end, f)} group by 1 order by 1`);
   const map = new Map((r.rows as { month: string; amount: number; quantity: number; orders: number }[]).map((x) => [x.month, x]));
   const out = [];

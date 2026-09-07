@@ -5,10 +5,15 @@
  * aux autres campagnes de la même marque. Le verdict SCALE / MAINTAIN / OPTIMIZE / STOP n'est
  * jamais donné seul : le diagnostic dit QUEL maillon se dégrade (diffusion, accroche, post-clic)
  * et l'action porte sur ce maillon.
+ *
+ * `diagnose()` est le SEUL moteur de verdict de l'application : l'écran Digital Ads et la
+ * règle `ads-performance` de l'Action Center l'appellent tous les deux. Aucun de ses seuils
+ * n'est écrit ici — ils viennent tous de `settings.ads` (`AdThresholds`), passés en argument.
  */
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { AD_VERDICTS, type AdVerdict } from "./marketing-shared";
+import type { AdThresholds } from "./settings";
 
 export type Range = { start: string; end: string };
 
@@ -175,7 +180,7 @@ const fmtDelta = (v: number | null) => (v === null ? "n/a" : `${v > 0 ? "+" : ""
  * longueur) et à la moyenne de la marque. Le verdict découle du coût par achat et du ROAS ;
  * le diagnostic isole le maillon responsable.
  */
-export function diagnose(cur: AdKpis, ref: AdKpis | null, brandAvg: { cpa: number | null; roas: number | null; ctr: number | null } | null): Diagnosis {
+export function diagnose(cur: AdKpis, ref: AdKpis | null, brandAvg: { cpa: number | null; roas: number | null; ctr: number | null } | null, t: AdThresholds): Diagnosis {
   const dCpa = pct(cur.cpa, ref?.cpa ?? null);
   const dCtr = pct(cur.ctr, ref?.ctr ?? null);
   const dCpm = pct(cur.cpm, ref?.cpm ?? null);
@@ -191,22 +196,22 @@ export function diagnose(cur: AdKpis, ref: AdKpis | null, brandAvg: { cpa: numbe
     { label: "Taux de conversion", value: cur.conversionRate === null ? "—" : `${cur.conversionRate.toFixed(2)} %`, delta: dConv, good: dConv === null ? null : dConv > 0 },
   ];
 
-  // Données insuffisantes : on ne tranche pas.
-  if (cur.spend < 200 || cur.days < 3) {
+  // Données insuffisantes : on ne tranche pas, et on ne le déguise pas en « stable ».
+  if (cur.spend < t.minSpend || cur.days < t.minDays) {
     return {
       verdict: "WATCH",
       headline: "Trop peu de données pour trancher",
       signals,
-      diagnostic: `${Math.round(cur.spend).toLocaleString("fr-FR")} MAD sur ${cur.days} jour(s) : l'échantillon est trop petit pour conclure.`,
+      diagnostic: `${Math.round(cur.spend).toLocaleString("fr-FR")} MAD sur ${cur.days} jour(s) : sous le seuil d'analyse (${t.minSpend} MAD et ${t.minDays} jours), l'échantillon ne permet pas de conclure.`,
       actions: ["Laisser tourner jusqu'à un volume significatif avant d'arbitrer."],
     };
   }
 
   // Où se situe la dégradation ?
-  const diffusionIssue = dCpm !== null && dCpm > 15;
-  const hookIssue = dCtr !== null && dCtr < -15;
-  const postClickIssue = dConv !== null && dConv < -15;
-  const fatigue = cur.frequency !== null && cur.frequency > 3.5;
+  const diffusionIssue = dCpm !== null && dCpm > t.cpmRisePct;
+  const hookIssue = dCtr !== null && dCtr < -t.ctrDropPct;
+  const postClickIssue = dConv !== null && dConv < -t.convDropPct;
+  const fatigue = cur.frequency !== null && cur.frequency > t.frequencyMax;
 
   let verdict: AdVerdict = "MAINTAIN";
   let headline = "Performance stable";
@@ -221,14 +226,14 @@ export function diagnose(cur: AdKpis, ref: AdKpis | null, brandAvg: { cpa: numbe
     headline = "Aucune conversion sur la période";
     diagnostic = `${Math.round(cur.spend).toLocaleString("fr-FR")} MAD dépensés sans un seul achat ni lead enregistré.`;
     actions.push("Vérifier d'abord le suivi des conversions (pixel, événements) avant de conclure à un échec.", "Si le suivi est bon : couper la campagne et réallouer le budget.");
-  } else if (cur.cpa !== null && brandAvg?.cpa && cur.cpa > brandAvg.cpa * 1.8) {
+  } else if (cur.cpa !== null && brandAvg?.cpa && cur.cpa > brandAvg.cpa * t.cpaVsBrandFactor) {
     verdict = "STOP";
     headline = "Coût par achat très au-dessus de la marque";
     diagnostic = `CPA de ${Math.round(cur.cpa)} MAD contre ${Math.round(brandAvg.cpa)} MAD en moyenne sur la marque (${fmtDelta(pct(cur.cpa, brandAvg.cpa))}).`;
     actions.push("Couper cette campagne et basculer le budget sur celle qui convertit le mieux.");
-  } else if ((dCpa !== null && dCpa > 25) || (dRoas !== null && dRoas < -25)) {
+  } else if ((dCpa !== null && dCpa > t.cpaRisePct) || (dRoas !== null && dRoas < -t.roasDropPct)) {
     verdict = "OPTIMIZE";
-    headline = dCpa !== null && dCpa > 25 ? `CPA en hausse de ${Math.round(dCpa)} %` : `ROAS en baisse de ${Math.abs(Math.round(dRoas!))} %`;
+    headline = dCpa !== null && dCpa > t.cpaRisePct ? `CPA en hausse de ${Math.round(dCpa)} %` : `ROAS en baisse de ${Math.abs(Math.round(dRoas!))} %`;
     if (postClickIssue && !hookIssue) {
       diagnostic = `CTR ${dCtr === null ? "stable" : fmtDelta(dCtr)}, CPM ${fmtDelta(dCpm)}, taux de conversion ${fmtDelta(dConv)} : le problème est principalement post-clic — les gens cliquent mais n'achètent pas.`;
       actions.push("Analyser la page de destination : temps de chargement, prix affiché, disponibilité produit.", "Vérifier le stock du produit poussé.", "Tester une offre ou un argument de réassurance.");
@@ -243,11 +248,11 @@ export function diagnose(cur: AdKpis, ref: AdKpis | null, brandAvg: { cpa: numbe
       actions.push("Comparer avec les autres campagnes de la marque avant d'arbitrer.");
     }
     if (fatigue) actions.push(`Fréquence à ${cur.frequency!.toFixed(1)} : renouveler les créatives pour éviter la lassitude.`);
-  } else if ((dRoas !== null && dRoas > 20 && (cur.roas ?? 0) > 1) || (roasRef !== null && (cur.roas ?? 0) > roasRef * 1.3 && (cur.roas ?? 0) > 1)) {
+  } else if ((dRoas !== null && dRoas > t.roasRisePct && (cur.roas ?? 0) > t.roasMin) || (roasRef !== null && (cur.roas ?? 0) > roasRef * t.roasVsBrandFactor && (cur.roas ?? 0) > t.roasMin)) {
     verdict = "SCALE";
     headline = "Performance au-dessus de la référence";
     diagnostic = `ROAS de ${cur.roas?.toFixed(2)}× ${dRoas !== null ? `(${fmtDelta(dRoas)} vs période précédente)` : ""}${roasRef ? `, moyenne marque ${roasRef.toFixed(2)}×` : ""}.`;
-    actions.push("Augmenter le budget par paliers de 20 % tous les 3 jours.", "Vérifier la couverture de stock du produit avant de scaler.");
+    actions.push(`Augmenter le budget par paliers de ${t.scaleStepPct} % tous les ${t.scaleStepDays} jours.`, "Vérifier la couverture de stock du produit avant de scaler.");
     if (fatigue) actions.push(`Fréquence à ${cur.frequency!.toFixed(1)} : préparer des créatives de relève avant l'augmentation.`);
   } else {
     diagnostic = `CPA ${cur.cpa === null ? "—" : Math.round(cur.cpa) + " MAD"}${dCpa !== null ? ` (${fmtDelta(dCpa)})` : ""}, ROAS ${cur.roas === null ? "—" : cur.roas.toFixed(2) + "×"}${dRoas !== null ? ` (${fmtDelta(dRoas)})` : ""} : pas de dérive significative.`;

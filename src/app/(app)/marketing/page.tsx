@@ -81,8 +81,8 @@ export default async function MarketingOverviewPage(props: { searchParams: Promi
 
   // Signaux : ce qui demande un arbitrage cette semaine
   const signals: { tone: "red" | "orange" | "green" | "blue"; title: string; detail: string; href: string }[] = [];
-  if (budget.annual > 0 && budget.consumedPct >= 90) signals.push({ tone: budget.consumedPct >= 100 ? "red" : "orange", title: `Budget ${year} consommé à ${Math.round(budget.consumedPct)} %`, detail: `Reste ${fmtMAD(budget.remaining, { compact: true })} sur ${fmtMAD(budget.annual, { compact: true })}. Toute nouvelle action demande un arbitrage.`, href: "/marketing/budgets" });
-  if (budget.annual > 0 && budget.consumedPct < 40 && ref.getUTCMonth() >= 7) signals.push({ tone: "blue", title: `Budget ${year} sous-consommé (${Math.round(budget.consumedPct)} %)`, detail: `${fmtMAD(budget.remaining, { compact: true })} encore disponibles à ${11 - ref.getUTCMonth()} mois de la fin d'année.`, href: "/marketing/budgets" });
+  if (budget.consumedPct !== null && budget.consumedPct >= 90) signals.push({ tone: budget.consumedPct >= 100 ? "red" : "orange", title: `Budget ${year} consommé à ${Math.round(budget.consumedPct)} %`, detail: `Reste ${budget.remaining === null ? "—" : fmtMAD(budget.remaining, { compact: true })} sur ${fmtMAD(budget.annual, { compact: true })}. Toute nouvelle action demande un arbitrage.`, href: "/marketing/budgets" });
+  if (budget.consumedPct !== null && budget.consumedPct < 40 && ref.getUTCMonth() >= 7) signals.push({ tone: "blue", title: `Budget ${year} sous-consommé (${Math.round(budget.consumedPct)} %)`, detail: `${budget.remaining === null ? "—" : fmtMAD(budget.remaining, { compact: true })} encore disponibles à ${11 - ref.getUTCMonth()} mois de la fin d'année.`, href: "/marketing/budgets" });
   if (attr.adSpend > 0 && attr.adRevenue === 0) signals.push({ tone: "orange", title: "Régie sans CA remonté", detail: `${fmtMAD(attr.adSpend, { compact: true })} de dépense publicitaire importée sans valeur de conversion : activez le suivi des achats ou saisissez le CA attribué.`, href: "/marketing/ads" });
   if (counters.pendingContent > 0) signals.push({ tone: "blue", title: `${counters.pendingContent} contenu(s) non publié(s) sur la période`, detail: "Planning éditorial en retard sur la période sélectionnée.", href: "/marketing/planning" });
   if (measuredCost > 0 && measuredRoas !== null && measuredRoas < 1) signals.push({ tone: "red", title: `ROAS mesuré ${measuredRoas.toFixed(2)}×`, detail: `Sur la part mesurable (${fmtMAD(measuredCost, { compact: true })}), le CA attribué est inférieur à la dépense.`, href: "/marketing/ads" });
@@ -158,8 +158,8 @@ export default async function MarketingOverviewPage(props: { searchParams: Promi
           )}
           <div className="mt-4 pt-3 border-t border-line grid grid-cols-2 gap-y-2 text-[12.5px]">
             <div><div className="text-muted">Budget {year}</div><div className="font-medium">{fmtMAD(budget.annual, { compact: true })}</div></div>
-            <div><div className="text-muted">Consommé</div><div className="font-medium">{fmtMAD(budget.consumed, { compact: true })} <span className="text-faint">{fmtPct(budget.consumedPct)}</span></div></div>
-            <div><div className="text-muted">Disponible</div><div className={`font-medium ${budget.remaining < 0 ? "text-red" : "text-green"}`}>{fmtMAD(budget.remaining, { compact: true })}</div></div>
+            <div><div className="text-muted">Consommé</div><div className="font-medium">{fmtMAD(budget.consumed, { compact: true })} <span className="text-faint">{budget.consumedPct === null ? "budget non défini" : fmtPct(budget.consumedPct)}</span></div></div>
+            <div><div className="text-muted">Disponible</div><div className={`font-medium ${budget.remaining !== null && budget.remaining < 0 ? "text-red" : "text-green"}`}>{budget.remaining === null ? "—" : fmtMAD(budget.remaining, { compact: true })}</div></div>
             <div><div className="text-muted">Prévu non engagé</div><div className="font-medium">{fmtMAD(budget.planned, { compact: true })}</div></div>
             {budget.adSpend > 0 && <div className="col-span-2 text-[11.5px] text-faint">Dont {fmtMAD(budget.adSpend, { compact: true })} de dépense régie importée, en plus des {fmtMAD(budget.committed, { compact: true })} saisis en actions.</div>}
           </div>

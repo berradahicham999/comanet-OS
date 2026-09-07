@@ -1,5 +1,3 @@
-import { sql } from "drizzle-orm";
-import { db } from "@/db";
 import { fmtMAD, fmtNum, fmtDate, months } from "@/lib/format";
 import type { Rule, Recommendation } from "./types";
 
@@ -101,37 +99,12 @@ export const overstockRule: Rule = {
   },
 };
 
-/** Ads actives sur une marque dont un produit clé est tendu : ne pas scaler avant sécurisation du stock. */
-export const scaleCautionRule: Rule = {
-  id: "stock-scale-caution",
-  label: "Ne pas scaler les Ads avant le stock",
-  description: "Une campagne digitale est active sur une marque dont un produit majeur a moins de 1,5 mois de couverture.",
-  async run({ stocks }) {
-    const r = await db.execute(sql`select brand_id, name from campaigns where status = 'ACTIVE' and channel in ('META','TIKTOK','GOOGLE')`);
-    const active = new Map<string, string[]>();
-    for (const row of r.rows as { brand_id: string; name: string }[]) active.set(row.brand_id, [...(active.get(row.brand_id) ?? []), row.name]);
-    const out: Recommendation[] = [];
-    for (const p of stocks) {
-      if (!p.stockKnown || !p.brandId || !active.has(p.brandId) || p.coverageMonths === null || p.coverageMonths >= 1.5 || p.avgMonthly < 30) continue;
-      out.push({
-        key: `stock-scale-caution:${p.productId}`,
-        rule: "stock-scale-caution",
-        category: "MARKETING",
-        priority: "HIGH",
-        title: brandLabel(p.brandName, p.name),
-        subtitle: "Campagne active sur un produit à stock tendu",
-        facts: [
-          { label: "Couverture", value: months(p.coverageMonths) },
-          { label: "Campagnes actives", value: active.get(p.brandId)!.join(", ") },
-          { label: "Sell-out terrain 30 j", value: `${fmtNum(p.fieldSellOut30d)} u.` },
-        ],
-        why: "Scaler l'acquisition sur un produit qui va manquer crée de la demande non servie, du CPA gaspillé et de la frustration client.",
-        action: "Prévoir l'achat ET geler toute augmentation de budget Ads sur ce produit jusqu'à confirmation de la date de livraison ; rediriger le budget vers un produit à couverture confortable.",
-        task: { title: `Geler le scaling Ads ${p.name} jusqu'à réception stock`, dueInDays: 1, role: "MARKETING" },
-        entity: { type: "product", id: p.productId, href: `/produits/${p.productId}` },
-        brandId: p.brandId,
-      });
-    }
-    return out;
-  },
-};
+/*
+ * `scaleCautionRule` (« Ne pas scaler les Ads avant le stock ») a été retirée le 7/09/2026 :
+ * elle couvrait exactement le même risque que `campaign-stock` et produisait une seconde carte
+ * pour un seul problème, avec ses propres seuils écrits en dur (1,5 mois / 30 u.). Le risque
+ * « campagne active + produit en tension » a désormais une définition unique, dans
+ * `src/lib/rules/marketing-rules.ts`, et ses seuils vivent dans `settings`.
+ * Le garde-fou de scaling reste appliqué : `adsRule` refuse de recommander un SCALE sans
+ * mentionner d'abord les produits en tension de la marque (même fonction `isUnderTension`).
+ */

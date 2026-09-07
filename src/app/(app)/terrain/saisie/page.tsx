@@ -7,11 +7,12 @@ import { PageHeader, Card } from "@/components/ui";
 import { AnimationForm } from "@/components/animation-form";
 import { saveAnimation } from "../actions";
 import { iso, fmtDateShort } from "@/lib/format";
+import { ANIMATION_ERRORS, ANIMATION_WARNINGS } from "@/lib/animations-shared";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Saisie terrain" };
 
-export default async function SaisiePage(props: { searchParams: Promise<{ client?: string; done?: string }> }) {
+export default async function SaisiePage(props: { searchParams: Promise<{ client?: string; done?: string; error?: string; warn?: string }> }) {
   const user = await requireAccess("terrain");
   const sp = await props.searchParams;
   const [clients, products, brands, users, recent] = await Promise.all([
@@ -24,7 +25,9 @@ export default async function SaisiePage(props: { searchParams: Promise<{ client
   return (
     <>
       <PageHeader eyebrow="Terrain" title="Saisie d'animation" subtitle="Moins d'une minute : point de vente, produits vendus, stock rayon, clientes conseillées." />
-      {sp.done && <div className="mb-4 rounded-2xl bg-green-soft border border-green/30 px-4 py-3 text-[13px] text-green font-medium">Animation enregistrée. Merci !</div>}
+      {sp.error && <div className="mb-4 rounded-2xl bg-red-soft border border-red/30 px-4 py-3 text-[13px] text-red font-medium">{ANIMATION_ERRORS[sp.error] ?? "Enregistrement impossible."}</div>}
+      {sp.warn && <div className="mb-4 rounded-2xl bg-orange-soft border border-orange/30 px-4 py-3 text-[13px] text-orange font-medium">{ANIMATION_WARNINGS[sp.warn] ?? "Animation enregistrée avec des réserves."}</div>}
+      {sp.done && !sp.warn && <div className="mb-4 rounded-2xl bg-green-soft border border-green/30 px-4 py-3 text-[13px] text-green font-medium">Animation enregistrée. Merci !</div>}
       <div className="grid lg:grid-cols-[minmax(0,560px)_1fr] gap-4">
         <Card>
           <AnimationForm

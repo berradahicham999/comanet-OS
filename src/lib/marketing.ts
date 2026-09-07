@@ -11,6 +11,11 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { addMonths, iso, startOfMonth } from "./format";
+import { budgetConsumption, type BudgetConsumption } from "./budget";
+import { productStocks } from "./stock";
+import type { CoverageLevel } from "./stock-math";
+import { getRefDate } from "./ref-date";
+import { selloutSumSql } from "./sellout";
 
 export type Range = { start: string; end: string };
 
@@ -19,30 +24,17 @@ const brandFilter = (brandId?: string | null, col = "brand_id") =>
 
 /* ------------------------------- Budget ---------------------------------- */
 
-export type BudgetSummary = {
-  annual: number;
-  planned: number;
-  committed: number;
-  spent: number;
-  /** Dépense publicitaire importée depuis la régie, qui n'est pas saisie dans marketing_expenses. */
-  adSpend: number;
-  /** Engagé + dépense régie : la consommation réelle de l'enveloppe. */
-  consumed: number;
-  remaining: number;
-  consumedPct: number;
+/**
+ * Budget consommé : simple relais vers `src/lib/budget.ts`, seule définition officielle.
+ * La répartition par catégorie reste ici, elle n'entre pas dans le calcul du consommé.
+ */
+export type BudgetSummary = BudgetConsumption & {
   byCategory: { category: string; planned: number; committed: number; spent: number }[];
 };
 
-/** Budget annuel (table budgets) vs dépenses réelles (marketing_expenses + régie importée). */
 export async function budgetSummary(year: number, brandId?: string | null): Promise<BudgetSummary> {
-  const [b, e, cat, ads] = await Promise.all([
-    db.execute(sql`select coalesce(sum(amount), 0)::float8 as annual from budgets where year = ${year} ${brandFilter(brandId)}`),
-    db.execute(sql`
-      select
-        coalesce(sum(amount) filter (where status = 'PLANNED'), 0)::float8 as planned,
-        coalesce(sum(amount) filter (where status = 'COMMITTED'), 0)::float8 as committed,
-        coalesce(sum(amount) filter (where status = 'SPENT'), 0)::float8 as spent
-      from marketing_expenses where extract(year from date) = ${year} ${brandFilter(brandId)}`),
+  const [consumption, cat] = await Promise.all([
+    budgetConsumption(year, brandId),
     db.execute(sql`
       select category::text as category,
         coalesce(sum(amount) filter (where status = 'PLANNED'), 0)::float8 as planned,
@@ -50,22 +42,9 @@ export async function budgetSummary(year: number, brandId?: string | null): Prom
         coalesce(sum(amount) filter (where status = 'SPENT'), 0)::float8 as spent
       from marketing_expenses where extract(year from date) = ${year} ${brandFilter(brandId)}
       group by 1 order by 2 + 3 + 4 desc`),
-    db.execute(sql`select coalesce(sum(spend), 0)::float8 as ad_spend from ad_metrics where extract(year from date) = ${year} ${brandFilter(brandId)}`),
   ]);
-  const annual = Number((b.rows[0] as { annual: number }).annual);
-  const x = e.rows[0] as { planned: number; committed: number; spent: number };
-  const committed = Number(x.committed) + Number(x.spent); // « engagé » inclut ce qui est déjà payé
-  const adSpend = Number((ads.rows[0] as { ad_spend: number }).ad_spend);
-  const consumed = committed + adSpend;
   return {
-    annual,
-    planned: Number(x.planned),
-    committed,
-    spent: Number(x.spent),
-    adSpend,
-    consumed,
-    remaining: annual - consumed,
-    consumedPct: annual > 0 ? (consumed / annual) * 100 : 0,
+    ...consumption,
     byCategory: (cat.rows as Record<string, unknown>[]).map((r) => ({
       category: String(r.category), planned: Number(r.planned), committed: Number(r.committed), spent: Number(r.spent),
     })),
@@ -148,9 +127,9 @@ export async function marketingTimeline(endExclusive: string, months = 13, brand
     ),
     anim_m as (
       select to_char(a.date, 'YYYY-MM') as month, coalesce(sum(a.days), 0)::float8 as days,
-             coalesce(sum(l.amount), 0)::float8 as revenue
+             coalesce(sum(l.sellout), 0)::float8 as revenue
       from animations a
-      left join lateral (select coalesce(sum(al.amount), 0)::float8 as amount from animation_lines al
+      left join lateral (select ${selloutSumSql("al", "p")} as sellout from animation_lines al
                          join products p on p.id = al.product_id
                          where al.animation_id = a.id ${bf("p.brand_id")}) l on true
       where a.status = 'DONE' and a.date >= ${startMonth}::date and a.date < ${endExclusive}::date
@@ -331,30 +310,44 @@ export async function campaignSales(campaignId: string): Promise<CampaignPeriodS
 }
 
 /** Couverture de stock des produits poussés par une campagne — garde-fou avant de scaler. */
-export async function campaignStock(campaignId: string, avgMonths = 3) {
+export type CampaignStockRow = {
+  id: string; name: string; qty: number; monthly: number;
+  coverage: number | null; level: CoverageLevel; stockKnown: boolean;
+};
+
+/**
+ * Couverture de stock des produits poussés par une campagne — garde-fou avant de scaler.
+ *
+ * Recalculait autrefois sa propre couverture (3 mois en dur, `current_date`, `on_order` et
+ * stock de sécurité ignorés) : une campagne pouvait être « en tension » ici et pas dans
+ * l'Action Center. Elle délègue maintenant à `productStocks()`, définition unique.
+ *
+ * Périmètre : les produits rattachés à la campagne ; à défaut, tous les produits actifs de
+ * sa marque. C'est la convention historique, inchangée.
+ */
+export async function campaignStock(campaignId: string): Promise<CampaignStockRow[]> {
   const r = await db.execute(sql`
-    with c as (select * from campaigns where id = ${campaignId}::uuid),
-    scope as (
-      select p.id, p.name from products p, c
-      where exists (select 1 from campaign_products cp where cp.campaign_id = c.id and cp.product_id = p.id)
-         or (not exists (select 1 from campaign_products cp where cp.campaign_id = c.id) and p.brand_id = c.brand_id)
-    ),
-    stock as (
-      select distinct on (product_id) product_id, quantity::float8 as qty
-      from stock_snapshots order by product_id, date desc
-    ),
-    velocity as (
-      select s.product_id, sum(s.quantity)::float8 / ${avgMonths} as monthly
-      from sales s where s.date >= current_date - interval '${sql.raw(String(avgMonths))} months' group by 1
-    )
-    select scope.id, scope.name, coalesce(stock.qty, 0) as qty, coalesce(velocity.monthly, 0) as monthly,
-           case when coalesce(velocity.monthly, 0) > 0 then coalesce(stock.qty, 0) / velocity.monthly else null end as coverage
-    from scope left join stock on stock.product_id = scope.id left join velocity on velocity.product_id = scope.id
-    order by coverage nulls last`);
-  return (r.rows as Record<string, unknown>[]).map((x) => ({
-    id: String(x.id), name: String(x.name), qty: Number(x.qty), monthly: Number(x.monthly),
-    coverage: x.coverage === null ? null : Number(x.coverage),
-  }));
+    select c.brand_id::text as brand_id,
+           coalesce(array_remove(array_agg(cp.product_id::text), null), '{}'::text[]) as product_ids
+    from campaigns c
+    left join campaign_products cp on cp.campaign_id = c.id
+    where c.id = ${campaignId}::uuid
+    group by c.brand_id`);
+  const row = r.rows[0] as { brand_id: string | null; product_ids: string[] } | undefined;
+  if (!row) return [];
+  const ids = (row.product_ids ?? []).filter(Boolean);
+  const { ref } = await getRefDate();
+  const list = ids.length
+    ? await productStocks({ productIds: ids }, ref)
+    : row.brand_id
+      ? await productStocks({ brandId: row.brand_id }, ref)
+      : [];
+  return list
+    .map((p) => ({
+      id: p.productId, name: p.name, qty: p.stock, monthly: p.avgMonthly,
+      coverage: p.coverageMonths, level: p.level, stockKnown: p.stockKnown,
+    }))
+    .sort((a, b) => (a.coverage ?? Number.POSITIVE_INFINITY) - (b.coverage ?? Number.POSITIVE_INFINITY));
 }
 
 /* --------------------------- Scorecard par marque -------------------------- */
@@ -402,7 +395,7 @@ export async function brandScorecard(range: Range, prev: Range): Promise<BrandSc
       from content_items where date >= ${range.start}::date and date < ${range.end}::date group by 1
     ),
     terrain as (
-      select p.brand_id, coalesce(sum(al.amount), 0)::float8 as revenue
+      select p.brand_id, ${selloutSumSql("al", "p")} as revenue
       from animations a join animation_lines al on al.animation_id = a.id join products p on p.id = al.product_id
       where a.status = 'DONE' and a.date >= ${range.start}::date and a.date < ${range.end}::date group by 1
     ),

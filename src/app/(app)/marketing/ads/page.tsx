@@ -8,6 +8,7 @@ import { resolvePeriod, PERIOD_OPTIONS, type PeriodParam } from "@/lib/periods";
 import { PageHeader, Card, Kpi, Badge, BrandDot, Section, Empty, Tabs } from "@/components/ui";
 import { SimpleLine } from "@/components/charts";
 import { fmtMAD, fmtNum, fmtPct, fmtDate, fmtDateShort, fmtTime, fmtAgo, delta } from "@/lib/format";
+import { getSettings } from "@/lib/settings";
 import { adsByDim, kpis, diagnose, brandAverages, verdictMeta, primaryResult, type AdKpis } from "@/lib/ads";
 import { accountsFreshness, intradayTotals, liveCampaigns } from "@/lib/meta/live";
 import { AD_PLATFORMS, platformLabel, deliveryStatus } from "@/lib/marketing-shared";
@@ -28,7 +29,8 @@ export default async function AdsPage(props: { searchParams: Promise<{ brand?: s
   const platform = sp.platform && sp.platform in AD_PLATFORMS ? sp.platform : null;
   const dim: "campaign" | "ad" = sp.dim === "ad" ? "ad" : "campaign";
 
-  const [curRows, refRows, byPlatform, daily, coverage, freshness, intraday, live] = await Promise.all([
+  const [settings, curRows, refRows, byPlatform, daily, coverage, freshness, intraday, live] = await Promise.all([
+    getSettings(),
     adsByDim(dim, period, { brandId, platform }),
     adsByDim(dim, period.prev, { brandId, platform }),
     adsByDim("platform", period, { brandId }),
@@ -69,7 +71,7 @@ export default async function AdsPage(props: { searchParams: Promise<{ brand?: s
   const prevTotals = refRows.reduce((a, r) => ({ spend: a.spend + r.spend, revenue: a.revenue + r.revenue, purchases: a.purchases + r.purchases }), { spend: 0, revenue: 0, purchases: 0 });
 
   const analyzed = cur
-    .map((r) => ({ row: r, diag: diagnose(r, prev.get(r.key) ?? null, avg) }))
+    .map((r) => ({ row: r, diag: diagnose(r, prev.get(r.key) ?? null, avg, settings.ads) }))
     .sort((a, b) => VERDICT_ORDER.indexOf(a.diag.verdict) - VERDICT_ORDER.indexOf(b.diag.verdict) || b.row.spend - a.row.spend);
 
   const chart = (daily.rows as Record<string, number | string>[]).map((r) => ({ date: fmtDateShort(String(r.date)), spend: Number(r.spend), revenue: Number(r.revenue) }));
