@@ -498,6 +498,8 @@ export const products = pgTable(
     nameKey: text("name_key").notNull().unique(), // désignation canonique normalisée
     name: text("name").notNull(), // désignation canonique (affichage)
     shortName: text("short_name"), // nom court (ex: fiche stock)
+    /** Import qui a créé la fiche automatiquement (NULL : saisie manuelle). Sert à l'annulation. */
+    importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
     category: text("category"),
     priceRetail: numeric("price_retail", { precision: 12, scale: 2 }), // PVC
     priceWholesale: numeric("price_wholesale", { precision: 12, scale: 2 }), // prix COMANET → client
@@ -527,6 +529,7 @@ export const productAliases = pgTable(
       .notNull()
       .references(() => products.id, { onDelete: "cascade" }),
     source: text("source").notNull().default("IMPORT"),
+    importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("product_aliases_product_idx").on(t.productId)],
@@ -543,6 +546,8 @@ export const clients = pgTable(
     code: text("code"), // code client Sage (facultatif)
     nameKey: text("name_key").notNull().unique(), // nom fonctionnel normalisé
     name: text("name").notNull(), // client fonctionnel (affichage)
+    /** Import qui a créé la fiche automatiquement (NULL : saisie manuelle). Sert à l'annulation. */
+    importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
     type: clientTypeEnum("type").notNull().default("AUTRE"),
     city: text("city"),
     channel: text("channel"), // ex: pharmacie / parapharmacie / grossiste / e-commerce
@@ -564,6 +569,7 @@ export const clientAliases = pgTable(
       .notNull()
       .references(() => clients.id, { onDelete: "cascade" }),
     source: text("source").notNull().default("IMPORT"),
+    importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("client_aliases_client_idx").on(t.clientId)],

@@ -63,8 +63,10 @@ class Resolver {
   pendingProductAliases = new Map<string, string>();
   pendingClientAliases = new Map<string, string>();
   threshold: number;
+  /** Import en cours : marqué sur chaque fiche et alias créés, pour pouvoir les retirer à l'annulation. */
+  importId: string | null;
 
-  constructor(threshold = 0.75) { this.threshold = threshold; }
+  constructor(threshold = 0.75, importId: string | null = null) { this.threshold = threshold; this.importId = importId; }
 
   async load() {
     const [b, p, pa, c, ca] = await Promise.all([
@@ -125,7 +127,7 @@ class Resolver {
     }
     if (!create) return null;
     const [row] = await db.insert(s.products).values({
-      name: name.trim(), nameKey: key, sku: sku ?? null, brandId, needsReview: !brandId, ...extra,
+      name: name.trim(), nameKey: key, sku: sku ?? null, brandId, needsReview: !brandId, importId: this.importId, ...extra,
     }).onConflictDoNothing().returning();
     if (!row) {
       const existing = await db.query.products.findFirst({ where: eq(s.products.nameKey, key) });
@@ -165,7 +167,7 @@ class Resolver {
     const key = normKey(name);
     if (!key) return null;
     const [row] = await db.insert(s.clients).values({
-      name, nameKey: key, code: code ?? null, city: city ?? null, type: inferClientType(name), needsReview: !functionalName || !city, ...extra,
+      name, nameKey: key, code: code ?? null, city: city ?? null, type: inferClientType(name), needsReview: !functionalName || !city, importId: this.importId, ...extra,
     }).onConflictDoNothing().returning();
     if (!row) {
       const existing = await db.query.clients.findFirst({ where: eq(s.clients.nameKey, key) });
@@ -186,8 +188,8 @@ class Resolver {
   }
 
   async flushAliases(source: string) {
-    const pa = [...this.pendingProductAliases].map(([alias, productId]) => ({ alias, productId, source }));
-    const ca = [...this.pendingClientAliases].map(([alias, clientId]) => ({ alias, clientId, source }));
+    const pa = [...this.pendingProductAliases].map(([alias, productId]) => ({ alias, productId, source, importId: this.importId }));
+    const ca = [...this.pendingClientAliases].map(([alias, clientId]) => ({ alias, clientId, source, importId: this.importId }));
     for (let i = 0; i < pa.length; i += 500) await db.insert(s.productAliases).values(pa.slice(i, i + 500)).onConflictDoNothing();
     for (let i = 0; i < ca.length; i += 500) await db.insert(s.clientAliases).values(ca.slice(i, i + 500)).onConflictDoNothing();
     this.pendingProductAliases.clear();
@@ -218,7 +220,7 @@ export async function runImport(params: {
     importId: imp.id, type, fileName, totalRows: rows.length, inserted: 0, updated: 0, duplicates: 0, errors: [], warnings: [],
     created: { products: [], clients: [], brands: [] }, matched: { fuzzyProducts: [] },
   };
-  const resolver = new Resolver(options.fuzzyThreshold);
+  const resolver = new Resolver(options.fuzzyThreshold, imp.id);
   await resolver.load();
 
   try {

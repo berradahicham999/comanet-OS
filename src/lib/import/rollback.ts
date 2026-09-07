@@ -68,7 +68,65 @@ export async function rollbackPlan(importId: string, type: string): Promise<Roll
   }
 }
 
-/** Exécute l'annulation. Renvoie le nombre d'enregistrements retirés. */
+/**
+ * Fiches créées automatiquement par cet import et qui ne servent nulle part ailleurs.
+ *
+ * Un fichier mal qualifié (un reporting publicitaire chargé comme des ventes, par exemple) crée
+ * des produits et des clients qui n'existent pas. Annuler l'import retire ses lignes, mais les
+ * fiches resteraient et pollueraient le stock, la bibliothèque produits et les rapprochements
+ * futurs. On ne retire qu'une fiche **sans aucune référence** : dès qu'une vente, une photo de
+ * stock, une animation ou un objectif d'un autre import s'y rattache, elle est conservée.
+ */
+export type OrphanPlan = { products: number; clients: number; aliases: number };
+
+const ORPHAN_PRODUCT_SQL = (importId: string) => sql`
+  from products p where p.import_id = ${importId}::uuid
+    and not exists (select 1 from sales where product_id = p.id)
+    and not exists (select 1 from stock_snapshots where product_id = p.id)
+    and not exists (select 1 from animation_lines where product_id = p.id)
+    and not exists (select 1 from objectives where product_id = p.id)
+    and not exists (select 1 from regulatory_files where product_id = p.id)
+    and not exists (select 1 from campaign_products where product_id = p.id)
+    and not exists (select 1 from sample_movements where product_id = p.id)
+    and not exists (select 1 from visit_products where product_id = p.id)
+    and not exists (select 1 from visit_samples where product_id = p.id)
+    and not exists (select 1 from content_items where product_id = p.id)
+    and not exists (select 1 from ad_creatives where product_id = p.id)
+    and not exists (select 1 from collaborations where product_id = p.id)
+    and not exists (select 1 from marketing_expenses where product_id = p.id)
+    and not exists (select 1 from activations where product_id = p.id)`;
+
+const ORPHAN_CLIENT_SQL = (importId: string) => sql`
+  from clients c where c.import_id = ${importId}::uuid
+    and not exists (select 1 from sales where client_id = c.id)
+    and not exists (select 1 from animations where client_id = c.id)
+    and not exists (select 1 from activations where client_id = c.id)
+    and not exists (select 1 from user_client_assignments where client_id = c.id)`;
+
+/** Ce que le nettoyage des fiches retirerait, sans rien modifier. */
+export async function orphanPlan(importId: string): Promise<OrphanPlan> {
+  const n = async (q: ReturnType<typeof sql>) => Number((((await db.execute(q)).rows[0] ?? {}) as { n?: number }).n ?? 0);
+  const [products, clients, aliases] = await Promise.all([
+    n(sql`select count(*)::int as n ${ORPHAN_PRODUCT_SQL(importId)}`),
+    n(sql`select count(*)::int as n ${ORPHAN_CLIENT_SQL(importId)}`),
+    n(sql`select (select count(*) from product_aliases where import_id = ${importId}::uuid)::int + (select count(*) from client_aliases where import_id = ${importId}::uuid)::int as n`),
+  ]);
+  return { products, clients, aliases };
+}
+
+/**
+ * Retire les fiches et alias créés par cet import et devenus orphelins. À appeler APRÈS
+ * `rollbackRows()` : c'est la suppression des lignes qui rend les fiches orphelines.
+ */
+export async function rollbackOrphans(importId: string): Promise<OrphanPlan> {
+  const aliases = (await db.execute(sql`delete from product_aliases where import_id = ${importId}::uuid`)).rowCount ?? 0;
+  const clientAliases = (await db.execute(sql`delete from client_aliases where import_id = ${importId}::uuid`)).rowCount ?? 0;
+  const products = (await db.execute(sql`delete ${ORPHAN_PRODUCT_SQL(importId)}`)).rowCount ?? 0;
+  const clients = (await db.execute(sql`delete ${ORPHAN_CLIENT_SQL(importId)}`)).rowCount ?? 0;
+  return { products, clients, aliases: aliases + clientAliases };
+}
+
+/** Exécute l'annulation des lignes. Renvoie le nombre d'enregistrements retirés. */
 export async function rollbackRows(importId: string, type: string): Promise<number> {
   switch (type) {
     case "SALES": {

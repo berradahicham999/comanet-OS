@@ -6,8 +6,8 @@ import { imports as importsTable } from "@/db/schema";
 import { requireAnyModule, getAccess } from "@/lib/access";
 import { PageHeader, Card, Badge } from "@/components/ui";
 import { IMPORT_TYPES, FIELDS, IMPORT_MODULE, type ImportType } from "@/lib/import/fields";
-import { rollbackImport } from "../actions";
-import { isReversible, irreversibleReason, rollbackPlan } from "@/lib/import/rollback";
+import { rollbackImport, cleanupImportOrphans } from "../actions";
+import { isReversible, irreversibleReason, rollbackPlan, orphanPlan } from "@/lib/import/rollback";
 import { fmtDate, fmtNum, fmtMAD } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +22,11 @@ export default async function ImportDetailPage(props: { params: Promise<{ id: st
   const stats = (await db.execute(sql`select count(*)::int as n, coalesce(sum(amount),0)::float8 as amount, min(date)::text as min_date, max(date)::text as max_date from sales where import_id = ${id}::uuid`)).rows[0] as { n: number; amount: number; min_date: string | null; max_date: string | null };
   const typeDef = IMPORT_TYPES.find((t) => t.key === imp.type);
   const plan = isReversible(imp.type) ? await rollbackPlan(id, imp.type) : null;
+  const orphans = plan && (plan.count > 0 || imp.status === "FAILED") ? await orphanPlan(id) : null;
+  const leftovers = imp.status === "FAILED" && orphans && (orphans.products || orphans.clients || orphans.aliases) ? orphans : null;
+  const orphanText = orphans && (orphans.products || orphans.clients)
+    ? `Retire aussi les fiches créées par cet import et utilisées nulle part ailleurs : ${orphans.products} produit(s), ${orphans.clients} client(s). Une fiche rattachée à d'autres ventes, photos de stock ou animations est conservée.`
+    : "Les produits, clients et marques créés au passage et utilisés ailleurs sont conservés.";
   const canRollback = access.perms[IMPORT_MODULE[imp.type as ImportType]]?.validate || access.perms.administration.validate;
   const fuzzy = imp.warnings.filter((w) => w.startsWith("≈"));
   const other = imp.warnings.filter((w) => !w.startsWith("≈"));
@@ -53,6 +58,21 @@ export default async function ImportDetailPage(props: { params: Promise<{ id: st
       <Card className="mt-4" title="Annuler cet import">
         {!isReversible(imp.type) ? (
           <p className="text-[13px] text-ink-2">{irreversibleReason(imp.type)}</p>
+        ) : leftovers ? (
+          <>
+            <p className="text-[13px] text-ink-2">
+              Cet import est annulé, mais il avait créé des fiches qui ne servent nulle part : <b>{leftovers.products} produit(s)</b>, <b>{leftovers.clients} client(s)</b> et {leftovers.aliases} alias de rapprochement.
+              Elles apparaissent en « Stock non renseigné » et faussent les rapprochements des prochains imports. Une fiche rattachée à d&apos;autres ventes, photos de stock ou animations n&apos;est pas concernée.
+            </p>
+            {!canRollback ? (
+              <p className="text-[12.5px] text-faint mt-2">Retirer ces fiches demande le droit « Valider » sur le module {IMPORT_MODULE[imp.type as ImportType]}.</p>
+            ) : (
+              <form action={cleanupImportOrphans} className="mt-3">
+                <input type="hidden" name="id" value={id} />
+                <button className="btn-secondary btn-sm text-red" type="submit">Retirer ces fiches orphelines</button>
+              </form>
+            )}
+          </>
         ) : imp.status !== "DONE" ? (
           <p className="text-[13px] text-ink-2">Cet import n&apos;est pas dans l&apos;état « terminé » : il n&apos;y a rien à annuler.</p>
         ) : !plan || plan.count === 0 ? (
@@ -61,8 +81,8 @@ export default async function ImportDetailPage(props: { params: Promise<{ id: st
           <>
             <p className="text-[13px] text-ink-2">
               Retire <b>{fmtNum(plan.count)} {plan.label}</b>{plan.detail ? ` (${plan.detail})` : ""} de la base.
-              Les produits, clients et marques créés au passage sont conservés : ils peuvent servir ailleurs.
-              Recharger le même fichier rétablit les lignes à l&apos;identique.
+              {" "}{orphanText}
+              {" "}Recharger le même fichier rétablit les lignes à l&apos;identique.
             </p>
             {!canRollback ? (
               <p className="text-[12.5px] text-faint mt-2">Annuler cet import demande le droit « Valider » sur le module {IMPORT_MODULE[imp.type as ImportType]}.</p>

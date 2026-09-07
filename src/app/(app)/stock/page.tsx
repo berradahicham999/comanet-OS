@@ -20,7 +20,11 @@ export default async function StockPage(props: { searchParams: Promise<{ brand?:
   const [all, settings, brands] = await Promise.all([productStocks({ brandId: sp.brand || undefined }, ref), getSettings(), listBrands()]);
   const sum = stockSummary(all);
   const view = sp.view ?? "all";
-  let list = all;
+  // La vue principale ne montre que les produits dont le stock est connu : un produit sans
+  // photo de stock (échantillons, référence hors fichier stock) reste accessible dans l'onglet
+  // « Stock non renseigné », il n'encombre pas la lecture des couvertures.
+  const known = all.filter((p) => p.stockKnown);
+  let list = known;
   if (view === "order") list = all.filter((p) => p.recommendedOrder > 0);
   else if (view === "risk") list = all.filter((p) => p.level === "red" || p.level === "orange");
   else if (view === "over") list = all.filter((p) => p.coverageMonths !== null && p.coverageMonths > 6);
@@ -44,7 +48,7 @@ export default async function StockPage(props: { searchParams: Promise<{ brand?:
           <Link href={qs({ view: "order" })} className={`card px-3 py-2.5 ${view === "order" ? "ring-2 ring-accent/40" : ""}`}><div className="text-[11px] text-muted">À commander</div><div className="text-[20px] font-semibold">{sum.toOrder.length} {seeMargins && <span className="text-[12px] font-medium text-muted">≈ {fmtMAD(toOrderValue, { compact: true })}</span>}</div></Link>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Tabs current={qs({ view })} tabs={[{ href: qs({ view: "all" }), label: "Tous", count: all.length }, { href: qs({ view: "order" }), label: "À commander", count: sum.toOrder.length }, { href: qs({ view: "risk" }), label: "À risque", count: sum.red + sum.orange }, { href: qs({ view: "over" }), label: "Surstock", count: sum.overstock }, { href: qs({ view: "unknown" }), label: "Stock non renseigné", count: sum.unknown }]} />
+          <Tabs current={qs({ view })} tabs={[{ href: qs({ view: "all" }), label: "Tous", count: known.length }, { href: qs({ view: "order" }), label: "À commander", count: sum.toOrder.length }, { href: qs({ view: "risk" }), label: "À risque", count: sum.red + sum.orange }, { href: qs({ view: "over" }), label: "Surstock", count: sum.overstock }, { href: qs({ view: "unknown" }), label: "Stock non renseigné", count: sum.unknown }]} />
           <form action="/stock" method="get" className="flex gap-2 ml-auto">
             {view !== "all" && <input type="hidden" name="view" value={view} />}
             <select name="brand" defaultValue={sp.brand ?? ""} className="select h-8 text-[12px] w-auto"><option value="">Toutes les marques</option>{brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>
@@ -73,7 +77,7 @@ export default async function StockPage(props: { searchParams: Promise<{ brand?:
                 {seeMargins && <td className="num text-muted">{p.stockKnown ? fmtMAD(p.stockValue, { compact: true, suffix: false }) : "—"}</td>}
               </tr>
             ))}
-            {list.length === 0 && <tr><td colSpan={11} className="text-center text-muted py-8">Aucun produit dans cette vue.</td></tr>}
+            {list.length === 0 && <tr><td colSpan={11} className="text-center text-muted py-8">{view === "all" && sum.unknown > 0 ? <>Aucune photo de stock importée. <Link href="/imports?type=STOCK" className="underline">Importer un fichier de stock</Link> (colonnes Marque, Nom produit, Stock).</> : "Aucun produit dans cette vue."}</td></tr>}
           </tbody>
         </table>
       </div>
