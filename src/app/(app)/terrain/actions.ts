@@ -20,7 +20,9 @@ const str = (fd: FormData, k: string) => String(fd.get(k) ?? "");
 
 function readForm(formData: FormData, forcedAnimatriceId: string | null): RawAnimationInput {
   const lines: RawAnimationInput["lines"] = [];
-  for (let i = 0; i < 30; i++) {
+  // 60 : la saisie rapide affiche jusqu'à 20 produits habituels et permet d'en ajouter
+  // d'autres — la journée la plus dense observée dans l'historique en compte 28.
+  for (let i = 0; i < 60; i++) {
     const productId = str(formData, `product_${i}`).trim();
     if (!productId) continue;
     lines.push({ productId, qty: str(formData, `qty_${i}`), stock: str(formData, `stock_${i}`) });
