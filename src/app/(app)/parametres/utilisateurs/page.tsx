@@ -27,7 +27,7 @@ export default async function UsersAdminPage(props: { searchParams: Promise<{ q?
           <Link href="/parametres/utilisateurs/nouveau" className="btn-primary btn-sm">+ Nouveau compte</Link>
         </>}
       >
-        <Tabs current="/parametres/utilisateurs" tabs={[{ href: "/parametres?tab=regles", label: "Règles & seuils" }, { href: "/parametres?tab=objectifs", label: "Objectifs" }, { href: "/parametres/utilisateurs", label: "Utilisateurs & droits" }, { href: "/parametres/modeles", label: "Modèles de rôle" }, { href: "/parametres?tab=demo", label: "Données de démo" }]} />
+        <Tabs current="/parametres/utilisateurs" tabs={[{ href: "/parametres?tab=regles", label: "Règles & seuils" }, { href: "/parametres?tab=objectifs", label: "Objectifs" }, { href: "/parametres/utilisateurs", label: "Utilisateurs & droits" }, { href: "/parametres/modeles", label: "Modèles de rôle" }, { href: "/parametres/contenus", label: "Contenus" }, { href: "/parametres?tab=demo", label: "Données de démo" }]} />
       </PageHeader>
 
       {sp.error && <div className="mb-4 rounded-2xl bg-red-soft border border-red/30 px-4 py-3 text-[13px] text-red">{sp.error}</div>}

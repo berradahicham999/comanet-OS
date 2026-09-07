@@ -5,6 +5,7 @@
  *   npm run db:seed:demo
  */
 import "dotenv/config";
+import { seedContentDemo } from "@/lib/content/demo";
 import bcrypt from "bcryptjs";
 import { sql } from "drizzle-orm";
 import { db } from "./index";
@@ -113,18 +114,9 @@ export async function seedDemo() {
     ]);
   }
 
-  // ---- Planning éditorial : mois courant + suivant
+  // ---- Planning éditorial : module dédié (src/lib/content/demo.ts), même marqueur [DÉMO]
+  const contentValues = { length: await seedContentDemo() };
   const mk = U("MARKETING");
-  const formats = ["Reel", "Carrousel", "Story", "UGC", "Post"], platforms = ["Instagram", "TikTok", "Facebook"], objectives = ["Notoriété", "Conversion", "Éducation", "Engagement", "Drive-to-store"];
-  const statuses: s.ContentStatus[] = ["IDEE", "BRIEF", "CREATION", "VALIDATION", "PROGRAMME", "PUBLIE", "ANALYSE"];
-  const contentValues: (typeof s.contentItems.$inferInsert)[] = [];
-  const som = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1, 12));
-  for (let i = 0; i < 24; i++) {
-    const p = pick(prodList);
-    const date = addDays(som, i * 2 + 1);
-    contentValues.push({ date: iso(date), brandId: p.brandId!, productId: p.id, title: `${p.name} — ${pick(["bénéfices clés", "avant / après", "routine du soir", "témoignage cliente", "conseil pharmacien", "unboxing"])}`, format: formats[i % 5], platform: platforms[i % 3], objective: objectives[i % 5], responsibleId: mk.id, status: date < today ? pick(["PUBLIE", "ANALYSE", "PROGRAMME"]) : statuses[i % 5], brief: `${TAG} Reprendre l'angle marketing et les claims autorisés de la fiche produit.` });
-  }
-  await db.insert(s.contentItems).values(contentValues);
 
   // ---- Tâches
   const admin = U("ADMIN"), trade = U("TRADE"), reg = U("REGLEMENTAIRE");

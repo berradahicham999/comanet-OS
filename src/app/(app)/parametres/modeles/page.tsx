@@ -20,7 +20,7 @@ export default async function TemplatesPage(props: { searchParams: Promise<{ ok?
         subtitle="Raccourcis de pré-remplissage pour les fiches utilisateur. Modifier un modèle ne change pas les comptes déjà configurés : il faut le réappliquer explicitement."
         actions={<Link href="/parametres/modeles/nouveau" className="btn-primary btn-sm">+ Nouveau modèle</Link>}
       >
-        <Tabs current="/parametres/modeles" tabs={[{ href: "/parametres?tab=regles", label: "Règles & seuils" }, { href: "/parametres?tab=objectifs", label: "Objectifs" }, { href: "/parametres/utilisateurs", label: "Utilisateurs & droits" }, { href: "/parametres/modeles", label: "Modèles de rôle" }, { href: "/parametres?tab=demo", label: "Données de démo" }]} />
+        <Tabs current="/parametres/modeles" tabs={[{ href: "/parametres?tab=regles", label: "Règles & seuils" }, { href: "/parametres?tab=objectifs", label: "Objectifs" }, { href: "/parametres/utilisateurs", label: "Utilisateurs & droits" }, { href: "/parametres/modeles", label: "Modèles de rôle" }, { href: "/parametres/contenus", label: "Contenus" }, { href: "/parametres?tab=demo", label: "Données de démo" }]} />
       </PageHeader>
       {sp.ok && <div className="mb-4 rounded-2xl bg-green-soft border border-green/30 px-4 py-3 text-[13px] text-green">Modèle enregistré.</div>}
       {sp.error && <div className="mb-4 rounded-2xl bg-red-soft border border-red/30 px-4 py-3 text-[13px] text-red">{sp.error}</div>}

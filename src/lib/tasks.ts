@@ -11,7 +11,7 @@ export const SOURCE_LABEL: Record<string, string> = { MANUAL: "Manuelle", ACTION
 
 export function entityHref(type: string | null, id: string | null) {
   if (!type || !id) return null;
-  const map: Record<string, string> = { product: "/produits/", client: "/clients/", brand: "/marques/", regulatory: "/reglementaire/", campaign: "/marketing/campagnes/", animation: "/terrain/" };
+  const map: Record<string, string> = { product: "/produits/", client: "/clients/", brand: "/marques/", regulatory: "/reglementaire/", campaign: "/marketing/campagnes/", animation: "/terrain/", content: "/marketing/planning/" };
   return map[type] ? map[type] + id : null;
 }
 

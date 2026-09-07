@@ -18,6 +18,7 @@ import {
   numeric,
   boolean,
   date,
+  time,
   timestamp,
   jsonb,
   index,
@@ -136,16 +137,6 @@ export const expenseStatusEnum = pgEnum("expense_status", [
   "PLANNED",
   "COMMITTED",
   "SPENT",
-]);
-
-export const contentStatusEnum = pgEnum("content_status", [
-  "IDEE",
-  "BRIEF",
-  "CREATION",
-  "VALIDATION",
-  "PROGRAMME",
-  "PUBLIE",
-  "ANALYSE",
 ]);
 
 export const animationStatusEnum = pgEnum("animation_status", [
@@ -1503,38 +1494,237 @@ export const marketingExpenses = pgTable(
   ],
 );
 
+/**
+ * Contenus du planning éditorial.
+ *
+ * Plateforme, format, objectif et statut sont des CLÉS vers les tables de référence
+ * (`content_platforms`, `content_formats`, `content_objectives`, `content_statuses`),
+ * modifiables depuis /parametres. Le cycle de vie est piloté par `content_status_transitions`
+ * et la fonction unique `transition()` de `src/lib/content/workflow.ts`.
+ * Un contenu archivé n'est jamais supprimé : il garde brief, fichiers et historique.
+ */
 export const contentItems = pgTable(
   "content_items",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     date: date("date").notNull(),
+    publishTime: time("publish_time"),
+    /** Date de livraison du livrable, distincte de la date de publication. */
+    deadline: date("deadline"),
     brandId: uuid("brand_id")
       .notNull()
       .references(() => brands.id, { onDelete: "cascade" }),
+    /** Produit principal ; la liste complète vit dans `content_products`. */
     productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
     title: text("title").notNull(),
-    format: text("format"), // Reel, Story, Post, Carrousel, UGC, Vidéo…
-    platform: text("platform"), // Instagram, TikTok, Facebook, YouTube…
-    objective: text("objective"),
+    format: text("format").references(() => contentFormats.key, { onDelete: "set null" }),
+    platform: text("platform").references(() => contentPlatforms.key, { onDelete: "set null" }),
+    objective: text("objective").references(() => contentObjectives.key, { onDelete: "set null" }),
+    /** Brief libre (V1) — conservé comme « notes de brief ». */
     brief: text("brief"),
+    keyMessage: text("key_message"),
+    angle: text("angle"),
+    hook: text("hook"),
+    caption: text("caption"),
+    hashtags: text("hashtags"),
+    cta: text("cta"),
+    constraints: text("constraints"),
+    mandatoryMentions: text("mandatory_mentions"),
+    forbiddenClaims: text("forbidden_claims"),
+    /** Références / inspirations : [{ url, label }]. Les images uploadées vont dans `content_assets` (kind REFERENCE). */
+    references: jsonb("references").$type<{ url: string; label?: string }[]>().notNull().default([]),
+    deliverables: text("deliverables"),
+    templateId: uuid("template_id").references(() => briefTemplates.id, { onDelete: "set null" }),
     responsibleId: uuid("responsible_id").references(() => users.id, { onDelete: "set null" }),
-    status: contentStatusEnum("status").notNull().default("IDEE"),
+    validatorId: uuid("validator_id").references(() => users.id, { onDelete: "set null" }),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    status: text("status").notNull().default("IDEE").references(() => contentStatuses.key),
     campaignId: uuid("campaign_id").references((): any => campaigns.id, { onDelete: "set null" }),
     activationId: uuid("activation_id").references((): any => activations.id, { onDelete: "set null" }),
     influencerId: uuid("influencer_id").references((): any => influencers.id, { onDelete: "set null" }),
     budget: numeric("budget", { precision: 12, scale: 2 }),
+    /** Lien du post publié. */
     link: text("link"),
+    /** Performance saisie à la main (facultative) en attendant les connecteurs. */
+    reach: integer("reach"),
+    engagement: integer("engagement"),
+    perfNotes: text("perf_notes"),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("content_date_idx").on(t.date),
     index("content_items_brand_idx").on(t.brandId),
+    index("content_items_brand_date_idx").on(t.brandId, t.date),
+    index("content_items_status_idx").on(t.status),
+    index("content_items_platform_idx").on(t.platform),
+    index("content_items_deadline_idx").on(t.deadline),
     index("content_items_product_idx").on(t.productId),
     index("content_items_responsible_idx").on(t.responsibleId),
+    index("content_items_validator_idx").on(t.validatorId),
+    index("content_items_created_by_idx").on(t.createdById),
+    index("content_items_template_idx").on(t.templateId),
     index("content_items_campaign_idx").on(t.campaignId),
     index("content_items_activation_idx").on(t.activationId),
     index("content_items_influencer_idx").on(t.influencerId),
   ],
+);
+
+/* Référentiels du planning éditorial (configurables dans /parametres) */
+
+export const contentPlatforms = pgTable("content_platforms", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  icon: text("icon"),
+  sort: integer("sort").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+  specs: jsonb("specs").$type<{ ratios?: string[]; maxDurationSec?: number; notes?: string }>().notNull().default({}),
+});
+
+export const contentFormats = pgTable("content_formats", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  sort: integer("sort").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+  defaultDeliverable: text("default_deliverable"),
+});
+
+export const contentObjectives = pgTable("content_objectives", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  sort: integer("sort").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+});
+
+export const contentStatuses = pgTable("content_statuses", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  tone: text("tone").notNull().default("gray"),
+  sort: integer("sort").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+  isPublished: boolean("is_published").notNull().default(false),
+  isArchived: boolean("is_archived").notNull().default(false),
+  awaitingValidation: boolean("awaiting_validation").notNull().default(false),
+  inProduction: boolean("in_production").notNull().default(false),
+});
+
+export const contentStatusTransitions = pgTable(
+  "content_status_transitions",
+  {
+    fromKey: text("from_key").notNull().references(() => contentStatuses.key, { onDelete: "cascade" }),
+    toKey: text("to_key").notNull().references(() => contentStatuses.key, { onDelete: "cascade" }),
+    requiresValidator: boolean("requires_validator").notNull().default(false),
+    requiresComment: boolean("requires_comment").notNull().default(false),
+    label: text("label"),
+  },
+  (t) => [primaryKey({ columns: [t.fromKey, t.toKey] })],
+);
+
+export type BriefTemplateDefaults = {
+  keyMessage?: string; angle?: string; hook?: string; caption?: string; hashtags?: string; cta?: string;
+  constraints?: string; mandatoryMentions?: string; forbiddenClaims?: string; deliverables?: string; deadlineOffsetDays?: number;
+};
+
+export const briefTemplates = pgTable(
+  "brief_templates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    brandId: uuid("brand_id").references(() => brands.id, { onDelete: "set null" }),
+    objectiveKey: text("objective_key").references(() => contentObjectives.key, { onDelete: "set null" }),
+    platformKey: text("platform_key").references(() => contentPlatforms.key, { onDelete: "set null" }),
+    formatKey: text("format_key").references(() => contentFormats.key, { onDelete: "set null" }),
+    defaults: jsonb("defaults").$type<BriefTemplateDefaults>().notNull().default({}),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("brief_templates_brand_idx").on(t.brandId)],
+);
+
+export const brandValidators = pgTable(
+  "brand_validators",
+  {
+    brandId: uuid("brand_id").notNull().references(() => brands.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.brandId, t.userId] }), index("brand_validators_user_idx").on(t.userId)],
+);
+
+export const contentProducts = pgTable(
+  "content_products",
+  {
+    contentId: uuid("content_id").notNull().references(() => contentItems.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.contentId, t.productId] }), index("content_products_product_idx").on(t.productId)],
+);
+
+/** Historique des changements de statut : qui, quand, commentaire. Jamais purgé. */
+export const contentStatusHistory = pgTable(
+  "content_status_history",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    contentId: uuid("content_id").notNull().references(() => contentItems.id, { onDelete: "cascade" }),
+    fromStatus: text("from_status"),
+    toStatus: text("to_status").notNull(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    comment: text("comment"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("content_status_history_content_idx").on(t.contentId, t.createdAt), index("content_status_history_user_idx").on(t.userId)],
+);
+
+export const contentComments = pgTable(
+  "content_comments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    contentId: uuid("content_id").notNull().references(() => contentItems.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("content_comments_content_idx").on(t.contentId, t.createdAt), index("content_comments_user_idx").on(t.userId)],
+);
+
+/** Livrables (versionnés) et références d'un contenu. Le fichier est stocké en base (`data`). */
+export const contentAssets = pgTable(
+  "content_assets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    contentId: uuid("content_id").notNull().references(() => contentItems.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull().default("LIVRABLE"), // LIVRABLE | REFERENCE
+    name: text("name").notNull(),
+    mime: text("mime").notNull().default("application/octet-stream"),
+    size: integer("size").notNull().default(0),
+    version: integer("version").notNull().default(1),
+    data: customType<{ data: Buffer; driverData: Buffer }>({ dataType() { return "bytea"; } })("data"),
+    uploadedById: uuid("uploaded_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("content_assets_content_idx").on(t.contentId, t.kind, t.version), index("content_assets_user_idx").on(t.uploadedById)],
+);
+
+/* ------------------------------------------------------------------ */
+/* Notifications in-app                                                */
+/* ------------------------------------------------------------------ */
+
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    title: text("title").notNull(),
+    body: text("body"),
+    href: text("href"),
+    entityType: text("entity_type"),
+    entityId: uuid("entity_id"),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("notifications_user_unread_idx").on(t.userId, t.readAt, t.createdAt)],
 );
 
 /* ------------------------------------------------------------------ */
@@ -1905,7 +2095,16 @@ export type DataScope = (typeof dataScopeEnum.enumValues)[number];
 export type TaskStatus = (typeof taskStatusEnum.enumValues)[number];
 export type TaskPriority = (typeof taskPriorityEnum.enumValues)[number];
 export type BudgetCategory = (typeof budgetCategoryEnum.enumValues)[number];
-export type ContentStatus = (typeof contentStatusEnum.enumValues)[number];
+/** Clé de `content_statuses` (référentiel en base, plus un enum). */
+export type ContentStatus = string;
+export type ContentPlatform = typeof contentPlatforms.$inferSelect;
+export type ContentFormat = typeof contentFormats.$inferSelect;
+export type ContentObjective = typeof contentObjectives.$inferSelect;
+export type ContentStatusRow = typeof contentStatuses.$inferSelect;
+export type ContentStatusTransition = typeof contentStatusTransitions.$inferSelect;
+export type BriefTemplate = typeof briefTemplates.$inferSelect;
+export type ContentAsset = typeof contentAssets.$inferSelect;
+export type Notification = typeof notifications.$inferSelect;
 export type RegulatoryStatus = (typeof regulatoryStatusEnum.enumValues)[number];
 export type DoctorStatus = (typeof doctorStatusEnum.enumValues)[number];
 export type DoctorPotential = (typeof doctorPotentialEnum.enumValues)[number];

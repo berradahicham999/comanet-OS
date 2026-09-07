@@ -15,6 +15,7 @@ import { budgetRule, adsRule, influenceRule, campaignStockRule } from "./marketi
 import { terrainRules, overdueTasksRule } from "./execution-rules";
 import { animationPerformanceRule } from "./animation-rules";
 import { medicalRules } from "./medical-rules";
+import { contentLateRule } from "./content-rules";
 
 export * from "./types";
 
@@ -32,6 +33,7 @@ export const RULES: Rule[] = [
   animationPerformanceRule,
   overstockRule,
   overdueTasksRule,
+  contentLateRule,
   dataQualityRule,
   ...medicalRules,
 ];

@@ -44,6 +44,7 @@ src/lib/              logique métier, une bibliothèque par domaine
 src/lib/import/       moteur d'import (parse → mapping → run → rollback)
 src/lib/meta/         connexion Meta Ads en lecture seule (client → sync → links)
 src/lib/rules/        moteur de recommandations (Action Center)
+src/lib/content/      planning éditorial (référentiels, workflow, notifications, fichiers, démo)
 drizzle/              migrations SQL + meta/_journal.json
 ```
 
@@ -83,8 +84,16 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Ville, clé d'animation | `src/lib/animations-shared.ts` | `normalizeCity()`, `cityKey()`, `animationKey()` |
 | Droits d'accès, portée, interrupteurs | `src/lib/permissions.ts` + `src/lib/access.ts` | `requireAccess()`, `requirePermission()`, `requireAdmin()`, `requireFlag()`, `canDo()`, `isOwnOnly()`, `brandFilter()`, `clientFilter()`, `hasFlag()` |
 | Qui est animatrice / délégué | `src/lib/users.ts` | `listAnimatrices()`, `listDelegates()`, `ANIMATRICE_SQL`, `DELEGATE_SQL` |
+| Statut d'un contenu éditorial, transitions, retards | `src/lib/content/workflow.ts` + `src/lib/content/shared.ts` | `transition()` (seule écriture du statut), `checkTransition()`, `nextTransitions()`, `lateness()`, `canValidateBrand()` |
 
 `tests/definitions-uniques.test.ts` échoue si une seconde définition réapparaît.
+
+**Planning éditorial** (`docs/guide-planning-editorial.md`). Plateformes, formats, objectifs, statuts et
+transitions sont des tables de référence modifiables dans `/parametres/contenus` : le code ne connaît
+aucun nom de statut, il lit les drapeaux (`is_published`, `awaiting_validation`, `in_production`,
+`is_archived`). Archiver ne supprime rien. Les livrables sont stockés en `bytea` dans `content_assets`
+via `src/lib/content/assets.ts` (seul module à toucher pour passer à un stockage objet). Les notifications
+in-app vivent dans `notifications` (`src/lib/content/notify.ts`).
 
 **Permissions modulaires par utilisateur** (`docs/permissions-modulaires.md`). Chaque compte porte
 sa propre matrice `user_permissions` (14 modules × Voir / Créer / Modifier / Valider), une portée

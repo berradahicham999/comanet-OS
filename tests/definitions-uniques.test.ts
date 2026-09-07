@@ -111,3 +111,17 @@ describe("mondayOf — une seule définition", () => {
     assert.deepEqual(found, ["src/lib/format.ts"]);
   });
 });
+
+describe("Planning éditorial — une seule façon de changer un statut", () => {
+  test("aucune mise à jour directe de content_items.status hors du workflow", () => {
+    // `transition()` (workflow.ts) est la seule fonction autorisée à changer le statut d'un contenu :
+    // elle vérifie le référentiel des transitions, les droits, écrit l'historique et notifie.
+    const found = codeHits(/update\(contentItems\)\s*\.set\(\{[^}]*\bstatus\b|update\s+content_items\s+set[^;]*\bstatus\s*=/i, ["lib/content/workflow.ts", "lib/content/demo.ts"]);
+    assert.deepEqual(found, [], `Statut de contenu modifié hors de transition() dans : ${found.join(", ")}`);
+  });
+  test("aucun nom de statut de contenu codé en dur dans les pages et règles", () => {
+    // Les statuts vivent dans `content_statuses` ; le code raisonne sur leurs drapeaux (is_published, awaiting_validation…).
+    const found = codeHits(/['"](BRIEF_PRET|EN_CREATION|A_VALIDER|CORRECTIONS|PROGRAMME)['"]/, ["db/seed-demo.ts", "lib/content/demo.ts", "db/schema.ts"]);
+    assert.deepEqual(found, [], `Nom de statut de contenu en dur dans : ${found.join(", ")}`);
+  });
+});

@@ -4,13 +4,13 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import clsx from "clsx";
-import { Eye, Menu, Search, X } from "lucide-react";
+import { Bell, Eye, Menu, Search, X } from "lucide-react";
 import type { NavGroup, NavItem } from "@/components/nav-config";
 import type { SessionUser } from "@/lib/auth";
 import { Sidebar, isActive } from "./sidebar";
 import { NavIcon } from "./nav-icons";
 
-export function AppShell({ groups, tabs, user, logout, canSearch, preview, children }: {
+export function AppShell({ groups, tabs, user, logout, canSearch, preview, unread = 0, children }: {
   groups: NavGroup[];
   tabs: NavItem[];
   user: SessionUser;
@@ -18,6 +18,8 @@ export function AppShell({ groups, tabs, user, logout, canSearch, preview, child
   canSearch: boolean;
   /** Prévisualisation « en tant que » : bandeau permanent, lecture seule. */
   preview: { adminName: string; targetName: string; targetId: string } | null;
+  /** Notifications non lues (cloche de l'en-tête). */
+  unread?: number;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -89,6 +91,10 @@ export function AppShell({ groups, tabs, user, logout, canSearch, preview, child
               />
             </form>
           )}
+          <Link href="/notifications" className={clsx("relative btn-ghost h-9 w-9 p-0 rounded-full", pathname === "/notifications" && "bg-black/5")} aria-label={unread ? `${unread} notification${unread > 1 ? "s" : ""} non lue${unread > 1 ? "s" : ""}` : "Notifications"} title="Notifications">
+            <Bell size={18} />
+            {unread > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red text-white text-[10px] font-semibold flex items-center justify-center">{unread > 99 ? "99+" : unread}</span>}
+          </Link>
         </header>
 
         <main className="flex-1 px-3 sm:px-5 lg:px-7 py-4 sm:py-6 pb-24 lg:pb-8 max-w-[1440px] w-full mx-auto">
