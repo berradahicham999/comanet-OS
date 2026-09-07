@@ -125,3 +125,23 @@ describe("Planning éditorial — une seule façon de changer un statut", () => 
     assert.deepEqual(found, [], `Nom de statut de contenu en dur dans : ${found.join(", ")}`);
   });
 });
+
+describe("Activations — un seul workflow, un seul reflet budgétaire", () => {
+  test("aucune mise à jour directe de activations.status hors du workflow", () => {
+    const found = codeHits(/update\(activations\)\s*\.set\(\{[^}]*\bstatus\b|update\s+activations\s+set[^;]*\bstatus\s*=/i, ["lib/activations/workflow.ts", "lib/activations/demo.ts"]);
+    assert.deepEqual(found, [], `Statut d'activation modifié hors de transitionActivation() dans : ${found.join(", ")}`);
+  });
+  test("aucun nom de statut d'activation codé en dur dans les pages et règles", () => {
+    // TERMINEE / ANNULEE / VALIDEE existent aussi comme statuts de visite médicale : on ne teste que les clés propres aux activations.
+    const found = codeHits(/['"](PROPOSEE|EN_PREPARATION|MESUREE|ARCHIVEE)['"]/, ["db/seed-demo.ts", "lib/activations/demo.ts", "db/schema.ts"]);
+    assert.deepEqual(found, [], `Nom de statut d'activation en dur dans : ${found.join(", ")}`);
+  });
+  test("marketing_expenses n'est alimentée pour une activation que par budget.ts", () => {
+    const found = codeHits(/insert into marketing_expenses[^;]*activation_ref|insert\(marketingExpenses\)[^;]*activationRef/i, ["lib/activations/budget.ts"]);
+    assert.deepEqual(found, [], `Reflet budgétaire concurrent dans : ${found.join(", ")}`);
+  });
+  test("les totaux budgétaires ne sont calculés que par budgetTotals()", () => {
+    const found = hits(/export function budgetTotals\(/);
+    assert.deepEqual(found, ["src/lib/activations/shared.ts"]);
+  });
+});

@@ -70,6 +70,39 @@ export type ComanetSettings = {
    * aucun verdict n'est rendu — la campagne est classée WATCH.
    */
   ads: AdThresholds;
+  /** Fenêtres et délais du module Activations (mesure du retour, rappels). */
+  activations: ActivationSettings;
+};
+
+/** Réglages du module Activations : aucun de ces nombres n'est écrit dans le code de mesure. */
+export type ActivationSettings = {
+  /** Jours de ventes comparés AVANT le début de l'activation. */
+  windowBeforeDays: number;
+  /** Jours de ventes observés APRÈS la fin de l'activation. */
+  windowAfterDays: number;
+  /** Jours après la fin au-delà desquels des résultats non saisis déclenchent un rappel. */
+  resultsDelayDays: number;
+  /** Jours avant le début à partir desquels une checklist incomplète devient une action prioritaire. */
+  checklistAlertDays: number;
+  /** Dépassement de l'engagé sur le prévu (%) déclenchant une alerte budget. */
+  overrunAlertPct: number;
+  /** Variation de CA (%) en dessous de laquelle le verdict est « ajuster » plutôt que « refaire ». */
+  roiRepeatMinUpliftPct: number;
+  /** ROI (incrément CA / coût complet) minimal pour « refaire ». */
+  roiRepeatMin: number;
+  /** Article d'inventaire considéré dormant après ce nombre de jours sans sortie. */
+  inventoryDormantDays: number;
+};
+
+export const DEFAULT_ACTIVATION_SETTINGS: ActivationSettings = {
+  windowBeforeDays: 30,
+  windowAfterDays: 30,
+  resultsDelayDays: 15,
+  checklistAlertDays: 7,
+  overrunAlertPct: 0,
+  roiRepeatMinUpliftPct: 10,
+  roiRepeatMin: 1,
+  inventoryDormantDays: 180,
 };
 
 /** Seuils du moteur publicitaire, tels que passés à `diagnose()`. */
@@ -145,6 +178,7 @@ export const DEFAULT_SETTINGS: ComanetSettings = {
   metaAttributionWindow: "7d_click,1d_view",
   metaSyncWindowDays: 28,
   ads: DEFAULT_AD_THRESHOLDS,
+  activations: DEFAULT_ACTIVATION_SETTINGS,
 };
 
 export const SETTINGS_KEY = "comanet.rules";
@@ -163,6 +197,7 @@ export function mergeSettings(stored: Partial<ComanetSettings> | null | undefine
     ...stored,
     coverage: { ...DEFAULT_SETTINGS.coverage, ...(stored.coverage ?? {}) },
     ads: { ...DEFAULT_AD_THRESHOLDS, ...(stored.ads ?? {}) },
+    activations: { ...DEFAULT_ACTIVATION_SETTINGS, ...(stored.activations ?? {}) },
   };
 }
 

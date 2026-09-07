@@ -236,6 +236,7 @@ export async function runImport(params: {
       case "ANIM_OBJECTIVES": await importAnimationObjectives(rows, mapping, options, resolver, summary); break;
       case "ADS": await importAds(rows, mapping, options, resolver, imp.id, summary); break;
       case "MEDECINS": await importMedecins(rows, mapping, options, imp.id, summary); break;
+      case "INVENTORY": await importInventory(rows, mapping, options, resolver, imp.id, summary); break;
     }
     await resolver.flushAliases(type);
     summary.created = resolver.created;
@@ -1164,4 +1165,64 @@ async function importMedecins(rows: Record<string, unknown>[], mapping: Mapping,
   }
   out.inserted += pending.filter((p) => !existingKeys.has(p.key)).length;
   out.updated += pending.filter((p) => existingKeys.has(p.key)).length;
+}
+
+/* ------------------------------ Inventaire matériel ------------------------------ */
+
+/**
+ * Inventaire initial du matériel marketing. Idempotent : un article est identifié par son
+ * nom (insensible à la casse) et sa marque ; recharger le fichier ajuste le stock au lieu de
+ * dupliquer. Chaque changement de stock passe par un mouvement (`inventory_movements`), jamais
+ * par une écriture directe — même règle que l'application (`src/lib/activations/inventory.ts`).
+ * Anti-régression : un coût, une unité ou un seuil absents du fichier ne remplacent pas ce qui
+ * a été saisi dans l'application.
+ */
+async function importInventory(rows: Record<string, unknown>[], mapping: Mapping, options: ImportOptions, R: Resolver, importId: string, out: ImportSummary) {
+  const { recordMovement } = await import("@/lib/activations/inventory");
+  const cats = (await db.execute<{ key: string; label: string }>(sql`select key, label from inventory_categories`)).rows;
+  const catOf = (v: string | null): string => {
+    if (!v) return "PLV";
+    const k = normKey(v);
+    const hit = cats.find((c) => normKey(c.key) === k || normKey(c.label) === k) ?? cats.find((c) => k.includes(normKey(c.key)) || k.includes(normKey(c.label)));
+    if (hit) return hit.key;
+    if (/echant|sample|dose/.test(k)) return "ECHANTILLON";
+    if (/good|cadeau|gift/.test(k)) return "GOODIE";
+    if (/print|impr|flyer|brochure|affiche/.test(k)) return "PRINT";
+    return "PLV";
+  };
+  const date = options.stockDate ?? new Date().toISOString().slice(0, 10);
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const name = txt(r, mapping, "name");
+    const qty = num(r, mapping, "quantity");
+    if (!name || qty === null) continue;
+    const brandValue = txt(r, mapping, "brand");
+    let brandId = brandValue ? R.brand(brandValue, name) : null;
+    if (!brandId && brandValue) brandId = await R.createBrand(brandValue);
+    const productName = txt(r, mapping, "productName");
+    const productId = productName ? await R.product(productName, null, brandId, false) : null;
+    const unitCost = num(r, mapping, "unitCost");
+    const threshold = num(r, mapping, "alertThreshold");
+    const set: Record<string, unknown> = { categoryKey: catOf(txt(r, mapping, "category")), updatedAt: new Date() };
+    if (productId) set.productId = productId;
+    const sku = txt(r, mapping, "sku"); if (sku) set.sku = sku;
+    const unit = txt(r, mapping, "unit"); if (unit) set.unit = unit;
+    const location = txt(r, mapping, "location"); if (location) set.location = location;
+    if (unitCost !== null) set.unitCost = unitCost.toFixed(2);
+    if (threshold !== null) set.alertThreshold = Math.round(threshold);
+    const existing = (await db.execute<{ id: string; stock: number }>(sql`select id, stock from inventory_items where lower(name) = lower(${name}) and coalesce(brand_id, '00000000-0000-0000-0000-000000000000'::uuid) = coalesce(${brandId}::uuid, '00000000-0000-0000-0000-000000000000'::uuid)`)).rows[0];
+    let id: string;
+    if (existing) {
+      await db.update(s.inventoryItems).set(set).where(eq(s.inventoryItems.id, existing.id));
+      id = existing.id;
+      const delta = Math.round(qty) - existing.stock;
+      if (delta !== 0) await recordMovement({ itemId: id, type: "AJUSTEMENT", quantity: delta, unitCost, date, reason: "Import d'inventaire", importId });
+      out.updated++;
+    } else {
+      const [row] = await db.insert(s.inventoryItems).values({ name, brandId, categoryKey: set.categoryKey as string, productId, sku, unit: unit ?? "pièce", location, unitCost: unitCost !== null ? unitCost.toFixed(2) : "0", alertThreshold: threshold !== null ? Math.round(threshold) : null, importId }).returning({ id: s.inventoryItems.id });
+      id = row.id;
+      if (qty !== 0) await recordMovement({ itemId: id, type: "ENTREE", quantity: Math.round(qty), unitCost, date, reason: "Inventaire initial (import)", importId });
+      out.inserted++;
+    }
+  }
 }
