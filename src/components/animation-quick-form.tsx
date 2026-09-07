@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, X, ChevronDown } from "lucide-react";
+import { X, ChevronDown } from "lucide-react";
 import { normKey } from "@/lib/import/normalize";
 
 /**
@@ -29,7 +29,7 @@ export function AnimationQuickForm({
   clients: QuickClient[];
   /** Ses produits habituels, déjà triés par fréquence — affichés sans recherche. */
   usualProducts: QuickProduct[];
-  /** Le reste du catalogue réellement animé, pour la recherche « Ajouter un produit ». */
+  /** Le reste du catalogue réellement animé, pour le menu « Ajouter un produit », groupé par marque. */
   catalog: QuickProduct[];
   defaultClientId?: string | null;
   today: string;
@@ -40,16 +40,21 @@ export function AnimationQuickForm({
   const [clientSearchOpen, setClientSearchOpen] = useState(!defaultClientId);
   const [clientId, setClientId] = useState(defaultClientId ?? "");
   const [rows, setRows] = useState<Row[]>(usualProducts.map((p) => ({ productId: p.id, name: p.name, qty: "", stock: "" })));
-  const [addQuery, setAddQuery] = useState("");
-  const [showAdd, setShowAdd] = useState(false);
   const [showMore, setShowMore] = useState(false);
 
   const usedIds = useMemo(() => new Set(rows.map((r) => r.productId)), [rows]);
-  const addResults = useMemo(() => {
-    const q = normKey(addQuery);
-    if (!q) return [];
-    return catalog.filter((p) => !usedIds.has(p.id) && normKey(p.name).includes(q)).slice(0, 12);
-  }, [addQuery, catalog, usedIds]);
+  /** Le reste du catalogue, groupé par marque — plus rapide à parcourir qu'une recherche
+   * quand on sait ce qu'on cherche. « Sans marque » toujours en dernier. */
+  const catalogByBrand = useMemo(() => {
+    const groups = new Map<string, QuickProduct[]>();
+    for (const p of catalog) {
+      if (usedIds.has(p.id)) continue;
+      const key = p.brandName ?? "Sans marque";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(p);
+    }
+    return [...groups.entries()].sort(([a], [b]) => (a === "Sans marque" ? 1 : b === "Sans marque" ? -1 : a.localeCompare(b, "fr")));
+  }, [catalog, usedIds]);
 
   const filteredClients = useMemo(() => {
     if (!clientSearchOpen) return [];
@@ -64,8 +69,6 @@ export function AnimationQuickForm({
   }
   function addProduct(p: QuickProduct) {
     setRows((rs) => [...rs, { productId: p.id, name: p.name, qty: "", stock: "" }]);
-    setAddQuery("");
-    setShowAdd(false);
   }
   function removeRow(i: number) {
     setRows((rs) => rs.filter((_, j) => j !== i));
@@ -143,28 +146,24 @@ export function AnimationQuickForm({
           {rows.length === 0 && <div className="text-[13px] text-muted py-2">Aucun produit habituel pour le moment — ajoutez-en un ci-dessous.</div>}
         </div>
 
-        {showAdd ? (
-          <div className="mt-2">
-            <input
-              autoFocus value={addQuery} onChange={(e) => setAddQuery(e.target.value)}
-              placeholder="Chercher un produit…" className="input h-11 text-[14px]"
-            />
-            {addQuery && (
-              <div className="mt-1 max-h-48 overflow-y-auto rounded-xl border border-line divide-y divide-line">
-                {addResults.length === 0 && <div className="px-3 py-2 text-[13px] text-muted">Aucun résultat.</div>}
-                {addResults.map((p) => (
-                  <button key={p.id} type="button" onClick={() => addProduct(p)} className="w-full text-left px-3 py-2 text-[13px] hover:bg-sunk">
-                    {p.name}{p.brandName ? <span className="text-muted"> — {p.brandName}</span> : null}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          <button type="button" onClick={() => setShowAdd(true)} className="btn-ghost btn-sm mt-2">
-            <Plus size={14} /> Ajouter un produit
-          </button>
-        )}
+        <div className="mt-2">
+          <select
+            value=""
+            onChange={(e) => {
+              const p = catalog.find((c) => c.id === e.target.value);
+              if (p) addProduct(p);
+            }}
+            className="select h-11 text-[14px]"
+            aria-label="Ajouter un produit"
+          >
+            <option value="">+ Ajouter un produit…</option>
+            {catalogByBrand.map(([brand, prods]) => (
+              <optgroup key={brand} label={brand}>
+                {prods.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </optgroup>
+            ))}
+          </select>
+        </div>
         <div className="text-[11px] text-faint mt-1.5">Vendu = unités vendues pendant l&apos;animation · Rayon (facultatif) = ce qu&apos;il reste en stock</div>
       </div>
 
