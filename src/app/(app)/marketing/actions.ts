@@ -5,9 +5,9 @@ import { redirect } from "next/navigation";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  budgets, budgetLines, campaigns, campaignProducts, marketingExpenses, contentItems,
+  budgets, budgetLines, campaigns, campaignProducts, marketingExpenses,
   influencers, collaborations, adCreatives, campaignAdLinks, adAccounts,
-  type BudgetCategory, type ContentStatus,
+  type BudgetCategory,
 } from "@/db/schema";
 import { requirePermission, requireFlag } from "@/lib/access";
 import { categoryFromLabel } from "@/lib/budget-categories";
@@ -198,34 +198,8 @@ export async function saveAdCreative(formData: FormData) {
   revalidatePath("/marketing/ads");
 }
 
-export async function saveContent(formData: FormData) {
-  await requirePermission("marketing", "create");
-  const id = str(formData, "id");
-  const brandId = str(formData, "brandId"); const title = str(formData, "title"); const date = str(formData, "date");
-  if (!brandId || !title || !date) return;
-  const values = {
-    brandId, title, date, productId: str(formData, "productId"), format: str(formData, "format"), platform: str(formData, "platform"), objective: str(formData, "objective"),
-    brief: str(formData, "brief"), responsibleId: str(formData, "responsibleId"), status: (str(formData, "status") as ContentStatus | null) ?? "IDEE", link: str(formData, "link"),
-  };
-  if (id) await db.update(contentItems).set(values).where(eq(contentItems.id, id));
-  else await db.insert(contentItems).values(values);
-  revalidatePath("/marketing/planning");
-}
-
-export async function setContentStatus(formData: FormData) {
-  await requirePermission("marketing", "edit");
-  const id = str(formData, "id"); const status = str(formData, "status") as ContentStatus | null;
-  if (!id || !status) return;
-  await db.update(contentItems).set({ status }).where(eq(contentItems.id, id));
-  revalidatePath("/marketing/planning");
-}
-
-export async function deleteContent(formData: FormData) {
-  await requirePermission("marketing", "validate");
-  const id = str(formData, "id"); if (!id) return;
-  await db.delete(contentItems).where(eq(contentItems.id, id));
-  revalidatePath("/marketing/planning");
-}
+/* Les contenus du planning éditorial vivent dans `planning/actions.ts` : un seul chemin pour
+   changer un statut (`transition()`), aucune mise à jour directe de `content_items.status`. */
 
 /* ------------------------------------------------------------------ */
 /* Régie Meta : rattachement et synchronisation                        */
