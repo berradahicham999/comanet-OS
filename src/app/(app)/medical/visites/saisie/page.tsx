@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, isOwnOnly } from "@/lib/access";
 import { PageHeader, Card } from "@/components/ui";
 import { MedicalVisitForm } from "@/components/medical-visit-form";
 import { saveVisitAction } from "../actions";
@@ -13,7 +13,7 @@ export const metadata = { title: "Saisie de visite" };
 export default async function SaisieVisitePage(props: { searchParams: Promise<{ doctor?: string; done?: string }> }) {
   const user = await requireAccess("medical");
   const sp = await props.searchParams;
-  const isDelegate = user.role === "DELEGUE_MEDICAL";
+  const isDelegate = await isOwnOnly();
   const [doctorsRes, productsRes, recentRes] = await Promise.all([
     db.execute(sql`select id, (first_name || ' ' || last_name) as name, city from doctors where status <> 'INACTIF' ${isDelegate ? sql`and delegate_id = ${user.id}::uuid` : sql``} order by last_name, first_name`),
     db.execute(sql`select id, name from products where active order by name`),

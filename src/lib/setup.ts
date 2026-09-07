@@ -50,7 +50,10 @@ export async function hasSetupAccess(): Promise<boolean> {
   }
   try {
     const s = await getSession();
-    return s?.role === "ADMIN";
+    if (!s) return false;
+    // Module Administration avec « Valider » ; l'enum legacy sert de repli tant que la migration 0012 n'est pas appliquée.
+    const r = await db.execute<{ ok: boolean }>(sql`select exists (select 1 from user_permissions where user_id = ${s.id}::uuid and module = 'administration' and can_validate) as ok`).catch(() => null);
+    return r ? r.rows[0]?.ok === true : s.role === "ADMIN";
   } catch {
     return false; // base non initialisée
   }

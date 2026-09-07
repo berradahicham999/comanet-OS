@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, isOwnOnly, canDo } from "@/lib/access";
 import { saveVisit, deleteVisit, type VisitInput } from "@/lib/medical/visits";
 import type { DoctorInterest, MedicalVisitStatus } from "@/db/schema";
 
@@ -23,7 +23,7 @@ export async function saveVisitAction(formData: FormData) {
   const input: VisitInput = {
     id: String(formData.get("id") ?? "") || undefined,
     doctorId,
-    delegateId: user.role === "DELEGUE_MEDICAL" ? user.id : String(formData.get("delegateId") ?? "") || null,
+    delegateId: (await isOwnOnly()) ? user.id : String(formData.get("delegateId") ?? "") || null,
     date,
     durationMinutes: formData.get("durationMinutes") ? Math.round(Number(formData.get("durationMinutes"))) : null,
     visitType: String(formData.get("visitType") ?? "VISITE").trim() || "VISITE",
@@ -33,6 +33,8 @@ export async function saveVisitAction(formData: FormData) {
     comment: String(formData.get("comment") ?? "").trim() || null,
     nextAction: String(formData.get("nextAction") ?? "").trim() || null,
     nextVisitDate: String(formData.get("nextVisitDate") ?? "") || null,
+    objections: String(formData.get("objections") ?? "").trim() || null,
+    documentation: String(formData.get("documentation") ?? "").trim() || null,
     status: (String(formData.get("status") ?? "REALISEE") as MedicalVisitStatus),
     productIds: formData.getAll("productId").map(String).filter(Boolean),
     samples,
@@ -42,12 +44,12 @@ export async function saveVisitAction(formData: FormData) {
   revalidatePath("/medical/visites");
   revalidatePath(`/medical/medecins/${doctorId}`);
   revalidatePath("/medical");
-  redirect(user.role === "DELEGUE_MEDICAL" ? "/medical/visites/saisie?done=1" : `/medical/visites/${visitId}`);
+  redirect((await isOwnOnly()) ? "/medical/visites/saisie?done=1" : `/medical/visites/${visitId}`);
 }
 
 export async function deleteVisitAction(formData: FormData) {
-  const user = await requireAccess("medical");
-  if (user.role === "DELEGUE_MEDICAL") return;
+  await requireAccess("medical");
+  if (!(await canDo("medical", "validate"))) return;
   const id = String(formData.get("id") ?? "");
   const doctorId = String(formData.get("doctorId") ?? "");
   if (!id || !doctorId) return;

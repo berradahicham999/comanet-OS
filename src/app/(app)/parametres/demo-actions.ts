@@ -1,17 +1,17 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireAccess } from "@/lib/access";
+import { requireAdmin } from "@/lib/access";
 import { seedDemo, purgeDemo } from "@/db/seed-demo";
 
 export async function seedDemoAction() {
-  await requireAccess("parametres");
+  await requireAdmin();
   await seedDemo();
   revalidatePath("/", "layout");
 }
 
 export async function purgeDemoAction() {
-  await requireAccess("parametres");
+  await requireAdmin();
   await purgeDemo();
   revalidatePath("/", "layout");
 }

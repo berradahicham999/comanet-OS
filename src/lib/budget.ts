@@ -22,6 +22,9 @@
  *    du consommé pour ne pas compter deux fois la même campagne ; leur montant reste visible
  *    dans `manualAdIgnored`. Sans donnée de régie, ce sont elles qui font foi.
  *  · **Autres dépenses** (influence, trade, événement, création…) : comptées telles quelles.
+ *  · **Échantillons médicaux** remis en visite (`sample_movements` SORTIE_VISITE) : valorisés au
+ *    prix d'achat, sinon au prix COMANET, et comptés dans le consommé de la marque du produit
+ *    (`samplesValue`). Une unité sans prix n'est pas estimée : elle n'entre pas dans le total.
  *  · **Dépenses annulées / remboursées** : le modèle ne connaît que PLANNED / COMMITTED /
  *    SPENT. Une annulation se traduit aujourd'hui par la suppression de la ligne ou par un
  *    montant négatif, qui est alors compté tel quel (il diminue le consommé). Aucun statut
@@ -61,6 +64,8 @@ export type BudgetConsumption = {
   adSource: AdSpendSource;
   /** Média saisi à la main mais écarté du total parce que la régie fait foi. */
   manualAdIgnored: number;
+  /** Échantillons médicaux remis en visite, valorisés (voir `src/lib/medical/samples.ts`). */
+  samplesValue: number;
   consumed: number;
   remaining: number | null;
   consumedPct: number | null;
@@ -69,7 +74,7 @@ export type BudgetConsumption = {
 function empty(brandId: string | null): BudgetConsumption {
   return {
     brandId, hasBudget: false, annual: 0, planned: 0, committed: 0, spent: 0,
-    adSpend: 0, adSource: "AUCUNE", manualAdIgnored: 0,
+    adSpend: 0, adSource: "AUCUNE", manualAdIgnored: 0, samplesValue: 0,
     consumed: 0, remaining: null, consumedPct: null,
   };
 }
@@ -84,6 +89,7 @@ type Raw = {
   manual_ad_spent: number;
   regie_spend: number;
   regie_rows: number;
+  samples_value: number;
 };
 
 /** Une seule requête : budgets, dépenses par statut, média saisi, et régie — groupés par marque. */
@@ -103,6 +109,13 @@ async function rawByBrand(year: number, brandId?: string | null): Promise<Raw[]>
         coalesce(sum(amount) filter (where status = 'SPENT' and category in (${adCats})), 0)::float8 as manual_ad_spent
       from marketing_expenses where extract(year from date) = ${year} group by brand_id
     ),
+    samples as (
+      select p.brand_id,
+        coalesce(sum(case when coalesce(p.cost_price, p.price_wholesale) is not null then -sm.quantity * coalesce(p.cost_price, p.price_wholesale) else 0 end), 0)::float8 as samples_value
+      from sample_movements sm join products p on p.id = sm.product_id
+      where sm.type = 'SORTIE_VISITE' and extract(year from sm.date) = ${year} and p.brand_id is not null
+      group by p.brand_id
+    ),
     regie as (
       select brand_id,
         coalesce(sum(spend), 0)::float8 as regie_spend,
@@ -119,11 +132,13 @@ async function rawByBrand(year: number, brandId?: string | null): Promise<Raw[]>
       coalesce(exp.manual_ad_committed, 0) as manual_ad_committed,
       coalesce(exp.manual_ad_spent, 0) as manual_ad_spent,
       coalesce(regie.regie_spend, 0) as regie_spend,
-      coalesce(regie.regie_rows, 0) as regie_rows
+      coalesce(regie.regie_rows, 0) as regie_rows,
+      coalesce(samples.samples_value, 0) as samples_value
     from brands b
     left join bud on bud.brand_id = b.id
     left join exp on exp.brand_id = b.id
     left join regie on regie.brand_id = b.id
+    left join samples on samples.brand_id = b.id
     where true ${only}`);
   return r.rows as Raw[];
 }
@@ -132,6 +147,8 @@ async function rawByBrand(year: number, brandId?: string | null): Promise<Raw[]>
 export function foldConsumption(brandId: string | null, raw: {
   annual: number; planned: number; committedAll: number; spentAll: number;
   manualAdCommitted: number; manualAdSpent: number; regieSpend: number; regieRows: number;
+  /** Échantillons médicaux valorisés ; absent = 0 (compatibilité des appels existants). */
+  samplesValue?: number;
 }): BudgetConsumption {
   const regieOfficial = raw.regieRows > 0;
   const committed = raw.committedAll - (regieOfficial ? raw.manualAdCommitted : 0);
@@ -139,11 +156,12 @@ export function foldConsumption(brandId: string | null, raw: {
   const adSpend = regieOfficial ? raw.regieSpend : raw.manualAdCommitted;
   const adSource: AdSpendSource = regieOfficial ? "REGIE" : raw.manualAdCommitted !== 0 ? "SAISIE" : "AUCUNE";
   // Sans régie, le média saisi est déjà dans `committed` : ne pas l'ajouter une seconde fois.
-  const consumed = regieOfficial ? committed + adSpend : committed;
+  const samplesValue = raw.samplesValue ?? 0;
+  const consumed = (regieOfficial ? committed + adSpend : committed) + samplesValue;
   const hasBudget = raw.annual > 0;
   return {
     brandId, hasBudget, annual: raw.annual, planned: raw.planned, committed, spent,
-    adSpend, adSource, manualAdIgnored: regieOfficial ? raw.manualAdCommitted : 0,
+    adSpend, adSource, manualAdIgnored: regieOfficial ? raw.manualAdCommitted : 0, samplesValue,
     consumed,
     remaining: hasBudget ? raw.annual - consumed : null,
     consumedPct: hasBudget ? (consumed / raw.annual) * 100 : null,
@@ -155,7 +173,7 @@ function fold(brandId: string | null, r: Raw): BudgetConsumption {
     annual: Number(r.annual), planned: Number(r.planned),
     committedAll: Number(r.committed_all), spentAll: Number(r.spent_all),
     manualAdCommitted: Number(r.manual_ad_committed), manualAdSpent: Number(r.manual_ad_spent),
-    regieSpend: Number(r.regie_spend), regieRows: Number(r.regie_rows),
+    regieSpend: Number(r.regie_spend), regieRows: Number(r.regie_rows), samplesValue: Number(r.samples_value),
   });
 }
 
@@ -187,6 +205,7 @@ export async function budgetConsumption(year: number, brandId?: string | null): 
     adSpend: sum((c) => c.adSpend),
     adSource: sources.size === 1 ? [...sources][0] : sources.size === 0 ? "AUCUNE" : "REGIE",
     manualAdIgnored: sum((c) => c.manualAdIgnored),
+    samplesValue: sum((c) => c.samplesValue),
     consumed,
     remaining: hasBudget ? annual - consumed : null,
     consumedPct: hasBudget ? (consumed / annual) * 100 : null,

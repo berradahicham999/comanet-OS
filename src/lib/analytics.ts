@@ -8,6 +8,9 @@ import { addMonths, iso, startOfMonth, today } from "./format";
 
 export type SalesFilter = {
   brandId?: string;
+  /** Portée « marques assignées » : restreint aux marques listées (vide = rien). */
+  brandIds?: string[];
+  clientIds?: string[];
   productId?: string;
   clientId?: string;
   city?: string;
@@ -19,6 +22,8 @@ export type SalesFilter = {
 function whereClause(start: string, end: string, f: SalesFilter = {}): SQL {
   const parts: SQL[] = [sql`s.date >= ${start}::date`, sql`s.date < ${end}::date`];
   if (f.brandId) parts.push(sql`p.brand_id = ${f.brandId}::uuid`);
+  if (f.brandIds) parts.push(f.brandIds.length ? sql`p.brand_id = any(${f.brandIds}::uuid[])` : sql`false`);
+  if (f.clientIds && f.clientIds.length) parts.push(sql`s.client_id = any(${f.clientIds}::uuid[])`);
   if (f.productId) parts.push(sql`s.product_id = ${f.productId}::uuid`);
   if (f.clientId) parts.push(sql`s.client_id = ${f.clientId}::uuid`);
   if (f.city) parts.push(sql`c.city = ${f.city}`);

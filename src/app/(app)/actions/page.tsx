@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { requireAccess } from "@/lib/access";
+import { requireAnyModule, getUserPermissions } from "@/lib/access";
+import type { ModuleKey } from "@/lib/access-shared";
 import { getRecommendations, RULES, CATEGORY_META, type RecCategory } from "@/lib/rules";
 import { listUsers } from "@/lib/users";
 import { PageHeader, Tabs, Card, Empty, Badge } from "@/components/ui";
@@ -11,15 +12,19 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Action Center" };
 
 export default async function ActionCenterPage(props: { searchParams: Promise<{ cat?: string; all?: string; priority?: string }> }) {
-  const user = await requireAccess("actions");
+  await requireAnyModule();
+  const perms = await getUserPermissions();
   const sp = await props.searchParams;
   const [recs, users, refDate] = await Promise.all([getRecommendations(), listUsers(), getRefDate()]);
   const showAll = sp.all === "1";
   const cat = (sp.cat ?? "") as RecCategory | "";
   const base = recs.filter((r) => showAll || !r.existingTask);
-  // Rôles non-admin : on montre en priorité ce qui les concerne
-  const roleCats: Partial<Record<string, RecCategory[]>> = { MARKETING: ["MARKETING", "BUDGET"], TRADE: ["COMMERCIAL", "TERRAIN", "STOCK"], REGLEMENTAIRE: ["REGLEMENTAIRE"] };
-  const scoped = user.role === "ADMIN" ? base : base.filter((r) => (roleCats[user.role] ?? []).includes(r.category) || r.category === "EXECUTION");
+  // Chaque catégorie de recommandation suit le module qu'elle concerne : on n'affiche que celles que la personne peut voir.
+  const catModules: Record<RecCategory, ModuleKey[]> = {
+    STOCK: ["stock"], MARKETING: ["marketing", "influence"], REGLEMENTAIRE: ["reglementaire"], TERRAIN: ["terrain"], COMMERCIAL: ["ventes", "clients"],
+    BUDGET: ["budgets"], EXECUTION: ["taches"], DATA: ["administration"], MEDICAL: ["medical"],
+  };
+  const scoped = base.filter((r) => (catModules[r.category] ?? []).some((m) => perms[m].view));
   const list = scoped.filter((r) => !cat || r.category === cat).filter((r) => !sp.priority || r.priority === sp.priority);
   const counts = (Object.keys(CATEGORY_META) as RecCategory[]).map((c) => ({ c, n: scoped.filter((r) => r.category === c).length })).filter((x) => x.n > 0);
   const q = (extra: Record<string, string>) => {
@@ -71,7 +76,7 @@ export default async function ActionCenterPage(props: { searchParams: Promise<{ 
                 </li>
               ))}
             </ul>
-            {user.role === "ADMIN" && <Link href="/parametres" className="btn-secondary btn-sm mt-4 w-full">Régler les seuils</Link>}
+            {perms.administration.validate && <Link href="/parametres" className="btn-secondary btn-sm mt-4 w-full">Régler les seuils</Link>}
           </Card>
         </aside>
       </div>

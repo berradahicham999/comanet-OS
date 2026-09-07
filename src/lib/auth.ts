@@ -69,6 +69,7 @@ export async function verifyCredentials(email: string, password: string): Promis
   if (!u || !u.active) return null;
   const ok = await bcrypt.compare(password, u.passwordHash);
   if (!ok) return null;
+  await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, u.id)).catch(() => {});
   return { id: u.id, name: u.name, email: u.email, role: u.role };
 }
 

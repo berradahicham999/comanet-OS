@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireAccess } from "@/lib/access";
+import { listDelegates } from "@/lib/users";
+import { requireAccess, isOwnOnly } from "@/lib/access";
 import { PageHeader, Badge } from "@/components/ui";
 import { fmtDateShort } from "@/lib/format";
 
@@ -14,7 +15,7 @@ const STATUS_LABEL: Record<string, string> = { REALISEE: "Réalisée", PLANIFIEE
 export default async function VisitesPage(props: { searchParams: Promise<{ delegate?: string; status?: string; doctor?: string }> }) {
   const user = await requireAccess("medical");
   const sp = await props.searchParams;
-  const isDelegate = user.role === "DELEGUE_MEDICAL";
+  const isDelegate = await isOwnOnly();
   const delegateFilter = isDelegate ? user.id : sp.delegate;
 
   const [rowsRes, delegatesRes] = await Promise.all([
@@ -30,7 +31,7 @@ export default async function VisitesPage(props: { searchParams: Promise<{ deleg
         ${sp.status ? sql`and v.status = ${sp.status}` : sql``}
         ${sp.doctor ? sql`and v.doctor_id = ${sp.doctor}::uuid` : sql``}
       order by v.date desc, v.created_at desc limit 300`),
-    db.execute(sql`select id, name from users where role = 'DELEGUE_MEDICAL' and active order by name`),
+    listDelegates().then((rows) => ({ rows })),
   ]);
   const rows = rowsRes.rows as { id: string; date: string; status: string; doctor_interest: string | null; doctor_name: string; doctor_id: string; delegate_name: string | null }[];
   const delegates = delegatesRes.rows as { id: string; name: string }[];

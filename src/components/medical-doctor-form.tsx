@@ -5,6 +5,7 @@ export type DoctorFormOptions = {
   sectors: { id: string; name: string }[];
   delegates: { id: string; name: string }[];
   showDelegate: boolean;
+  brands?: { id: string; name: string }[];
 };
 
 export type DoctorFormValue = {
@@ -24,6 +25,7 @@ export type DoctorFormValue = {
   visitFrequencyDays?: number | null;
   comments?: string | null;
   notes?: string | null;
+  brandIds?: string[];
 };
 
 /** Champs de la fiche médecin — partagés entre la création et l'édition. */
@@ -83,6 +85,14 @@ export function DoctorFormFields({ doctor, options }: { doctor?: DoctorFormValue
         <span className="label block mb-1">Fréquence de visite recommandée (j)</span>
         <input name="visitFrequencyDays" type="number" defaultValue={doctor?.visitFrequencyDays ?? ""} placeholder="Défaut des réglages" className="input h-9" />
       </label>
+      {options.brands && options.brands.length > 0 && (
+        <div className="block sm:col-span-2">
+          <span className="label block mb-1">Marques concernées</span>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px]">
+            {options.brands.map((b) => <label key={b.id} className="flex items-center gap-1.5"><input type="checkbox" name="brandIds" value={b.id} defaultChecked={doctor?.brandIds?.includes(b.id)} />{b.name}</label>)}
+          </div>
+        </div>
+      )}
       <label className="block sm:col-span-2"><span className="label block mb-1">Commentaires</span><textarea name="comments" defaultValue={doctor?.comments ?? ""} className="input min-h-16" /></label>
       <label className="block sm:col-span-2"><span className="label block mb-1">Notes du délégué</span><textarea name="notes" defaultValue={doctor?.notes ?? ""} className="input min-h-16" /></label>
     </div>

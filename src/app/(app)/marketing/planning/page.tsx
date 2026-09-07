@@ -2,7 +2,7 @@ import Link from "next/link";
 import clsx from "clsx";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, brandFilter } from "@/lib/access";
 import { listBrands, listUsers } from "@/lib/users";
 import { PageHeader, Card, Badge, BrandDot } from "@/components/ui";
 import { saveContent, setContentStatus, deleteContent } from "../actions";
@@ -22,10 +22,11 @@ export default async function PlanningPage(props: { searchParams: Promise<{ mont
   const sp = await props.searchParams;
   const base = sp.month && /^\d{4}-\d{2}$/.test(sp.month) ? new Date(sp.month + "-01T12:00:00Z") : startOfMonth(today());
   const start = iso(startOfMonth(base)), end = iso(addMonths(startOfMonth(base), 1));
+  const scopeBrands = await brandFilter();
   const [items, brands, users, products] = await Promise.all([
     db.execute(sql`select c.id, c.date::text as date, c.title, c.format, c.platform, c.objective, c.brief, c.status::text as status, c.link, c.product_id, p.name as product, c.brand_id, b.name as brand, b.color, u.name as responsible, c.responsible_id
       from content_items c join brands b on b.id = c.brand_id left join products p on p.id = c.product_id left join users u on u.id = c.responsible_id
-      where c.date >= ${start}::date and c.date < ${end}::date ${sp.brand ? sql`and c.brand_id = ${sp.brand}::uuid` : sql``} order by c.date, c.title`),
+      where c.date >= ${start}::date and c.date < ${end}::date ${sp.brand ? sql`and c.brand_id = ${sp.brand}::uuid` : sql``} ${scopeBrands ? sql`and c.brand_id = any(${scopeBrands}::uuid[])` : sql``} order by c.date, c.title`),
     listBrands(), listUsers(),
     db.execute(sql`select p.id, p.name, p.brand_id, p.marketing_angle, p.claims from products p where p.active order by p.name`),
   ]);
@@ -96,7 +97,7 @@ export default async function PlanningPage(props: { searchParams: Promise<{ mont
               <label className="block"><span className="label block mb-1">Format</span><select name="format" className="select h-9"><option value="">—</option>{["Reel", "Story", "Post", "Carrousel", "UGC", "Vidéo", "Live", "Newsletter"].map((f) => <option key={f}>{f}</option>)}</select></label>
               <label className="block"><span className="label block mb-1">Plateforme</span><select name="platform" className="select h-9"><option value="">—</option>{["Instagram", "TikTok", "Facebook", "YouTube", "Site", "WhatsApp"].map((f) => <option key={f}>{f}</option>)}</select></label>
               <label className="block"><span className="label block mb-1">Objectif</span><select name="objective" className="select h-9"><option value="">—</option>{["Notoriété", "Conversion", "Éducation", "Engagement", "Drive-to-store", "Lancement"].map((f) => <option key={f}>{f}</option>)}</select></label>
-              <label className="block"><span className="label block mb-1">Responsable</span><select name="responsibleId" className="select h-9"><option value="">—</option>{users.filter((u) => u.role !== "ANIMATRICE").map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
+              <label className="block"><span className="label block mb-1">Responsable</span><select name="responsibleId" className="select h-9"><option value="">—</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
               <label className="block"><span className="label block mb-1">Statut</span><select name="status" className="select h-9">{CONTENT_STATUS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select></label>
               <label className="block"><span className="label block mb-1">Lien</span><input name="link" className="input h-9" placeholder="https://" /></label>
             </div>

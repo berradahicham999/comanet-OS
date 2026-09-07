@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, brandFilter, hasFlag } from "@/lib/access";
 import { getRefDate } from "@/lib/ref-date";
 import { getSettings } from "@/lib/settings";
 import { listBrands } from "@/lib/users";
@@ -18,12 +18,13 @@ export const metadata = { title: "Budgets marketing" };
 const STATUS_LABEL = { PLANNED: "Prévu", COMMITTED: "Engagé", SPENT: "Dépensé" } as const;
 
 export default async function MarketingBudgetsPage(props: { searchParams: Promise<{ brand?: string; year?: string }> }) {
-  await requireAccess("marketing");
+  await requireAccess("budgets");
   const sp = await props.searchParams;
+  const [scopeBrands, seeGlobal, seeMargins] = await Promise.all([brandFilter(), hasFlag("seeGlobalBudgets"), hasFlag("seeMargins")]);
   const { ref } = await getRefDate();
   const year = Number(sp.year) || ref.getUTCFullYear();
   const [brands, settings] = await Promise.all([listBrands(), getSettings()]);
-  const activeBrands = brands.filter((b) => b.active);
+  const activeBrands = brands.filter((b) => b.active && (scopeBrands === null || scopeBrands.includes(b.id)));
   const brandId = sp.brand && activeBrands.some((b) => b.id === sp.brand) ? sp.brand : null;
 
   const [consumption, budgetRows, lineRows, expenseRows, campaignRows, marginRows] = await Promise.all([
@@ -60,13 +61,13 @@ export default async function MarketingBudgetsPage(props: { searchParams: Promis
     <>
       <PageHeader eyebrow="Marketing Operating System" title="Budgets & campagnes" subtitle={`Année ${year} · budget prévu / engagé / dépensé / restant par marque, croisé avec le CA attribué et la marge.`}
         actions={<><Link href="/marketing" className="btn-secondary btn-sm">Vue d&apos;ensemble</Link><Link href="/imports?type=BUDGETS" className="btn-ghost btn-sm">Importer budgets</Link></>}>
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-3">
+        {(seeGlobal || brandId) && <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-3">
           <Card><div className="label">Budget annuel</div><div className="kpi mt-2">{fmtMAD(totals.budget, { compact: true })}</div></Card>
           <Card><div className="label">Prévu (actions)</div><div className="kpi mt-2">{fmtMAD(totals.planned, { compact: true })}</div><div className="text-[12px] text-muted mt-1">{fmtPct(totals.budget ? (totals.planned / totals.budget) * 100 : 0)} du budget</div></Card>
           <Card><div className="label">Engagé</div><div className="kpi mt-2">{fmtMAD(totals.engaged, { compact: true })}</div><Progress value={totals.budget ? (totals.engaged / totals.budget) * 100 : 0} className="mt-2" /></Card>
           <Card><div className="label">Dépensé</div><div className="kpi mt-2">{fmtMAD(totals.spent, { compact: true })}</div></Card>
           <Card><div className="label">Disponible</div><div className={`kpi mt-2 ${totals.budget - totals.engaged < 0 ? "text-red" : "text-green"}`}>{fmtMAD(totals.budget - totals.engaged, { compact: true })}</div><div className="text-[12px] text-muted mt-1">CA attribué {fmtMAD(totals.revenue, { compact: true })}</div></Card>
-        </div>
+        </div>}
         <Tabs current={brandId ? `/marketing/budgets?brand=${brandId}` : "/marketing/budgets"} tabs={[{ href: "/marketing/budgets", label: "Toutes les marques" }, ...activeBrands.map((b) => ({ href: `/marketing/budgets?brand=${b.id}`, label: b.name }))]} />
       </PageHeader>
 
@@ -112,7 +113,7 @@ export default async function MarketingBudgetsPage(props: { searchParams: Promis
                   </details>
                 </div>
                 <div className="lg:col-span-2">
-                  <div className="flex items-center justify-between mb-2"><div className="label">Actions & dépenses ({ex.length})</div><div className="text-[12px] text-muted">CA attribué <b>{fmtMAD(revenue, { compact: true })}</b> · marge {Math.round(margin)} % → <b>{fmtMAD(grossMargin, { compact: true })}</b> · ROI réel <b className={roi !== null && roi < 0 ? "text-red" : "text-green"}>{roi === null ? "—" : fmtPct(roi, 0, true)}</b></div></div>
+                  <div className="flex items-center justify-between mb-2"><div className="label">Actions & dépenses ({ex.length})</div><div className="text-[12px] text-muted">CA attribué <b>{fmtMAD(revenue, { compact: true })}</b>{seeMargins && <> · marge {Math.round(margin)} % → <b>{fmtMAD(grossMargin, { compact: true })}</b></>} · ROI réel <b className={roi !== null && roi < 0 ? "text-red" : "text-green"}>{roi === null ? "—" : fmtPct(roi, 0, true)}</b></div></div>
                   <div className="overflow-x-auto"><table className="tbl text-[12.5px]"><thead><tr><th>Date</th><th>Action</th><th>Catégorie</th><th>Statut</th><th className="num">Montant</th><th className="num">CA attribué</th><th className="num">ROAS</th><th></th></tr></thead><tbody>
                     {ex.slice(0, 12).map((e) => <tr key={e.id}><td className="whitespace-nowrap">{fmtDateShort(e.date)}</td><td>{e.label}{e.campaign && <span className="text-faint"> · {e.campaign}</span>}</td><td className="text-muted">{BUDGET_CATEGORY_LABELS[e.category as keyof typeof BUDGET_CATEGORY_LABELS]}</td><td><Badge tone={e.status === "SPENT" ? "green" : e.status === "COMMITTED" ? "blue" : "gray"}>{STATUS_LABEL[e.status]}</Badge></td><td className="num font-medium">{fmtMAD(e.amount, { suffix: false })}</td><td className="num">{e.revenue ? fmtMAD(e.revenue, { suffix: false }) : "—"}</td><td className="num">{e.revenue && e.amount ? (e.revenue / e.amount).toFixed(1) + "×" : "—"}</td><td><form action={deleteExpense}><input type="hidden" name="id" value={e.id} /><button className="text-faint hover:text-red" type="submit" title="Supprimer">×</button></form></td></tr>)}
                     {ex.length === 0 && <tr><td colSpan={8} className="text-muted text-center py-3">Aucune action saisie pour {year}.</td></tr>}

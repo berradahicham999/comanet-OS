@@ -6,6 +6,7 @@
  */
 import { sql, type SQL } from "drizzle-orm";
 import { db } from "@/db";
+import { ANIMATRICE_SQL } from "@/lib/users";
 import { cityKey } from "./animations-shared";
 import { selloutAmountSql, selloutSumSql } from "./sellout";
 
@@ -250,7 +251,7 @@ export async function animatriceScores(range: Range, prev: Range, year: number):
       from users u
       left join anim an on an.animatrice_id = u.id
       left join prev pv on pv.animatrice_id = u.id
-      where u.role = 'ANIMATRICE' and u.active
+      where ${ANIMATRICE_SQL} and u.active
       group by u.id, u.name, u.city`),
     animationObjectives(year),
   ]);

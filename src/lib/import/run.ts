@@ -1,5 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { DELEGATE_SQL } from "@/lib/users";
 import * as s from "@/db/schema";
 import { saleLineHash } from "@/lib/hash";
 import { categoryFromLabel } from "@/lib/budget-categories";
@@ -1077,7 +1078,7 @@ async function importMedecins(rows: Record<string, unknown>[], mapping: Mapping,
   const [sectorsRes, specialtiesRes, delegatesRes] = await Promise.all([
     db.select({ id: s.medicalSectors.id, name: s.medicalSectors.name, city: s.medicalSectors.city }).from(s.medicalSectors),
     db.select({ id: s.medicalSpecialties.id, name: s.medicalSpecialties.name }).from(s.medicalSpecialties),
-    db.execute(sql`select id, name from users where role = 'DELEGUE_MEDICAL'`),
+    db.execute(sql`select u.id, u.name from users u where ${DELEGATE_SQL}`),
   ]);
   const sectorByKey = new Map(sectorsRes.map((x) => [`${normKey(x.name)}|${normKey(x.city ?? "")}`, x.id]));
   const specialtyByKey = new Map(specialtiesRes.map((x) => [normKey(x.name), x.id]));

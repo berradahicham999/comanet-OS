@@ -2,13 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { importFiles, imports } from "@/db/schema";
-import { requireAccess } from "@/lib/access";
+import { requireAnyModule, requirePermission, getAccess } from "@/lib/access";
 import { parseSheet } from "@/lib/import/parse";
 import { runImport } from "@/lib/import/run";
-import { FIELDS, missingRequired, type ImportType } from "@/lib/import/fields";
+import { FIELDS, IMPORT_MODULE, missingRequired, type ImportType } from "@/lib/import/fields";
 import { appendUploadChunk, createUploadFile, MAX_UPLOAD_BYTES, UPLOAD_CHUNK_BYTES, purgeStaleUploads } from "@/lib/import/upload";
 import { isReversible, rollbackRows } from "@/lib/import/rollback";
 
@@ -17,7 +17,7 @@ import { isReversible, rollbackRows } from "@/lib/import/rollback";
  * → écran de mapping. Le découpage contourne la limite de taille des requêtes des hébergeurs serverless.
  */
 export async function beginImportUpload(name: string, size: number) {
-  const user = await requireAccess("imports");
+  const user = await requireAnyModule();
   if (size <= 0) throw new Error("Fichier vide.");
   if (size > MAX_UPLOAD_BYTES) throw new Error("Fichier trop volumineux (max 25 Mo).");
   await purgeStaleUploads().catch(() => {});
@@ -26,16 +26,16 @@ export async function beginImportUpload(name: string, size: number) {
 }
 
 export async function appendImportChunk(formData: FormData) {
-  await requireAccess("imports");
+  await requireAnyModule();
   const received = await appendUploadChunk(formData);
   return { received };
 }
 
 /** Étape 2 : mapping validé → import. */
 export async function runImportAction(formData: FormData) {
-  const user = await requireAccess("imports");
   const fileId = String(formData.get("fileId") ?? "");
   const type = String(formData.get("type") ?? "SALES") as ImportType;
+  const user = await requirePermission(IMPORT_MODULE[type], "create");
   const sheet = String(formData.get("sheet") ?? "") || undefined;
   const headerRow = Number(formData.get("headerRow") ?? -1);
   const file = await db.query.importFiles.findFirst({ where: eq(importFiles.id, fileId) });
@@ -71,12 +71,15 @@ export async function runImportAction(formData: FormData) {
  * sont conservés — ils peuvent être utilisés ailleurs.
  */
 export async function rollbackImport(formData: FormData) {
-  const user = await requireAccess("imports");
-  if (user.role !== "ADMIN") redirect("/imports?error=" + encodeURIComponent("Seul un administrateur peut annuler un import."));
+  await requireAnyModule();
   const id = String(formData.get("id") ?? "");
   if (!id) return;
   const imp = await db.query.imports.findFirst({ where: eq(imports.id, id) });
   if (!imp) redirect("/imports?error=" + encodeURIComponent("Import introuvable."));
+  const access = await getAccess();
+  if (!access || !(access.perms[IMPORT_MODULE[imp.type as ImportType]]?.validate || access.perms.administration.validate)) {
+    redirect("/imports?error=" + encodeURIComponent("Annuler cet import demande le droit « Valider » sur son module."));
+  }
   if (!isReversible(imp.type)) redirect(`/imports/${id}?error=` + encodeURIComponent("Ce type d'import ne peut pas être annulé."));
 
   let removed = 0;

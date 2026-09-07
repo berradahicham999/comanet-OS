@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { sql, eq, and, desc } from "drizzle-orm";
 import { db } from "@/db";
 import { regulatoryFiles, regulatoryEvents, documents as documentsTable, tasks as tasksTable } from "@/db/schema";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, canDo } from "@/lib/access";
 import { getSettings } from "@/lib/settings";
 import { listBrands, listUsers } from "@/lib/users";
 import { PageHeader, Card, Badge, PriorityBadge, StatusBadge, Facts } from "@/components/ui";
@@ -15,7 +15,7 @@ import { fmtDate, iso, today, addDays } from "@/lib/format";
 export const dynamic = "force-dynamic";
 
 export default async function RegulatoryDetailPage(props: { params: Promise<{ id: string }> }) {
-  const user = await requireAccess("reglementaire");
+  await requireAccess("reglementaire");
   const { id } = await props.params;
   const file = await db.query.regulatoryFiles.findFirst({ where: eq(regulatoryFiles.id, id), with: { product: true, brand: true, responsible: true } });
   if (!file) notFound();
@@ -128,7 +128,7 @@ export default async function RegulatoryDetailPage(props: { params: Promise<{ id
             )}
           </Card>
 
-          {user.role === "ADMIN" && <form action={deleteRegulatoryFile}><input type="hidden" name="id" value={id} /><button className="btn-ghost btn-sm text-red" type="submit">Supprimer le dossier</button></form>}
+          {(await canDo("reglementaire", "validate")) && <form action={deleteRegulatoryFile}><input type="hidden" name="id" value={id} /><button className="btn-ghost btn-sm text-red" type="submit">Supprimer le dossier</button></form>}
         </div>
       </div>
     </>

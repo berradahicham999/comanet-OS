@@ -81,8 +81,23 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Score animatrice | `src/lib/animations.ts` | `animatriceScores()` — source unique |
 | Clé de commande, commercial, canal | `src/lib/analytics.ts` | `ORDER_KEY`, `SALES_REP`, `SALES_CHANNEL` |
 | Ville, clé d'animation | `src/lib/animations-shared.ts` | `normalizeCity()`, `cityKey()`, `animationKey()` |
+| Droits d'accès, portée, interrupteurs | `src/lib/permissions.ts` + `src/lib/access.ts` | `requireAccess()`, `requirePermission()`, `requireAdmin()`, `requireFlag()`, `canDo()`, `isOwnOnly()`, `brandFilter()`, `clientFilter()`, `hasFlag()` |
+| Qui est animatrice / délégué | `src/lib/users.ts` | `listAnimatrices()`, `listDelegates()`, `ANIMATRICE_SQL`, `DELEGATE_SQL` |
 
 `tests/definitions-uniques.test.ts` échoue si une seconde définition réapparaît.
+
+**Permissions modulaires par utilisateur** (`docs/permissions-modulaires.md`). Chaque compte porte
+sa propre matrice `user_permissions` (14 modules × Voir / Créer / Modifier / Valider), une portée
+`user_scope` (OWN / ASSIGNED / ALL), des assignations de marques et de clients, et six interrupteurs
+transverses `user_flags`. Les modèles de rôle (`role_templates`) ne servent qu'à pré-remplir.
+Règles : aucune décision d'accès sur `users.role` (enum legacy recalculée, lecture seule — un test
+l'interdit) ; une page garde avec `requireAccess(module)`, une action avec `requirePermission(module, action)` ;
+Cockpit, Action Center, Recherche et Imports utilisent `requireAnyModule()` et filtrent par module ;
+importer = Créer sur le module du type (`IMPORT_MODULE`), annuler = Valider ; « Valider » = action
+irréversible ou externe ; tout ce qui touche l'argent (enveloppes annuelles, engagement d'une dépense)
+passe par Administration ou l'interrupteur « Valider une dépense » ; personne ne modifie ses propres
+droits ; le dernier administrateur ne peut être ni rétrogradé ni suspendu. La prévisualisation
+« en tant que » pose un cookie signé et refuse toute server action.
 
 **Seuils dans `settings`**, pas en dur dans les règles. Les **secrets** (jetons de régie)
 restent en variables d'environnement, jamais en base.

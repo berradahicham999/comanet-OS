@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, isOwnOnly } from "@/lib/access";
 import { getRefDate } from "@/lib/ref-date";
 import { resolvePeriod, PERIOD_OPTIONS, type PeriodParam } from "@/lib/periods";
 import { animationTotals, animationsByDim, animationDaily, animationObjectives, objectiveForRange, bestOf, type DimRow } from "@/lib/animations";
+import { adoptionByWeek, adoptionByAnimatrice } from "@/lib/terrain/usual-products";
 import { PageHeader, Card, Tabs, Delta, Progress, Empty, BrandDot } from "@/components/ui";
 import { SimpleLine } from "@/components/charts";
 import { fmtMAD, fmtNum, fmtDateShort, delta } from "@/lib/format";
@@ -24,15 +25,16 @@ export default async function TerrainPage(props: {
   searchParams: Promise<{ period?: PeriodParam; start?: string; end?: string; dim?: string; animatrice?: string; city?: string }>;
 }) {
   const user = await requireAccess("terrain");
+  const isAnimatrice = await isOwnOnly();
   const sp = await props.searchParams;
   const { ref } = await getRefDate();
   const period = resolvePeriod(sp.period, ref, { start: sp.start, end: sp.end });
   const dim = (DIMS.find((d) => d.key === sp.dim)?.key ?? "animatrice") as (typeof DIMS)[number]["key"];
-  const mine = user.role === "ANIMATRICE" ? user.id : sp.animatrice || undefined;
+  const mine = isAnimatrice ? user.id : sp.animatrice || undefined;
   const filter = { animatriceId: mine, city: sp.city || undefined };
   const year = Number(period.start.slice(0, 4));
 
-  const [totals, prevTotals, rows, daily, objectives, cityRows, best, hasData] = await Promise.all([
+  const [totals, prevTotals, rows, daily, objectives, cityRows, best, hasData, weeklyAdoption, teamAdoption] = await Promise.all([
     animationTotals(period, filter),
     animationTotals(period.prev, filter),
     animationsByDim(dim, period, period.prev, filter),
@@ -41,6 +43,9 @@ export default async function TerrainPage(props: {
     animationsByDim("city", period, period.prev, filter),
     bestOf(period),
     db.execute(sql`select count(*)::int as n from animations where status = 'DONE'`),
+    // Bascule WhatsApp → application : coût nul si l'écran n'est pas admin/trade.
+    isAnimatrice ? Promise.resolve([]) : adoptionByWeek({ weeks: 6 }),
+    isAnimatrice ? Promise.resolve([]) : adoptionByAnimatrice(28),
   ]);
 
   const total = (hasData.rows[0] as { n: number }).n;
@@ -91,7 +96,7 @@ export default async function TerrainPage(props: {
         actions={<>
           <Link href="/imports?type=ANIMATIONS" className="btn-secondary btn-sm">Importer le jour</Link>
           <Link href="/terrain/saisie" className="btn-secondary btn-sm">+ Saisir</Link>
-          {user.role !== "ANIMATRICE" && <Link href="/terrain/animatrices" className="btn-primary btn-sm">Plan d&apos;action animatrices</Link>}
+          {!isAnimatrice && <Link href="/terrain/animatrices" className="btn-primary btn-sm">Plan d&apos;action animatrices</Link>}
         </>}
       >
         <form action="/terrain" method="get" className="flex flex-wrap gap-2 mb-3 text-[13px]">
@@ -190,6 +195,44 @@ export default async function TerrainPage(props: {
         </div>
 
         <div className="space-y-4">
+          {!isAnimatrice && (weeklyAdoption.length > 0 || teamAdoption.length > 0) && (
+            <Card title="Adoption saisie mobile" action={<Link href="/parametres/evenements" className="text-[11px] text-accent hover:underline">Journal</Link>}>
+              <div className="text-[11px] text-muted mb-2">Saisie directe (app) vs import du fichier — par semaine</div>
+              <div className="flex items-end gap-1.5 h-14 mb-3">
+                {weeklyAdoption.map((w) => {
+                  const total = w.saisie + w.import_;
+                  const pct = total > 0 ? (w.saisie / total) * 100 : null;
+                  const tone = pct === null ? "bg-sunk" : pct >= 70 ? "bg-green" : pct >= 30 ? "bg-orange" : "bg-red";
+                  return (
+                    <div key={w.weekStart} className="flex-1 flex flex-col items-center gap-1" title={`${fmtDateShort(w.weekStart)} · ${w.saisie} saisie(s) / ${w.import_} import(s)`}>
+                      <div className="w-full flex-1 flex items-end rounded-sm overflow-hidden bg-sunk">
+                        <div className={`w-full ${tone}`} style={{ height: `${pct ?? 4}%` }} />
+                      </div>
+                      <div className="text-[9px] text-faint">{fmtDateShort(w.weekStart).slice(0, 5)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="text-[11px] text-muted mb-1.5">Par animatrice — 4 dernières semaines</div>
+              <div className="space-y-2">
+                {[...teamAdoption].sort((a, b) => (a.pct ?? -1) - (b.pct ?? -1)).map((a) => (
+                  <div key={a.animatriceId}>
+                    <div className="flex items-center justify-between text-[12px]">
+                      <span className="font-medium truncate">{a.name}</span>
+                      <span className="text-muted tabular-nums shrink-0">{a.pct === null ? "aucune activité" : `${Math.round(a.pct)} %`}</span>
+                    </div>
+                    {a.pct !== null && (
+                      <div className="mt-1 h-1.5 rounded-full overflow-hidden bg-sunk flex">
+                        <div className="h-full bg-green" style={{ width: `${a.pct}%` }} />
+                        <div className="h-full bg-faint/40" style={{ width: `${100 - a.pct}%` }} />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
           <Card title="Palmarès de la période">
             <div className="space-y-2.5">
               {podium.map((p) => (

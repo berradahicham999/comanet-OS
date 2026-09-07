@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, hasFlag } from "@/lib/access";
 import { getSettings } from "@/lib/settings";
 import { ensureRegulatoryTasks } from "@/lib/automations";
 import { PageHeader, Card, Badge, Tabs, BrandDot, Progress, Empty } from "@/components/ui";
@@ -24,6 +24,7 @@ type Row = {
 
 export default async function ReglementairePage(props: { searchParams: Promise<{ view?: string; brand?: string; type?: string; q?: string }> }) {
   await requireAccess("reglementaire");
+  const canExport = await hasFlag("exportData");
   const sp = await props.searchParams;
   const s = await getSettings();
   const created = await ensureRegulatoryTasks();
@@ -98,7 +99,7 @@ export default async function ReglementairePage(props: { searchParams: Promise<{
         title="Réglementaire"
         subtitle={`${list.length} dossiers DMP suivis par variante déposée. L'écart et la situation sont recalculés à chaque ouverture — jamais figés. Redépôt à lancer à J-${s.regulatoryRenewalDays}.${created ? ` ${created} tâche(s) créée(s) à l'instant.` : ""}`}
         actions={<>
-          <Link href="/reglementaire/export" prefetch={false} className="btn-secondary btn-sm">Exporter Excel</Link>
+          {canExport && <Link href="/reglementaire/export" prefetch={false} className="btn-secondary btn-sm">Exporter Excel</Link>}
           <Link href="/imports?type=REGULATORY" className="btn-secondary btn-sm">Importer</Link>
           <Link href="/reglementaire/nouveau" className="btn-primary btn-sm">+ Dossier</Link>
         </>}

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, brandFilter, clientFilter } from "@/lib/access";
 import { byDim, dailySeries, filterOptions, monthlySeries, totals, type Dim, type SalesFilter } from "@/lib/analytics";
 import { getRefDate } from "@/lib/ref-date";
 import { resolvePeriod, type PeriodParam } from "@/lib/periods";
@@ -26,7 +26,9 @@ export default async function VentesPage(props: { searchParams: Promise<FilterVa
   const sp = await props.searchParams;
   const { ref } = await getRefDate();
   const period = resolvePeriod(sp.period as PeriodParam, ref, { start: sp.start, end: sp.end });
-  const filter: SalesFilter = { brandId: sp.brand || undefined, city: sp.city || undefined, channel: sp.channel || undefined, salesRep: sp.rep || undefined, clientType: sp.type || undefined };
+  const [scopeBrands, scopeClients] = await Promise.all([brandFilter(), clientFilter()]);
+  // Portée « marques et clients assignés » : les marques restreignent ; les clients assignés restreignent aussi s'il y en a.
+  const filter: SalesFilter = { brandId: sp.brand || undefined, brandIds: scopeBrands ?? undefined, clientIds: scopeClients ?? undefined, city: sp.city || undefined, channel: sp.channel || undefined, salesRep: sp.rep || undefined, clientType: sp.type || undefined };
   const dim = (DIMS.find((d) => d.key === sp.dim)?.key ?? "brand") as Dim;
 
   const [cur, prev, n1, rows, prevRows, options, series] = await Promise.all([

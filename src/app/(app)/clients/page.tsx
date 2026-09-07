@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, brandFilter, clientFilter } from "@/lib/access";
 import { clientIntel, segmentCounts, SEGMENT_META, type Segment } from "@/lib/clients";
 import { getRefDate } from "@/lib/ref-date";
 import { PageHeader, Card, Badge, Delta, Tabs } from "@/components/ui";
@@ -15,7 +15,9 @@ export default async function ClientsPage(props: { searchParams: Promise<{ seg?:
   await requireAccess("clients");
   const sp = await props.searchParams;
   const { ref } = await getRefDate();
-  const all = await clientIntel({}, ref);
+  // Portée « assignés » : clients cochés, sinon clients ayant acheté une marque assignée.
+  const [scopeBrands, scopeClients] = await Promise.all([brandFilter(), clientFilter()]);
+  const all = await clientIntel({ clientIds: scopeClients, brandIds: scopeBrands }, ref);
   const counts = segmentCounts(all);
   const q = sp.q ? normKey(sp.q) : "";
   let list = all;

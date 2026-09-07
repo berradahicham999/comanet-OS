@@ -9,7 +9,7 @@ import {
   influencers, collaborations, adCreatives, campaignAdLinks, adAccounts,
   type BudgetCategory, type ContentStatus,
 } from "@/db/schema";
-import { requireAccess } from "@/lib/access";
+import { requirePermission, requireFlag } from "@/lib/access";
 import { categoryFromLabel } from "@/lib/budget-categories";
 import { matchKeyFor, backfillLink, clearLink } from "@/lib/meta/links";
 import { syncAccount, syncAll } from "@/lib/meta/sync";
@@ -20,7 +20,8 @@ const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim() || null;
 const num = (fd: FormData, k: string) => { const s = String(fd.get(k) ?? "").replace(/\s/g, "").replace(",", "."); const n = Number(s); return s === "" || Number.isNaN(n) ? null : n; };
 
 export async function saveBudget(formData: FormData) {
-  await requireAccess("marketing");
+  // Enveloppe annuelle par marque : réservée à l'Administration (distincte de la saisie d'une dépense).
+  await requirePermission("administration", "validate");
   const brandId = str(formData, "brandId"); const year = Number(str(formData, "year")); const amount = num(formData, "amount");
   if (!brandId || !year || amount === null) return;
   const ref = num(formData, "referenceRevenue");
@@ -30,7 +31,7 @@ export async function saveBudget(formData: FormData) {
 }
 
 export async function saveBudgetLine(formData: FormData) {
-  await requireAccess("marketing");
+  await requirePermission("budgets", "edit");
   const id = str(formData, "id");
   const brandId = str(formData, "brandId"); const year = Number(str(formData, "year")); const amount = num(formData, "amount"); const label = str(formData, "label");
   if (!brandId || !year || amount === null || !label) return;
@@ -41,14 +42,17 @@ export async function saveBudgetLine(formData: FormData) {
 }
 
 export async function deleteBudgetLine(formData: FormData) {
-  await requireAccess("marketing");
+  await requirePermission("budgets", "validate");
   const id = str(formData, "id"); if (!id) return;
   await db.delete(budgetLines).where(eq(budgetLines.id, id));
   revalidatePath("/marketing");
 }
 
 export async function saveExpense(formData: FormData) {
-  await requireAccess("marketing");
+  await requirePermission("budgets", "create");
+  // Passer une dépense en « engagé » ou « dépensé » exige l'interrupteur « Valider une dépense ».
+  const status = String(formData.get("status") ?? "PLANNED");
+  if (status !== "PLANNED") await requireFlag("approveSpend");
   const id = str(formData, "id");
   const brandId = str(formData, "brandId"); const amount = num(formData, "amount"); const label = str(formData, "label"); const date = str(formData, "date");
   if (!brandId || amount === null || !label || !date) return;
@@ -67,14 +71,14 @@ export async function saveExpense(formData: FormData) {
 }
 
 export async function deleteExpense(formData: FormData) {
-  await requireAccess("marketing");
+  await requirePermission("budgets", "validate");
   const id = str(formData, "id"); if (!id) return;
   await db.delete(marketingExpenses).where(eq(marketingExpenses.id, id));
   revalidatePath("/marketing");
 }
 
 export async function saveCampaign(formData: FormData) {
-  await requireAccess("marketing");
+  await requirePermission("marketing", "create");
   const id = str(formData, "id");
   const brandId = str(formData, "brandId"); const name = str(formData, "name");
   if (!brandId || !name) return;
@@ -106,7 +110,7 @@ export async function saveCampaign(formData: FormData) {
 }
 
 export async function deleteCampaign(formData: FormData) {
-  await requireAccess("marketing");
+  await requirePermission("marketing", "validate");
   const id = str(formData, "id"); if (!id) return;
   await db.delete(campaigns).where(eq(campaigns.id, id));
   revalidatePath("/marketing"); revalidatePath("/marketing/campagnes");
@@ -114,7 +118,7 @@ export async function deleteCampaign(formData: FormData) {
 }
 
 export async function setCampaignStatus(formData: FormData) {
-  await requireAccess("marketing");
+  await requirePermission("marketing", "validate");
   const id = str(formData, "id"); const status = str(formData, "status");
   if (!id || !status) return;
   await db.update(campaigns).set({ status: status as "DRAFT" | "PLANNED" | "ACTIVE" | "PAUSED" | "DONE" | "ANALYZED", updatedAt: new Date() }).where(eq(campaigns.id, id));
@@ -124,7 +128,7 @@ export async function setCampaignStatus(formData: FormData) {
 /* ------------------------------- Influence -------------------------------- */
 
 export async function saveInfluencer(formData: FormData) {
-  await requireAccess("marketing");
+  await requirePermission("influence", "create");
   const id = str(formData, "id"); const name = str(formData, "name");
   if (!name) return;
   const values = {
@@ -143,7 +147,7 @@ export async function saveInfluencer(formData: FormData) {
 }
 
 export async function saveCollaboration(formData: FormData) {
-  await requireAccess("marketing");
+  await requirePermission("influence", "create");
   const id = str(formData, "id");
   const influencerId = str(formData, "influencerId"); const brandId = str(formData, "brandId"); const date = str(formData, "date");
   if (!influencerId || !brandId || !date) return;
@@ -169,7 +173,7 @@ export async function saveCollaboration(formData: FormData) {
 }
 
 export async function setCollaborationStatus(formData: FormData) {
-  await requireAccess("marketing");
+  await requirePermission("influence", "edit");
   const id = str(formData, "id"); const status = str(formData, "status");
   if (!id || !status) return;
   await db.update(collaborations).set({ status, updatedAt: new Date() }).where(eq(collaborations.id, id));
@@ -177,7 +181,7 @@ export async function setCollaborationStatus(formData: FormData) {
 }
 
 export async function deleteCollaboration(formData: FormData) {
-  await requireAccess("marketing");
+  await requirePermission("influence", "validate");
   const id = str(formData, "id"); if (!id) return;
   await db.delete(collaborations).where(eq(collaborations.id, id));
   revalidatePath("/marketing/influence");
@@ -186,7 +190,7 @@ export async function deleteCollaboration(formData: FormData) {
 /* ------------------------------ Créatives Ads ------------------------------ */
 
 export async function saveAdCreative(formData: FormData) {
-  await requireAccess("marketing");
+  await requirePermission("marketing", "edit");
   const platform = str(formData, "platform"); const adName = str(formData, "adName");
   if (!platform || !adName) return;
   const values = { platform, adName, format: str(formData, "format"), hook: str(formData, "hook"), productId: str(formData, "productId"), notes: str(formData, "notes") };
@@ -195,7 +199,7 @@ export async function saveAdCreative(formData: FormData) {
 }
 
 export async function saveContent(formData: FormData) {
-  await requireAccess("marketing");
+  await requirePermission("marketing", "create");
   const id = str(formData, "id");
   const brandId = str(formData, "brandId"); const title = str(formData, "title"); const date = str(formData, "date");
   if (!brandId || !title || !date) return;
@@ -209,7 +213,7 @@ export async function saveContent(formData: FormData) {
 }
 
 export async function setContentStatus(formData: FormData) {
-  await requireAccess("marketing");
+  await requirePermission("marketing", "edit");
   const id = str(formData, "id"); const status = str(formData, "status") as ContentStatus | null;
   if (!id || !status) return;
   await db.update(contentItems).set({ status }).where(eq(contentItems.id, id));
@@ -217,7 +221,7 @@ export async function setContentStatus(formData: FormData) {
 }
 
 export async function deleteContent(formData: FormData) {
-  await requireAccess("marketing");
+  await requirePermission("marketing", "validate");
   const id = str(formData, "id"); if (!id) return;
   await db.delete(contentItems).where(eq(contentItems.id, id));
   revalidatePath("/marketing/planning");
@@ -236,7 +240,7 @@ const COMPTES = "/marketing/ads/comptes";
  * (lignes venues d'un import fichier, qui n'en portent pas), auquel cas on rattache par nom.
  */
 export async function linkAdCampaigns(formData: FormData) {
-  await requireAccess("marketing");
+  await requirePermission("marketing", "edit");
   const campaignId = str(formData, "campaignId");
   if (!campaignId) return;
   const picks = formData.getAll("pick").map(String).filter(Boolean);
@@ -272,7 +276,7 @@ export async function linkAdCampaigns(formData: FormData) {
 }
 
 export async function unlinkAdCampaign(formData: FormData) {
-  await requireAccess("marketing");
+  await requirePermission("marketing", "edit");
   const linkId = str(formData, "linkId");
   const campaignId = str(formData, "campaignId");
   if (!linkId) return;
@@ -284,7 +288,7 @@ export async function unlinkAdCampaign(formData: FormData) {
 
 /** Déclare (ou met à jour) un compte publicitaire Meta et son activation de synchronisation. */
 export async function saveAdAccount(formData: FormData) {
-  await requireAccess("marketing");
+  await requirePermission("administration", "validate");
   const externalId = str(formData, "externalId");
   const name = str(formData, "name");
   if (!externalId || !name) return;
@@ -312,7 +316,7 @@ export async function saveAdAccount(formData: FormData) {
 }
 
 export async function setAdAccountSync(formData: FormData) {
-  await requireAccess("marketing");
+  await requirePermission("administration", "validate");
   const id = str(formData, "id");
   if (!id) return;
   const enabled = str(formData, "enabled") === "1";
@@ -322,7 +326,7 @@ export async function setAdAccountSync(formData: FormData) {
 
 /** Synchronisation immédiate d'un compte, sans attendre le passage quotidien. */
 export async function syncAdAccountNow(formData: FormData) {
-  await requireAccess("marketing");
+  await requirePermission("marketing", "edit");
   const id = str(formData, "id");
   if (!id) return;
   const rows = await db
@@ -345,7 +349,7 @@ export async function syncAdAccountNow(formData: FormData) {
  * le verrou, sans erreur.
  */
 export async function refreshMetaNow() {
-  await requireAccess("marketing");
+  await requirePermission("marketing", "edit");
   if (!hasMetaToken()) return;
   await syncAll({ mode: "intraday" });
   revalidatePath("/marketing/ads");
@@ -357,7 +361,7 @@ export async function refreshMetaNow() {
  * activer une synchronisation reste un choix explicite (chaque compte consomme du quota).
  */
 export async function discoverAdAccounts() {
-  await requireAccess("marketing");
+  await requirePermission("administration", "validate");
   if (!hasMetaToken()) {
     redirect(`${COMPTES}?erreur=${encodeURIComponent("Aucun jeton Meta n'est configuré : ajoutez META_ACCESS_TOKEN aux variables d'environnement, puis redéployez.")}`);
   }
@@ -411,7 +415,7 @@ export async function discoverAdAccounts() {
  * concerné est refusée plutôt que de produire une dépense en dirhams inventée.
  */
 export async function saveFxRates(formData: FormData) {
-  await requireAccess("marketing");
+  await requirePermission("marketing", "edit");
   const cur = await getSettings();
   const rates: Record<string, number> = { ...cur.fxRates };
   for (const code of ["EUR", "USD"]) {

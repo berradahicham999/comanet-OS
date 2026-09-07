@@ -1,83 +1,166 @@
 /**
- * Catalogue des modules de COMANET OS (partagé client/serveur).
+ * Catalogue des modules, des interrupteurs transverses et des portées
+ * (partagé client/serveur).
  *
- * Ce fichier ne décide plus QUI a accès à QUOI : les droits vivent en base
- * (`roles` → `role_permissions` → `user_roles`) et se résolvent via
+ * Ce fichier ne décide pas QUI a accès à QUOI : les droits vivent en base
+ * (`user_permissions`, `user_scope`, `user_flags`) et se résolvent via
  * `src/lib/permissions.ts`. Il ne reste ici que la liste des modules, leurs
- * libellés et leur regroupement, qui servent à semer et à afficher la matrice
- * de permissions dans Paramètres.
+ * libellés et leur regroupement, qui servent à afficher la matrice de
+ * permissions dans l'administration et à filtrer la navigation.
+ *
+ * Cockpit, Action Center et Recherche ne sont PAS des modules : ils agrègent
+ * ce que la personne a déjà le droit de voir et apparaissent dès qu'un module
+ * est visible.
  */
 
 export const MODULE_KEYS = [
-  "cockpit",
-  "actions",
+  "produits",
+  "stock",
+  "reglementaire",
   "ventes",
   "clients",
-  "produits",
-  "marques",
-  "stock",
-  "terrain",
-  "terrain_animatrices",
-  "reglementaire",
   "marketing",
+  "influence",
+  "budgets",
+  "terrain",
   "medical",
-  "medical_admin",
   "taches",
-  "imports",
-  "parametres",
-  "recherche",
+  "assets",
+  "rapports",
+  "administration",
 ] as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
 
 export const MODULE_LABELS: Record<ModuleKey, string> = {
-  cockpit: "Cockpit",
-  actions: "Action Center",
+  produits: "Référentiel produits",
+  stock: "Stock et achats",
+  reglementaire: "Réglementaire",
+  ventes: "Suivi commercial et ventes",
+  clients: "Clients et trade marketing",
+  marketing: "Marketing digital",
+  influence: "Influence et UGC",
+  budgets: "Budgets",
+  terrain: "Terrain / animations",
+  medical: "Délégué médical",
+  taches: "Tâches et projets",
+  assets: "Bibliothèque d'assets",
+  rapports: "Rapports et exports",
+  administration: "Administration",
+};
+
+/** Libellé court, pour les puces de la liste des utilisateurs. */
+export const MODULE_SHORT: Record<ModuleKey, string> = {
+  produits: "Produits",
+  stock: "Stock",
+  reglementaire: "Réglementaire",
   ventes: "Ventes",
   clients: "Clients",
-  produits: "Produits",
-  marques: "Marques",
-  stock: "Stock & achats",
-  terrain: "Terrain",
-  terrain_animatrices: "Terrain — animatrices",
-  reglementaire: "Réglementaire",
   marketing: "Marketing",
+  influence: "Influence",
+  budgets: "Budgets",
+  terrain: "Terrain",
   medical: "Médical",
-  medical_admin: "Médical — administration",
   taches: "Tâches",
-  imports: "Imports Sage",
-  parametres: "Paramètres",
-  recherche: "Recherche",
+  assets: "Assets",
+  rapports: "Rapports",
+  administration: "Admin",
 };
 
-/** Les 7 grandes catégories, pour présenter la matrice de permissions. */
+/** Ce que contient chaque module, affiché dans la matrice. */
+export const MODULE_HINTS: Record<ModuleKey, string> = {
+  produits: "Fiches produits, marques, prix publics, assets produit.",
+  stock: "Couverture de stock, commandes conseillées, prix d'achat.",
+  reglementaire: "Dossiers, autorisations, alertes d'expiration, dépôts.",
+  ventes: "Import des ventes, objectifs, analyses, classements clients.",
+  clients: "Fiches clients, plans d'animation, calendrier trade.",
+  marketing: "Planning éditorial, campagnes, rapports publicitaires (Meta Ads).",
+  influence: "Créatrices, collaborations, performances, bibliothèque UGC.",
+  budgets: "Enveloppes par marque, engagements, dépenses, factures.",
+  terrain: "Saisie journalière, rapports d'animation, animatrices, ROI.",
+  medical: "Prescripteurs, visites, échantillons, tournées, délégués.",
+  taches: "Attribution, suivi, kanban d'équipe.",
+  assets: "Visuels, PLV, vidéos, argumentaires.",
+  rapports: "Génération et export des rapports.",
+  administration: "Utilisateurs, permissions, modèles de rôle, seuils, connexions, imports système.",
+};
+
+/** Ce que « Valider » veut dire, module par module (action irréversible ou externe). */
+export const VALIDATE_HINTS: Record<ModuleKey, string> = {
+  produits: "Valider une fiche produit ; supprimer un produit.",
+  stock: "Valider une commande conseillée.",
+  reglementaire: "Déposer un dossier à l'autorité, valider une étape ; supprimer un dossier.",
+  ventes: "Valider un objectif ; annuler un import de ventes.",
+  clients: "Valider un plan d'animation ; supprimer un client.",
+  marketing: "Publier ou clôturer une campagne.",
+  influence: "Clôturer une collaboration (le cachet passe par « Valider une dépense »).",
+  budgets: "Engager une ligne (nécessite aussi « Valider une dépense »). Les enveloppes annuelles restent en Administration.",
+  terrain: "Clôturer une animation (fige son ROI) ; gérer les fiches animatrices.",
+  medical: "Valider une visite, ajuster le stock d'échantillons, gérer délégués, secteurs et spécialités.",
+  taches: "Clôturer ou supprimer une tâche d'autrui.",
+  assets: "Publier ou retirer un asset.",
+  rapports: "Publier un rapport.",
+  administration: "Gérer utilisateurs et droits, modèles, seuils, connexions ; suppressions définitives.",
+};
+
+/** Regroupement des modules pour présenter la matrice. */
 export const MODULE_GROUPS: { title: string; modules: ModuleKey[] }[] = [
-  { title: "Pilotage", modules: ["cockpit", "actions", "recherche"] },
-  { title: "Commercial", modules: ["ventes", "clients", "produits", "marques", "stock"] },
-  { title: "Marketing", modules: ["marketing"] },
-  { title: "Terrain", modules: ["terrain", "terrain_animatrices"] },
-  { title: "Médical", modules: ["medical", "medical_admin"] },
-  { title: "Conformité & exécution", modules: ["reglementaire", "taches"] },
-  { title: "Système", modules: ["imports", "parametres"] },
+  { title: "Référentiels", modules: ["produits", "stock", "reglementaire"] },
+  { title: "Commercial", modules: ["ventes", "clients"] },
+  { title: "Marketing", modules: ["marketing", "influence", "budgets", "assets"] },
+  { title: "Terrain et médical", modules: ["terrain", "medical"] },
+  { title: "Exécution", modules: ["taches", "rapports"] },
+  { title: "Système", modules: ["administration"] },
 ];
 
-/**
- * Description des modules dont la portée n'est pas évidente, affichée dans la matrice.
- * Les deux modules « _admin » remplacent les exceptions qui étaient codées en dur par
- * nom de rôle avant ce chantier.
- */
-export const MODULE_HINTS: Partial<Record<ModuleKey, string>> = {
-  terrain_animatrices: "Fiches et performances des animatrices, en plus de l'accès Terrain.",
-  medical_admin: "Délégués, secteurs, spécialités et paramétrage médical, en plus de l'accès Médical.",
-  parametres: "L'action « administrer » est requise pour modifier rôles, permissions et périmètres.",
+/** Cookie de prévisualisation « en tant que » (défini ici pour rester importable sans base). */
+export const PREVIEW_COOKIE = "comanet_preview";
+
+/* ------------------------------------------------------------------ */
+/* Interrupteurs transverses                                           */
+/* ------------------------------------------------------------------ */
+
+export const FLAG_KEYS = [
+  "seeMargins",
+  "seeGlobalBudgets",
+  "seeInternalCosts",
+  "approveSpend",
+  "exportData",
+  "readActivityLog",
+] as const;
+
+export type FlagKey = (typeof FLAG_KEYS)[number];
+
+export const FLAG_LABELS: Record<FlagKey, string> = {
+  seeMargins: "Voir les prix d'achat et les marges",
+  seeGlobalBudgets: "Voir les budgets globaux",
+  seeInternalCosts: "Voir les coûts internes (cachets, rémunération des animatrices)",
+  approveSpend: "Valider une dépense",
+  exportData: "Exporter des données",
+  readActivityLog: "Consulter le journal d'activité",
 };
 
-export const ROLE_LABELS: Record<string, string> = {
-  ADMIN: "Admin / DG",
-  MARKETING: "Marketing",
-  REGLEMENTAIRE: "Réglementaire",
-  TRADE: "Trade",
-  ANIMATRICE: "Animatrice",
-  DELEGUE_MEDICAL: "Délégué médical",
-  MANAGER_MEDICAL: "Manager médical",
+/* ------------------------------------------------------------------ */
+/* Portée des données                                                  */
+/* ------------------------------------------------------------------ */
+
+export const SCOPE_KEYS = ["OWN", "ASSIGNED", "ALL"] as const;
+export type ScopeKey = (typeof SCOPE_KEYS)[number];
+
+export const SCOPE_LABELS: Record<ScopeKey, string> = {
+  OWN: "Ses propres données uniquement",
+  ASSIGNED: "Ses marques et clients assignés",
+  ALL: "Tout",
+};
+
+export const SCOPE_SHORT: Record<ScopeKey, string> = {
+  OWN: "Ses données",
+  ASSIGNED: "Assignés",
+  ALL: "Tout",
+};
+
+export const SCOPE_HINTS: Record<ScopeKey, string> = {
+  OWN: "Animations, visites, tâches et dossiers dont la personne est responsable. Sur un module sans propriétaire (produits, clients, ventes), équivaut à « assignés ».",
+  ASSIGNED: "Données rattachées aux marques et aux clients cochés ci-dessous.",
+  ALL: "Aucun filtre.",
 };

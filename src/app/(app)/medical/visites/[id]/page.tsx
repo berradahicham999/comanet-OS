@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, isOwnOnly } from "@/lib/access";
 import { PageHeader, Card } from "@/components/ui";
 import { MedicalVisitForm } from "@/components/medical-visit-form";
 import { saveVisitAction, deleteVisitAction } from "../actions";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function VisiteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireAccess("medical");
   const { id } = await params;
-  const isDelegate = user.role === "DELEGUE_MEDICAL";
+  const isDelegate = await isOwnOnly();
 
   const [visitRes, productsRes, doctorsRes] = await Promise.all([
     db.execute(sql`
@@ -54,6 +54,8 @@ export default async function VisiteDetailPage({ params }: { params: Promise<{ i
             comment: visit.comment as string | null,
             nextAction: visit.next_action as string | null,
             nextVisitDate: visit.next_visit_date as string | null,
+            objections: visit.objections as string | null,
+            documentation: visit.documentation as string | null,
             productIds: (visit.product_ids as string[]) ?? [],
             samples: ((visit.samples as { productId: string; qty: string }[]) ?? []).map((s) => ({ productId: s.productId, qty: s.qty })),
           }}

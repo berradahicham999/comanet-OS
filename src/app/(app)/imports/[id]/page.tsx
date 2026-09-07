@@ -3,9 +3,9 @@ import { notFound } from "next/navigation";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { imports as importsTable } from "@/db/schema";
-import { requireAccess } from "@/lib/access";
+import { requireAnyModule, getAccess } from "@/lib/access";
 import { PageHeader, Card, Badge } from "@/components/ui";
-import { IMPORT_TYPES, FIELDS } from "@/lib/import/fields";
+import { IMPORT_TYPES, FIELDS, IMPORT_MODULE, type ImportType } from "@/lib/import/fields";
 import { rollbackImport } from "../actions";
 import { isReversible, irreversibleReason, rollbackPlan } from "@/lib/import/rollback";
 import { fmtDate, fmtNum, fmtMAD } from "@/lib/format";
@@ -13,7 +13,8 @@ import { fmtDate, fmtNum, fmtMAD } from "@/lib/format";
 export const dynamic = "force-dynamic";
 
 export default async function ImportDetailPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string }> }) {
-  const user = await requireAccess("imports");
+  await requireAnyModule();
+  const access = (await getAccess())!;
   const { id } = await props.params;
   const { error } = await props.searchParams;
   const imp = await db.query.imports.findFirst({ where: eq(importsTable.id, id) });
@@ -21,6 +22,7 @@ export default async function ImportDetailPage(props: { params: Promise<{ id: st
   const stats = (await db.execute(sql`select count(*)::int as n, coalesce(sum(amount),0)::float8 as amount, min(date)::text as min_date, max(date)::text as max_date from sales where import_id = ${id}::uuid`)).rows[0] as { n: number; amount: number; min_date: string | null; max_date: string | null };
   const typeDef = IMPORT_TYPES.find((t) => t.key === imp.type);
   const plan = isReversible(imp.type) ? await rollbackPlan(id, imp.type) : null;
+  const canRollback = access.perms[IMPORT_MODULE[imp.type as ImportType]]?.validate || access.perms.administration.validate;
   const fuzzy = imp.warnings.filter((w) => w.startsWith("≈"));
   const other = imp.warnings.filter((w) => !w.startsWith("≈"));
   return (
@@ -62,8 +64,8 @@ export default async function ImportDetailPage(props: { params: Promise<{ id: st
               Les produits, clients et marques créés au passage sont conservés : ils peuvent servir ailleurs.
               Recharger le même fichier rétablit les lignes à l&apos;identique.
             </p>
-            {user.role !== "ADMIN" ? (
-              <p className="text-[12.5px] text-faint mt-2">Seul un administrateur peut annuler un import.</p>
+            {!canRollback ? (
+              <p className="text-[12.5px] text-faint mt-2">Annuler cet import demande le droit « Valider » sur le module {IMPORT_MODULE[imp.type as ImportType]}.</p>
             ) : (
               <form action={rollbackImport} className="mt-3">
                 <input type="hidden" name="id" value={id} />

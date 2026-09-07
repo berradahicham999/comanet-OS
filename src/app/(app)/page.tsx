@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, Upload } from "lucide-react";
-import { requireAccess } from "@/lib/access";
+import { requireAnyModule, getUserPermissions } from "@/lib/access";
 import { cockpitData } from "@/lib/cockpit";
 import { listUsers } from "@/lib/users";
 import { PageHeader, Card, Kpi, Delta, Badge, BrandDot, Progress, Section } from "@/components/ui";
@@ -11,7 +11,8 @@ import { fmtMAD, fmtNum, fmtPct, fmtDate, fmtDateLong, fmtMonth, delta, months }
 export const dynamic = "force-dynamic";
 
 export default async function CockpitPage() {
-  const user = await requireAccess("cockpit");
+  const user = await requireAnyModule();
+  const perms = await getUserPermissions();
   const [d, users] = await Promise.all([cockpitData(), listUsers()]);
   const { cmp, objective, annualObj, ytd, ytdN1, series, seriesN1 } = d.commercial;
   const mtd = cmp.current.amount;
@@ -39,7 +40,7 @@ export default async function CockpitPage() {
       )}
 
       {/* ---------------- Commercial ---------------- */}
-      <Section title="Commercial" description={`${monthLabel} — à date (${d.proj.day}/${d.proj.daysInMonth} jours)`}>
+      {perms.ventes.view && <Section title="Commercial" description={`${monthLabel} — à date (${d.proj.day}/${d.proj.daysInMonth} jours)`}>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <Card href="/ventes">
             <div className="label">CA du mois</div>
@@ -103,12 +104,12 @@ export default async function CockpitPage() {
             </div>
           </Card>
         </div>
-      </Section>
+      </Section>}
 
-      {/* ---------------- Blocs opérationnels ---------------- */}
-      <Section title="Pilotage" description="Marketing · Terrain · Digital · Réglementaire · Stock">
+      {/* ---------------- Blocs opérationnels : chaque carte suit le module correspondant ---------------- */}
+      {(perms.budgets.view || perms.terrain.view || perms.marketing.view || perms.reglementaire.view || perms.stock.view) && <Section title="Pilotage" description="Marketing · Terrain · Digital · Réglementaire · Stock">
         <div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-3">
-          <Card href="/marketing" title="Marketing">
+          {perms.budgets.view && <Card href="/marketing" title="Marketing">
             <div className="kpi">{fmtMAD(d.marketing.available, { compact: true })}</div>
             <div className="text-[12px] text-muted mt-1">disponible sur {fmtMAD(d.marketing.budget, { compact: true })}</div>
             <Progress value={d.marketing.budget ? (d.marketing.engaged / d.marketing.budget) * 100 : 0} tone={d.marketing.budget && d.marketing.engaged / d.marketing.budget > 0.9 ? "orange" : "accent"} className="mt-3" />
@@ -116,9 +117,9 @@ export default async function CockpitPage() {
               <span className="text-muted">Engagé</span><span className="num font-medium">{fmtMAD(d.marketing.engaged, { compact: true, suffix: false })}</span>
               <span className="text-muted">Dépensé</span><span className="num font-medium">{fmtMAD(d.marketing.spent, { compact: true, suffix: false })}</span>
             </div>
-          </Card>
+          </Card>}
 
-          <Card href="/terrain" title="Terrain">
+          {perms.terrain.view && <Card href="/terrain" title="Terrain">
             <div className="kpi">{d.terrain.today.length} <span className="text-[14px] font-medium text-muted">animation{d.terrain.today.length > 1 ? "s" : ""} aujourd&apos;hui</span></div>
             <div className="text-[12px] text-muted mt-1">{fmtNum(d.terrain.sales7.units)} u. · {fmtMAD(d.terrain.sales7.revenue, { compact: true })} sur 7 j ({d.terrain.sales7.animations} animations)</div>
             <div className="mt-3 space-y-1 text-[12px]">
@@ -126,18 +127,18 @@ export default async function CockpitPage() {
               <div className="flex justify-between gap-2"><span className="text-muted">Top produit</span><span className="font-medium truncate">{d.terrain.topProduct?.name ?? "—"}</span></div>
               <div className="flex justify-between gap-2"><span className="text-muted">Top point de vente</span><span className="font-medium truncate">{d.terrain.topClient?.name ?? "—"}</span></div>
             </div>
-          </Card>
+          </Card>}
 
-          <Card href="/marketing" title="Digital · 30 j">
+          {perms.marketing.view && <Card href="/marketing" title="Digital · 30 j">
             <div className="kpi">{d.digital.roas !== null ? `${d.digital.roas.toFixed(1)}×` : "—"} <span className="text-[14px] font-medium text-muted">ROAS</span></div>
             <div className="text-[12px] text-muted mt-1">{fmtMAD(d.digital.spend, { compact: true })} dépensés · {fmtMAD(d.digital.revenue, { compact: true })} attribués</div>
             <div className="mt-3 space-y-1 text-[12px]">
               <div className="flex justify-between"><span className="text-muted">CPA</span><span className="font-medium">{d.digital.cpa !== null ? fmtMAD(d.digital.cpa) : "—"}</span></div>
               <div className="flex justify-between"><span className="text-muted">Campagnes à traiter</span><span className="font-medium">{d.recs.filter((r) => r.rule === "ads-performance" && !r.existingTask).length}</span></div>
             </div>
-          </Card>
+          </Card>}
 
-          <Card href="/reglementaire" title="Réglementaire">
+          {perms.reglementaire.view && <Card href="/reglementaire" title="Réglementaire">
             <div className="kpi text-red">{d.regulatory.critical} <span className="text-[14px] font-medium text-muted">critique{d.regulatory.critical > 1 ? "s" : ""}</span></div>
             <div className="text-[12px] text-muted mt-1">expirés ou ≤ 30 jours</div>
             <div className="mt-3 space-y-1 text-[12px]">
@@ -146,9 +147,9 @@ export default async function CockpitPage() {
               <div className="flex justify-between"><span className="text-muted">Non déposés / bloqués</span><span className="font-medium">{d.regulatory.blocked}</span></div>
               <div className="flex justify-between"><span className="text-muted">Dossiers suivis</span><span className="font-medium">{d.regulatory.total}</span></div>
             </div>
-          </Card>
+          </Card>}
 
-          <Card href="/stock" title="Stock">
+          {perms.stock.view && <Card href="/stock" title="Stock">
             <div className="kpi text-orange">{d.stock.red + d.stock.orange} <span className="text-[14px] font-medium text-muted">sous seuil</span></div>
             <div className="text-[12px] text-muted mt-1">{d.stock.red} critiques · {d.stock.orange} tendus</div>
             <div className="mt-3 space-y-1 text-[12px]">
@@ -156,9 +157,9 @@ export default async function CockpitPage() {
               <div className="flex justify-between"><span className="text-muted">Surstock (&gt; 6 mois)</span><span className="font-medium">{d.stock.overstock}</span></div>
               <div className="flex justify-between"><span className="text-muted">À commander</span><span className="font-medium">{d.stock.toOrder.length}</span></div>
             </div>
-          </Card>
+          </Card>}
         </div>
-      </Section>
+      </Section>}
 
       {/* ---------------- Action Center ---------------- */}
       <Section title="Actions prioritaires" description="Générées automatiquement à partir des données — chaque action peut devenir une tâche." action={<Link href="/actions" className="btn-secondary btn-sm">Tout voir ({d.recs.filter((r) => !r.existingTask).length})</Link>}>
@@ -172,7 +173,7 @@ export default async function CockpitPage() {
       </Section>
 
       {/* ---------------- Stock à risque ---------------- */}
-      {(d.stock.red + d.stock.orange > 0) && (
+      {perms.stock.view && (d.stock.red + d.stock.orange > 0) && (
         <Section title="Produits à risque de rupture" action={<Link href="/stock" className="btn-secondary btn-sm">Purchase forecast</Link>}>
           <div className="table-wrap">
             <table className="tbl">

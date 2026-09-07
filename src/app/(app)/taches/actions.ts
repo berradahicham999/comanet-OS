@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { tasks, taskComments, type TaskPriority, type TaskStatus } from "@/db/schema";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, isOwnOnly, canDo } from "@/lib/access";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim() || null;
 
@@ -20,7 +20,7 @@ export async function saveTask(formData: FormData) {
     description: str(formData, "description"),
     priority: (str(formData, "priority") ?? "MEDIUM") as TaskPriority,
     dueDate: str(formData, "dueDate"),
-    assigneeId: user.role === "ANIMATRICE" ? user.id : str(formData, "assigneeId"),
+    assigneeId: (await isOwnOnly()) ? user.id : str(formData, "assigneeId"),
     brandId: str(formData, "brandId"),
     entityType: str(formData, "entityType"),
     entityId: entityId && /^[0-9a-f-]{36}$/.test(entityId) ? entityId : null,
@@ -62,8 +62,8 @@ export async function addComment(formData: FormData) {
 }
 
 export async function deleteTask(formData: FormData) {
-  const user = await requireAccess("taches");
-  if (user.role === "ANIMATRICE") return;
+  await requireAccess("taches");
+  if (!(await canDo("taches", "validate"))) return;
   const id = str(formData, "id");
   if (!id) return;
   await db.delete(tasks).where(eq(tasks.id, id));

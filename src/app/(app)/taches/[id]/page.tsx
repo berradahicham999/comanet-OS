@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { eq, and, asc } from "drizzle-orm";
 import { db } from "@/db";
 import { tasks as tasksTable, taskComments, documents as documentsTable } from "@/db/schema";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, isOwnOnly, canDo } from "@/lib/access";
 import { listBrands, listUsers } from "@/lib/users";
 import { entityHref, SOURCE_LABEL } from "@/lib/tasks";
 import { PageHeader, Card, Badge, PriorityBadge, StatusBadge } from "@/components/ui";
@@ -19,7 +19,8 @@ export default async function TaskPage(props: { params: Promise<{ id: string }> 
   const { id } = await props.params;
   const task = await db.query.tasks.findFirst({ where: eq(tasksTable.id, id), with: { assignee: true, createdBy: true, brand: true } });
   if (!task) notFound();
-  if (user.role === "ANIMATRICE" && task.assigneeId !== user.id) notFound();
+  const [ownOnly, canValidate] = await Promise.all([isOwnOnly(), canDo("taches", "validate")]);
+  if (ownOnly && task.assigneeId !== user.id && task.createdById !== user.id) notFound();
   const [comments, docs, users, brands] = await Promise.all([
     db.query.taskComments.findMany({ where: eq(taskComments.taskId, id), with: { user: true }, orderBy: [asc(taskComments.createdAt)] }),
     db.select().from(documentsTable).where(and(eq(documentsTable.entityType, "task"), eq(documentsTable.entityId, id))),
@@ -73,9 +74,9 @@ export default async function TaskPage(props: { params: Promise<{ id: string }> 
             <div className="flex items-center gap-2 mb-3 text-[13px]"><span className="text-muted">Responsable</span><span className="font-medium">{task.assignee?.name ?? "Non assignée"}</span></div>
             <div className="flex items-center gap-2 mb-3 text-[13px]"><span className="text-muted">Échéance</span><span className="font-medium">{fmtDate(task.dueDate)}</span></div>
             {task.sourceKey && <div className="text-[11px] text-faint mb-3">Clé : {task.sourceKey}</div>}
-            <TaskForm task={task} users={users} brands={brands} isAnimatrice={user.role === "ANIMATRICE"} />
+            <TaskForm task={task} users={users} brands={brands} isAnimatrice={ownOnly} />
           </Card>
-          {user.role !== "ANIMATRICE" && <form action={deleteTask}><input type="hidden" name="id" value={id} /><button className="btn-ghost btn-sm text-red" type="submit">Supprimer la tâche</button></form>}
+          {canValidate && <form action={deleteTask}><input type="hidden" name="id" value={id} /><button className="btn-ghost btn-sm text-red" type="submit">Supprimer la tâche</button></form>}
           {task.source !== "MANUAL" && <Badge tone="gray">Origine : {SOURCE_LABEL[task.source]}</Badge>}
         </div>
       </div>

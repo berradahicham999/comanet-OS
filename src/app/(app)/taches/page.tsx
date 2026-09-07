@@ -1,7 +1,7 @@
 import Link from "next/link";
 import clsx from "clsx";
 import { MessageSquare, ArrowRight, Check, Play, RotateCcw } from "lucide-react";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, isOwnOnly, brandFilter } from "@/lib/access";
 import { listTasks, SOURCE_LABEL, type TaskRow } from "@/lib/tasks";
 import { listUsers, listBrands } from "@/lib/users";
 import { PageHeader, Badge, PriorityBadge, BrandDot, Tabs, Card } from "@/components/ui";
@@ -42,10 +42,11 @@ function TaskCard({ t, me }: { t: TaskRow; me: string }) {
 
 export default async function TachesPage(props: { searchParams: Promise<{ assignee?: string; brand?: string; overdue?: string; view?: string; source?: string }> }) {
   const user = await requireAccess("taches");
+  const [ownOnly, scopeBrands] = await Promise.all([isOwnOnly(), brandFilter()]);
   const sp = await props.searchParams;
-  const mine = sp.view === "mine" || user.role === "ANIMATRICE";
+  const mine = sp.view === "mine" || ownOnly;
   const [tasks, users, brands] = await Promise.all([
-    listTasks({ assigneeId: mine ? user.id : sp.assignee || undefined, brandId: sp.brand || undefined, overdue: !!sp.overdue, source: sp.source || undefined }),
+    listTasks({ assigneeId: mine ? user.id : sp.assignee || undefined, brandId: sp.brand || undefined, brandIds: scopeBrands, overdue: !!sp.overdue, source: sp.source || undefined }),
     listUsers(), listBrands(),
   ]);
   const cols: { key: TaskRow["status"]; label: string }[] = [{ key: "TODO", label: "À faire" }, { key: "IN_PROGRESS", label: "En cours" }, { key: "DONE", label: "Terminées (14 j)" }];
@@ -57,8 +58,8 @@ export default async function TachesPage(props: { searchParams: Promise<{ assign
       <PageHeader eyebrow="Exécution" title={mine ? "Mes tâches" : "Tâches"} subtitle={`${tasks.filter((t) => t.status !== "DONE" && t.status !== "CANCELLED").length} ouvertes · ${overdueCount} en retard`}
         actions={<Link href="/taches/nouvelle" className="btn-primary btn-sm">+ Tâche</Link>}>
         <div className="flex flex-wrap items-center gap-2">
-          {user.role !== "ANIMATRICE" && <Tabs current={qs({ view: sp.view })} tabs={[{ href: qs({ view: "" }), label: "Toutes" }, { href: qs({ view: "mine" }), label: "Mes tâches" }]} />}
-          {user.role !== "ANIMATRICE" && (
+          {!ownOnly && <Tabs current={qs({ view: sp.view })} tabs={[{ href: qs({ view: "" }), label: "Toutes" }, { href: qs({ view: "mine" }), label: "Mes tâches" }]} />}
+          {!ownOnly && (
             <form action="/taches" method="get" className="flex flex-wrap gap-2 ml-auto">
               {sp.view && <input type="hidden" name="view" value={sp.view} />}
               <select name="assignee" defaultValue={sp.assignee ?? ""} className="select h-8 text-[12px] w-auto"><option value="">Tous les responsables</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>

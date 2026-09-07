@@ -1,8 +1,9 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireAccess } from "@/lib/access";
-import { sampleStockByDelegate, sampleForecast } from "@/lib/medical/samples";
-import { today, fmtNum } from "@/lib/format";
+import { listDelegates } from "@/lib/users";
+import { requireAccess, isOwnOnly, hasFlag } from "@/lib/access";
+import { sampleStockByDelegate, sampleForecast, sampleValuationByBrand } from "@/lib/medical/samples";
+import { today, fmtNum, fmtMAD } from "@/lib/format";
 import { PageHeader, Card, Badge, Empty } from "@/components/ui";
 import { addSampleEntry } from "./actions";
 
@@ -11,12 +12,15 @@ export const metadata = { title: "Échantillons" };
 
 export default async function EchantillonsPage() {
   const user = await requireAccess("medical");
-  const isDelegate = user.role === "DELEGUE_MEDICAL";
-  const [stocks, forecast, delegatesRes, productsRes] = await Promise.all([
+  const isDelegate = await isOwnOnly();
+  const seeValues = await hasFlag("seeMargins");
+  const year = today().getUTCFullYear();
+  const [stocks, forecast, delegatesRes, productsRes, valuation] = await Promise.all([
     sampleStockByDelegate(isDelegate ? user.id : undefined),
     sampleForecast(today()),
-    db.execute(sql`select id, name from users where role = 'DELEGUE_MEDICAL' and active order by name`),
+    listDelegates().then((rows) => ({ rows })),
     db.execute(sql`select id, name from products where active order by name`),
+    sampleValuationByBrand(year),
   ]);
   const delegates = delegatesRes.rows as { id: string; name: string }[];
   const products = productsRes.rows as { id: string; name: string }[];
@@ -47,12 +51,34 @@ export default async function EchantillonsPage() {
         )}
       </Card>
 
+      {!isDelegate && (
+        <Card title={`Valorisation ${year} — décomptée du budget de chaque marque`} className="mb-4">
+          <p className="text-[12.5px] text-muted mb-2">Échantillons remis en visite, valorisés au prix d&apos;achat (sinon au prix COMANET). Le montant entre dans le budget consommé de la marque (définition officielle, <code>src/lib/budget.ts</code>). Une unité sans prix n&apos;est pas estimée.</p>
+          {valuation.length === 0 ? <p className="text-[13px] text-faint">Aucun échantillon remis cette année.</p> : (
+            <div className="table-wrap">
+              <table className="tbl">
+                <thead><tr><th>Marque</th><th className="num">Unités remises</th><th className="num">Valorisation</th></tr></thead>
+                <tbody>
+                  {valuation.map((v) => (
+                    <tr key={v.brandId ?? "none"}>
+                      <td className="font-medium">{v.brandName}</td>
+                      <td className="num">{fmtNum(v.distributed)}</td>
+                      <td className="num">{!seeValues ? "•••" : v.value === null ? <span className="text-faint">non mesurable</span> : <>{fmtMAD(v.value, { compact: true })}{v.unknownPriceUnits > 0 && <span className="text-[11px] text-faint"> · {v.unknownPriceUnits} u. sans prix</span>}</>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      )}
+
       <div className="grid lg:grid-cols-[1fr_320px] gap-4">
         <Card title="Stock par délégué × produit">
           {stocks.length === 0 ? <Empty title="Aucun mouvement de stock" hint="Ajoutez une dotation depuis le formulaire ci-contre, ou remettez des échantillons lors d'une visite." /> : (
             <div className="table-wrap">
               <table className="tbl">
-                <thead><tr><th>Délégué</th><th>Produit</th><th className="num">Entrées</th><th className="num">Distribués</th><th className="num">Stock actuel</th></tr></thead>
+                <thead><tr><th>Délégué</th><th>Produit</th><th className="num">Entrées</th><th className="num">Distribués</th><th className="num">Stock actuel</th>{seeValues && <th className="num">Valeur stock</th>}</tr></thead>
                 <tbody>
                   {stocks.map((s) => (
                     <tr key={`${s.delegateId}-${s.productId}`}>
@@ -61,6 +87,7 @@ export default async function EchantillonsPage() {
                       <td className="num">{fmtNum(s.entries)}</td>
                       <td className="num">{fmtNum(s.distributed)}</td>
                       <td className="num font-medium">{fmtNum(s.current)}</td>
+                      {seeValues && <td className="num text-muted">{s.currentValue === null ? "non mesurable" : fmtMAD(s.currentValue, { compact: true, suffix: false })}</td>}
                     </tr>
                   ))}
                 </tbody>

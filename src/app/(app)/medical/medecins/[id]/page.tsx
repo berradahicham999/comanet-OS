@@ -1,12 +1,12 @@
 import { notFound } from "next/navigation";
 import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { tasks, users } from "@/db/schema";
-import { requireAccess } from "@/lib/access";
+import { tasks } from "@/db/schema";
+import { requireAccess, isOwnOnly } from "@/lib/access";
 import { getDoctor, doctorVisitHistory, buildDoctorRecommendation, effectiveFrequencyDays } from "@/lib/medical/doctors";
 import { getSettings } from "@/lib/settings";
 import { today, fmtDate, fmtDateShort } from "@/lib/format";
-import { listUsers } from "@/lib/users";
+import { listUsers, listDelegates, listBrands } from "@/lib/users";
 import { PageHeader, Card, Badge, Facts, Empty } from "@/components/ui";
 import { DoctorFormFields } from "@/components/medical-doctor-form";
 import { RecommendationCard } from "@/components/recommendation-card";
@@ -19,18 +19,19 @@ const STATUS_LABEL = { NOUVEAU: "Nouveau", ACTIF: "Actif", A_REACTIVER: "À réa
 const VISIT_STATUS_LABEL: Record<string, string> = { PLANIFIEE: "Planifiée", REALISEE: "Réalisée", ANNULEE: "Annulée", REPORTEE: "Reportée", NON_EFFECTUEE: "Non effectuée" };
 
 export default async function MedecinFichePage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requireAccess("medical");
+  await requireAccess("medical");
   const { id } = await params;
   const doctor = await getDoctor(id);
   if (!doctor) notFound();
 
-  const [visits, settings, specialties, sectors, delegatesRes, allUsers] = await Promise.all([
+  const [visits, settings, specialties, sectors, delegatesRes, allUsers, brands] = await Promise.all([
     doctorVisitHistory(id),
     getSettings(),
     db.query.medicalSpecialties.findMany({ where: (s, { eq }) => eq(s.active, true), orderBy: (s, { asc }) => [asc(s.name)] }),
     db.query.medicalSectors.findMany({ where: (s, { eq }) => eq(s.active, true), orderBy: (s, { asc }) => [asc(s.name)] }),
-    db.select({ id: users.id, name: users.name }).from(users).where(eq(users.role, "DELEGUE_MEDICAL")),
+    listDelegates(),
     listUsers(),
+    listBrands(),
   ]);
   const ref = today();
   const rec = buildDoctorRecommendation(doctor, settings, ref);
@@ -71,6 +72,7 @@ export default async function MedecinFichePage({ params }: { params: Promise<{ i
                 { label: "Adresse", value: doctor.addressLine ?? "—" },
                 { label: "Ville", value: doctor.city ?? "—" },
                 { label: "Délégué", value: doctor.delegateName ?? "—" },
+                { label: "Marques concernées", value: doctor.brandNames.length ? doctor.brandNames.join(", ") : "—" },
                 { label: "Fréquence recommandée", value: `${effectiveFrequencyDays(doctor.visitFrequencyDays, settings)} j` },
                 { label: "Dernière visite", value: doctor.lastVisitAt ? fmtDate(doctor.lastVisitAt) : "Jamais" },
                 { label: "Visites réalisées", value: String(doctor.visitCount) },
@@ -108,7 +110,7 @@ export default async function MedecinFichePage({ params }: { params: Promise<{ i
           <form action={saveDoctor}>
             <DoctorFormFields
               doctor={doctor}
-              options={{ specialties, sectors, delegates: delegatesRes, showDelegate: user.role !== "DELEGUE_MEDICAL" }}
+              options={{ specialties, sectors, delegates: delegatesRes, showDelegate: !(await isOwnOnly()), brands: brands.filter((b) => b.active).map((b) => ({ id: b.id, name: b.name })) }}
             />
             <div className="mt-4"><button className="btn-secondary btn-sm" type="submit">Enregistrer</button></div>
           </form>
