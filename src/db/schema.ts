@@ -540,6 +540,13 @@ export const animations = pgTable(
     photoUrl: text("photo_url"),
     /** Identité d'une ligne du fichier quotidien : date | ville | point de vente | animatrice. */
     dedupeKey: text("dedupe_key"),
+    /**
+     * Qui a écrit cette ligne EN DERNIER : 'saisie' (un humain, dans l'application) ou
+     * 'import' (le fichier quotidien). L'import ne remplace jamais une ligne 'saisie' —
+     * il journalise le conflit. `import_id` ne suffisait pas : une animation importée puis
+     * corrigée dans l'application garde son `import_id`.
+     */
+    source: text("source").notNull().default("import"),
     importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -551,6 +558,7 @@ export const animations = pgTable(
     index("animations_animatrice_idx").on(t.animatriceId),
     index("animations_brand_idx").on(t.brandId),
     index("animations_import_idx").on(t.importId),
+    index("animations_source_date_idx").on(t.source, t.date),
   ],
 );
 
