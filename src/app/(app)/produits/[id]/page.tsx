@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { sql, eq, desc } from "drizzle-orm";
 import { db } from "@/db";
 import { products as productsTable, tasks as tasksTable, regulatoryFiles, contentItems } from "@/db/schema";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, canDo, hasFlag } from "@/lib/access";
 import { getRefDate } from "@/lib/ref-date";
 import { monthlySeries } from "@/lib/analytics";
 import { productStocks, LEVEL_LABEL } from "@/lib/stock";
@@ -19,7 +19,8 @@ export const dynamic = "force-dynamic";
 const LEVEL_TONE = { green: "green", yellow: "yellow", orange: "orange", red: "red", none: "gray", unknown: "gray" } as const;
 
 export default async function ProductPage(props: { params: Promise<{ id: string }> }) {
-  const user = await requireAccess("produits");
+  await requireAccess("produits");
+  const seeMargins = await hasFlag("seeMargins");
   const { id } = await props.params;
   const product = await db.query.products.findFirst({ where: eq(productsTable.id, id) });
   if (!product) notFound();
@@ -84,8 +85,8 @@ export default async function ProductPage(props: { params: Promise<{ id: string 
           {st && st.stockKnown && (
             <dl className="mt-4 grid grid-cols-2 gap-2 text-[12px]">
               <dt className="text-muted">Stock cible</dt><dd className="font-medium text-right">{fmtNum(st.targetStock)} u.</dd>
-              <dt className="text-muted">Valeur stock</dt><dd className="font-medium text-right">{fmtMAD(st.stockValue, { compact: true })}</dd>
-              <dt className="text-muted">Marge</dt><dd className="font-medium text-right">{st.marginPct !== null ? `${Math.round(st.marginPct)} %` : "n/c"}</dd>
+              {seeMargins && <><dt className="text-muted">Valeur stock</dt><dd className="font-medium text-right">{fmtMAD(st.stockValue, { compact: true })}</dd>
+              <dt className="text-muted">Marge</dt><dd className="font-medium text-right">{st.marginPct !== null ? `${Math.round(st.marginPct)} %` : "n/c"}</dd></>}
               <dt className="text-muted">Sell-out terrain 30 j</dt><dd className="font-medium text-right">{fmtNum(st.fieldSellOut30d)} u.</dd>
             </dl>
           )}
@@ -146,7 +147,7 @@ export default async function ProductPage(props: { params: Promise<{ id: string 
           )}
           <Card title="Désignations rattachées">
             <ul className="text-[12px] space-y-1">{(aliases.rows as { alias: string; source: string }[]).map((a) => <li key={a.alias} className="flex justify-between gap-2"><span className="truncate">{a.alias}</span><span className="text-faint shrink-0">{a.source}</span></li>)}</ul>
-            {user.role === "ADMIN" && (
+            {(await canDo("produits", "validate")) && (
               <details className="mt-3">
                 <summary className="cursor-pointer text-[12.5px] font-medium text-accent">Fusionner ce produit dans un autre…</summary>
                 <form action={mergeProduct} className="mt-2 space-y-2">

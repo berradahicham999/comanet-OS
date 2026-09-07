@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { sql, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { brands as brandsTable } from "@/db/schema";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, canDo } from "@/lib/access";
 import { getRefDate } from "@/lib/ref-date";
 import { byDim, compareMonth, monthlySeries, periodRange, shiftRange, totals, annualObjective, objectiveFor } from "@/lib/analytics";
 import { productStocks, LEVEL_LABEL } from "@/lib/stock";
@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
 const LEVEL_TONE = { green: "green", yellow: "yellow", orange: "orange", red: "red", none: "gray", unknown: "gray" } as const;
 
 export default async function BrandPage(props: { params: Promise<{ id: string }> }) {
-  const user = await requireAccess("marques");
+  await requireAccess("produits");
   const { id } = await props.params;
   const brand = await db.query.brands.findFirst({ where: eq(brandsTable.id, id) });
   if (!brand) notFound();
@@ -123,7 +123,7 @@ export default async function BrandPage(props: { params: Promise<{ id: string }>
                 <label className="block"><span className="label block mb-1">Alias (import)</span><input name="aliases" defaultValue={brand.aliases.join(", ")} className="input h-9" /></label>
               </div>
               <label className="flex items-center gap-2"><input type="checkbox" name="active" defaultChecked={brand.active} /> Marque active</label>
-              {user.role !== "ANIMATRICE" && <button className="btn-secondary btn-sm w-full" type="submit">Enregistrer</button>}
+              {(await canDo("produits", "edit")) && <button className="btn-secondary btn-sm w-full" type="submit">Enregistrer</button>}
             </form>
           </Card>
         </div>

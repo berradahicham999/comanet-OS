@@ -1,6 +1,7 @@
 import "server-only";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
+import { ANIMATRICE_SQL } from "@/lib/users";
 import { addDays, iso, today } from "@/lib/format";
 import { rankUsualProducts, type ProductFrequencyRow, type UsualProduct } from "./usual-products-rank";
 
@@ -115,7 +116,7 @@ export async function adoptionByAnimatrice(windowDays = 28): Promise<AdoptionByA
            count(a.id) filter (where a.source = 'import')::int as import_
     from users u
     left join animations a on a.animatrice_id = u.id and a.date >= ${start}::date
-    where u.role = 'ANIMATRICE' and u.active
+    where ${ANIMATRICE_SQL} and u.active
     group by u.id, u.name order by u.name`);
   return (r.rows as Record<string, unknown>[]).map((x) => {
     const saisie = Number(x.saisie), import_ = Number(x.import_);

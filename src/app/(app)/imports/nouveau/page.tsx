@@ -3,9 +3,9 @@ import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { importFiles } from "@/db/schema";
-import { requireAccess } from "@/lib/access";
+import { requirePermission } from "@/lib/access";
 import { listSheets, parseSheet } from "@/lib/import/parse";
-import { autoMap, FIELDS, IMPORT_TYPES, type ImportType } from "@/lib/import/fields";
+import { autoMap, FIELDS, IMPORT_TYPES, IMPORT_MODULE, type ImportType } from "@/lib/import/fields";
 import { PageHeader, Card, Badge } from "@/components/ui";
 import { runImportAction } from "../actions";
 import { iso } from "@/lib/format";
@@ -15,9 +15,9 @@ export const maxDuration = 300;
 export const metadata = { title: "Mapping des colonnes" };
 
 export default async function NewImportPage(props: { searchParams: Promise<{ file?: string; type?: string; sheet?: string; header?: string; error?: string }> }) {
-  await requireAccess("imports");
   const sp = await props.searchParams;
   const type = (IMPORT_TYPES.some((t) => t.key === sp.type) ? sp.type : "SALES") as ImportType;
+  await requirePermission(IMPORT_MODULE[type], "create");
   if (!sp.file) redirect("/imports");
   const file = await db.query.importFiles.findFirst({ where: eq(importFiles.id, sp.file) });
   if (!file) redirect("/imports?error=expire");

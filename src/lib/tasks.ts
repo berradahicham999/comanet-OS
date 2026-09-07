@@ -15,7 +15,7 @@ export function entityHref(type: string | null, id: string | null) {
   return map[type] ? map[type] + id : null;
 }
 
-export async function listTasks(opts: { assigneeId?: string; brandId?: string; overdue?: boolean; includeDone?: boolean; source?: string } = {}): Promise<TaskRow[]> {
+export async function listTasks(opts: { assigneeId?: string; brandId?: string; brandIds?: string[] | null; overdue?: boolean; includeDone?: boolean; source?: string } = {}): Promise<TaskRow[]> {
   const r = await db.execute(sql`
     select t.id, t.title, t.status::text as status, t.priority::text as priority, t.due_date::text as due_date, t.source::text as source,
       t.assignee_id, u.name as assignee, b.name as brand, b.color as brand_color, t.entity_type, t.entity_id::text as entity_id, t.created_at::text as created_at,
@@ -24,6 +24,7 @@ export async function listTasks(opts: { assigneeId?: string; brandId?: string; o
     where true
       ${opts.assigneeId ? sql`and t.assignee_id = ${opts.assigneeId}::uuid` : sql``}
       ${opts.brandId ? sql`and t.brand_id = ${opts.brandId}::uuid` : sql``}
+      ${opts.brandIds ? sql`and (t.brand_id is null or t.brand_id = any(${opts.brandIds}::uuid[]) or t.assignee_id = ${opts.assigneeId ?? "00000000-0000-0000-0000-000000000000"}::uuid)` : sql``}
       ${opts.source ? sql`and t.source = ${opts.source}::task_source` : sql``}
       ${opts.overdue ? sql`and t.due_date < current_date and t.status in ('TODO','IN_PROGRESS')` : sql``}
       ${opts.includeDone ? sql`` : sql`and (t.status in ('TODO','IN_PROGRESS') or t.completed_at > now() - interval '14 days')`}

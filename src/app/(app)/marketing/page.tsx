@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, brandFilter } from "@/lib/access";
 import { getRefDate } from "@/lib/ref-date";
 import { listBrands } from "@/lib/users";
 import { resolvePeriod, PERIOD_OPTIONS, type PeriodParam } from "@/lib/periods";
@@ -26,8 +26,10 @@ export default async function MarketingOverviewPage(props: { searchParams: Promi
   const sp = await props.searchParams;
   const { ref, staleDays } = await getRefDate();
   const period = resolvePeriod((sp.period as PeriodParam) || "ytd", ref, { start: sp.start, end: sp.end });
-  const brands = (await listBrands()).filter((b) => b.active);
-  const brandId = sp.brand && brands.some((b) => b.id === sp.brand) ? sp.brand : null;
+  const scopeBrands = await brandFilter();
+  const brands = (await listBrands()).filter((b) => b.active && (scopeBrands === null || scopeBrands.includes(b.id)));
+  // Portée « assignés » sans marque choisie : on affiche la première marque assignée plutôt que le total toutes marques.
+  const brandId = sp.brand && brands.some((b) => b.id === sp.brand) ? sp.brand : scopeBrands ? (brands[0]?.id ?? null) : null;
   const year = ref.getUTCFullYear();
 
   const [budget, spend, prevSpend, timeline, sales, prevSales, counters, attr, scores, calendar, campaignRows] = await Promise.all([

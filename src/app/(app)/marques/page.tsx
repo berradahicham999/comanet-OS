@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Marques" };
 
 export default async function MarquesPage() {
-  await requireAccess("marques");
+  await requireAccess("produits");
   const { ref } = await getRefDate();
   const year = ref.getUTCFullYear();
   const ytd = periodRange("ytd", ref), ytdN1 = shiftRange(ytd, -12);

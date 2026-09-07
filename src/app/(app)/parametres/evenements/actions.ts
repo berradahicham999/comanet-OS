@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireAccess } from "@/lib/access";
+import { requireAdmin } from "@/lib/access";
 import { dispatchEvent, processPending } from "@/lib/events/dispatch";
 
 /**
@@ -10,7 +10,7 @@ import { dispatchEvent, processPending } from "@/lib/events/dispatch";
  * suivant. Aucun nouveau planificateur.
  */
 export async function replayOne(formData: FormData) {
-  await requireAccess("parametres");
+  await requireAdmin();
   const id = String(formData.get("id") ?? "").trim();
   if (!id) return;
   await dispatchEvent(id);
@@ -18,7 +18,7 @@ export async function replayOne(formData: FormData) {
 }
 
 export async function replayPending(formData: FormData) {
-  await requireAccess("parametres");
+  await requireAdmin();
   const limit = Number(formData.get("limit") ?? 50) || 50;
   await processPending({ limit });
   revalidatePath("/parametres/evenements");

@@ -5,6 +5,8 @@
  */
 import "dotenv/config";
 import bcrypt from "bcryptjs";
+import { sql } from "drizzle-orm";
+import { MODULE_KEYS } from "@/lib/access-shared";
 import { db } from "./index";
 import * as s from "./schema";
 import { DEFAULT_SETTINGS, SETTINGS_KEY } from "../lib/settings";
@@ -35,6 +37,19 @@ export async function seedBase() {
   for (const u of users) {
     await db.insert(s.users).values({ ...u, passwordHash: hash }).onConflictDoNothing({ target: s.users.email });
   }
+  // Les droits vivent dans la matrice par utilisateur : les deux administrateurs reçoivent
+  // tous les modules et tous les interrupteurs, les autres seront configurés depuis l'écran
+  // « Utilisateurs & droits » (ou par la migration 0012 s'ils existaient déjà).
+  await db.execute(sql`
+    insert into user_permissions (user_id, module, can_view, can_create, can_edit, can_validate)
+    select u.id, m.module, true, true, true, true
+    from users u cross join unnest(array[${sql.join(MODULE_KEYS.map((m) => sql`${m}`), sql`, `)}]::text[]) as m(module)
+    where u.role = 'ADMIN'
+    on conflict do nothing`);
+  await db.execute(sql`
+    insert into user_flags (user_id, see_margins, see_global_budgets, see_internal_costs, approve_spend, export_data, read_activity_log)
+    select id, true, true, true, true, true, true from users where role = 'ADMIN' on conflict do nothing`);
+  await db.execute(sql`insert into user_scope (user_id, scope) select id, 'ALL' from users where role = 'ADMIN' on conflict do nothing`);
   for (const b of BRAND_SEED) {
     await db.insert(s.brands).values(b).onConflictDoUpdate({ target: s.brands.slug, set: { aliases: b.aliases, color: b.color } });
   }

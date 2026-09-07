@@ -8,7 +8,6 @@ import { LogOut, ChevronDown } from "lucide-react";
 import type { NavGroup } from "@/components/nav-config";
 import { NavIcon } from "./nav-icons";
 import { initials } from "@/lib/format";
-import { ROLE_LABELS } from "@/lib/access-shared";
 import type { SessionUser } from "@/lib/auth";
 
 export function isActive(pathname: string, href: string, exact?: boolean) {
@@ -105,7 +104,7 @@ export function Sidebar({ groups, user, logout, onNavigate }: {
         </div>
         <div className="min-w-0 flex-1 leading-tight">
           <div className="text-[13px] font-medium truncate">{user.name}</div>
-          <div className="text-[11px] text-muted truncate">{ROLE_LABELS[user.role]}</div>
+          <div className="text-[11px] text-muted truncate">{user.email}</div>
         </div>
         <form action={logout}>
           <button className="btn-ghost h-8 w-8 p-0 rounded-lg" title="Se déconnecter" aria-label="Se déconnecter">

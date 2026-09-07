@@ -16,6 +16,9 @@ export type VisitInput = {
   comment: string | null;
   nextAction: string | null;
   nextVisitDate: string | null;
+  /** Objections rencontrées et documentation laissée (cahier des charges, section 4). */
+  objections: string | null;
+  documentation: string | null;
   status: MedicalVisitStatus;
   productIds: string[];
   samples: { productId: string; quantity: number }[];
@@ -42,6 +45,8 @@ export async function saveVisit(input: VisitInput): Promise<string> {
       comment: input.comment,
       nextAction: input.nextAction,
       nextVisitDate: input.nextVisitDate,
+      objections: input.objections,
+      documentation: input.documentation,
       status: input.status,
     };
     let visitId = input.id ?? "";

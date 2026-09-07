@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, canDo } from "@/lib/access";
 import { getSettings, saveSettings, type ComanetSettings } from "@/lib/settings";
 
 const num = (fd: FormData, k: string, fallback: number) => {
@@ -10,8 +10,8 @@ const num = (fd: FormData, k: string, fallback: number) => {
 };
 
 export async function updateMedicalSettings(formData: FormData) {
-  const user = await requireAccess("medical");
-  if (user.role === "DELEGUE_MEDICAL") return;
+  await requireAccess("medical");
+  if (!(await canDo("medical", "validate"))) return;
   const cur = await getSettings();
   const next: ComanetSettings = {
     ...cur,

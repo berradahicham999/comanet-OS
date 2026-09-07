@@ -1,7 +1,6 @@
 import Link from "next/link";
-import { sql } from "drizzle-orm";
-import { db } from "@/db";
-import { requireAccess } from "@/lib/access";
+import { listDelegates } from "@/lib/users";
+import { requireAccess, isOwnOnly } from "@/lib/access";
 import { suggestRoute } from "@/lib/medical/planning";
 import { delegateDashboard } from "@/lib/medical/delegates";
 import { today, fmtDateShort } from "@/lib/format";
@@ -13,9 +12,9 @@ export const metadata = { title: "Planning / tournée" };
 export default async function PlanningPage(props: { searchParams: Promise<{ delegate?: string }> }) {
   const user = await requireAccess("medical");
   const sp = await props.searchParams;
-  const isDelegate = user.role === "DELEGUE_MEDICAL";
+  const isDelegate = await isOwnOnly();
 
-  const delegatesRes = isDelegate ? null : await db.execute(sql`select id, name from users where role = 'DELEGUE_MEDICAL' and active order by name`);
+  const delegatesRes = isDelegate ? null : await listDelegates().then((rows) => ({ rows }));
   const delegates = (delegatesRes?.rows ?? []) as { id: string; name: string }[];
   const delegateId = isDelegate ? user.id : sp.delegate || delegates[0]?.id;
 

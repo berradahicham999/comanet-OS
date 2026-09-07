@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireAccess } from "@/lib/access";
+import { requirePermission, isOwnOnly } from "@/lib/access";
 import { parseAnimationInput, type RawAnimationInput } from "@/lib/terrain/animation-input";
 import { saveAnimation as persistAnimation, deleteAnimation as removeAnimation } from "@/lib/terrain/save-animation";
 import { dispatchEvent } from "@/lib/events/dispatch";
@@ -49,11 +49,12 @@ function back(target: string, params: Record<string, string>): never {
 }
 
 export async function saveAnimation(formData: FormData) {
-  const user = await requireAccess("terrain");
   const id = str(formData, "id").trim() || null;
+  const user = await requirePermission("terrain", id ? "edit" : "create");
+  const ownOnly = await isOwnOnly();
   const formTarget = id ? `/terrain/${id}` : "/terrain/saisie";
 
-  const parsed = parseAnimationInput(readForm(formData, user.role === "ANIMATRICE" ? user.id : null));
+  const parsed = parseAnimationInput(readForm(formData, ownOnly ? user.id : null));
   if (!parsed.ok) back(formTarget, { error: parsed.error });
 
   const saved = await persistAnimation({ id, parsed: parsed.value });
@@ -71,13 +72,12 @@ export async function saveAnimation(formData: FormData) {
   revalidatePath(`/terrain/${saved.animationId}`);
   revalidatePath("/");
   const params: Record<string, string> = saved.missingPrice ? { warn: "prix" } : {};
-  if (user.role === "ANIMATRICE") back("/terrain/saisie", { ...params, done: "1" });
+  if (ownOnly) back("/terrain/saisie", { ...params, done: "1" });
   back(`/terrain/${saved.animationId}`, params);
 }
 
 export async function deleteAnimation(formData: FormData) {
-  const user = await requireAccess("terrain");
-  if (user.role === "ANIMATRICE") return;
+  await requirePermission("terrain", "validate");
   const id = str(formData, "id").trim();
   if (!id) return;
   await removeAnimation(id);

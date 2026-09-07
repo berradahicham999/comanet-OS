@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireAccess } from "@/lib/access";
+import { listDelegates } from "@/lib/users";
+import { requireAccess, isOwnOnly } from "@/lib/access";
 import { listDoctors } from "@/lib/medical/doctors";
 import { PageHeader, Badge } from "@/components/ui";
 import { fmtDateShort } from "@/lib/format";
@@ -17,13 +17,13 @@ export default async function MedecinsPage(props: {
 }) {
   const user = await requireAccess("medical");
   const sp = await props.searchParams;
-  const isDelegate = user.role === "DELEGUE_MEDICAL";
+  const isDelegate = await isOwnOnly();
   const [doctors, sectors, delegates] = await Promise.all([
     listDoctors({
       sectorId: sp.sector, delegateId: isDelegate ? user.id : sp.delegate, status: sp.status, potential: sp.potential, search: sp.q,
     }),
     db.query.medicalSectors.findMany({ where: (s, { eq }) => eq(s.active, true), orderBy: (s, { asc }) => [asc(s.name)] }),
-    db.execute(sql`select id, name from users where role = 'DELEGUE_MEDICAL' and active order by name`),
+    listDelegates().then((rows) => ({ rows })),
   ]);
   const delegateRows = delegates.rows as { id: string; name: string }[];
 

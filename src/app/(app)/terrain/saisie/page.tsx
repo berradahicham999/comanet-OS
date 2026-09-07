@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireAccess } from "@/lib/access";
-import { listBrands, listUsers } from "@/lib/users";
+import { requireAccess, isOwnOnly } from "@/lib/access";
+import { listBrands, listAnimatrices } from "@/lib/users";
 import { PageHeader, Card } from "@/components/ui";
 import { AnimationForm } from "@/components/animation-form";
 import { AnimationQuickForm } from "@/components/animation-quick-form";
@@ -17,7 +17,8 @@ export const metadata = { title: "Saisie terrain" };
 export default async function SaisiePage(props: { searchParams: Promise<{ client?: string; done?: string; error?: string; warn?: string }> }) {
   const user = await requireAccess("terrain");
   const sp = await props.searchParams;
-  const isAnimatrice = user.role === "ANIMATRICE";
+  const isAnimatrice = await isOwnOnly();
+  const animatriceUsers = await listAnimatrices();
 
   const recentP = db.execute(sql`
     select a.id, a.date::text as date, c.name as client, coalesce(sum(al.quantity_sold),0)::int as sold
@@ -68,11 +69,10 @@ export default async function SaisiePage(props: { searchParams: Promise<{ client
   }
 
   // Rôles non-animatrice : saisie de correction, référentiel complet (produits, marques, animatrices).
-  const [clients, products, brands, users, recent] = await Promise.all([
+  const [clients, products, brands, recent] = await Promise.all([
     db.execute(sql`select id, name, city from clients where active and type <> 'GROSSISTE' order by name`),
     db.execute(sql`select id, name, brand_id from products where active order by name`),
     listBrands(),
-    listUsers(),
     recentP,
   ]);
   return (
@@ -86,7 +86,7 @@ export default async function SaisiePage(props: { searchParams: Promise<{ client
             clients={(clients.rows as { id: string; name: string; city: string | null }[])}
             products={(products.rows as { id: string; name: string; brand_id: string | null }[]).map((p) => ({ id: p.id, name: p.name, brandId: p.brand_id }))}
             brands={brands.filter((b) => b.active).map((b) => ({ id: b.id, name: b.name }))}
-            animatrices={users.filter((u) => u.role === "ANIMATRICE").map((u) => ({ id: u.id, name: u.name }))}
+            animatrices={animatriceUsers.map((u) => ({ id: u.id, name: u.name }))}
             initial={{ clientId: sp.client ?? "" }}
             isAnimatrice={false}
             today={iso(new Date())}

@@ -2,7 +2,7 @@ import { redirect, notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, isOwnOnly } from "@/lib/access";
 import { delegateDashboard } from "@/lib/medical/delegates";
 import { today, fmtDateShort, fmtPct } from "@/lib/format";
 import { PageHeader, Card, Kpi, Progress, Badge, Empty } from "@/components/ui";
@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 export default async function DelegueDashboardPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireAccess("medical");
   const { id } = await params;
-  if (user.role === "DELEGUE_MEDICAL" && user.id !== id) redirect(`/medical/delegues/${user.id}`);
+  if ((await isOwnOnly()) && user.id !== id) redirect(`/medical/delegues/${user.id}`);
   const delegate = await db.query.users.findFirst({ where: eq(users.id, id) });
   if (!delegate) notFound();
 

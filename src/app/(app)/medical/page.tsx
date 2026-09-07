@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, isOwnOnly } from "@/lib/access";
 import { medicalDashboard } from "@/lib/medical/dashboard";
-import { today, fmtNum, fmtPct } from "@/lib/format";
+import { today, fmtNum, fmtPct, fmtMAD } from "@/lib/format";
 import { PageHeader, Card, Kpi, Progress, Empty } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -9,7 +9,7 @@ export const metadata = { title: "Dashboard médical" };
 
 export default async function MedicalDashboardPage() {
   const user = await requireAccess("medical");
-  if (user.role === "DELEGUE_MEDICAL") redirect(`/medical/delegues/${user.id}`);
+  if (await isOwnOnly()) redirect(`/medical/delegues/${user.id}`);
   const ref = today();
   const d = await medicalDashboard(ref);
 
@@ -43,6 +43,33 @@ export default async function MedicalDashboardPage() {
                     <td className="num">{t.visitsMonth}</td>
                     <td className="w-32">{t.realisationPct !== null ? <><Progress value={t.realisationPct} tone={t.realisationPct >= 85 ? "green" : t.realisationPct >= 60 ? "yellow" : "red"} /><span className="text-[11px] text-muted">{fmtPct(t.realisationPct)}</span></> : <span className="text-faint">—</span>}</td>
                     <td className="num">{t.activeDoctors} / {t.assignedDoctors}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      <Card title="Zones visitées et ventes en pharmacie — corrélation observée" className="mb-4">
+        <p className="text-[12.5px] text-muted mb-3">
+          Visites réalisées sur 90 jours par ville des prescripteurs, mises en regard des ventes aux clients de la même ville (90 jours vs 90 jours précédents).
+          C&apos;est une <b>tendance</b>, pas une attribution : rien ne prouve que les visites ont causé l&apos;écart.
+          {d.cityCorrelation !== null && <> Corrélation entre villes : <b>{d.cityCorrelation.toFixed(2)}</b>.</>}
+          {d.cityCorrelation === null && d.byCity.length > 0 && <> Pas encore comparable : moins de quatre villes avec un historique de ventes suffisant.</>}
+        </p>
+        {d.byCity.length === 0 ? <Empty title="Aucune visite réalisée sur 90 jours" hint="Les visites saisies avec une ville de prescripteur alimentent cette analyse." /> : (
+          <div className="table-wrap">
+            <table className="tbl">
+              <thead><tr><th>Ville</th><th className="num">Visites 90 j</th><th className="num">Ventes 90 j</th><th className="num">90 j précédents</th><th className="num">Évolution</th></tr></thead>
+              <tbody>
+                {d.byCity.map((c) => (
+                  <tr key={c.city}>
+                    <td className="font-medium">{c.city}</td>
+                    <td className="num">{fmtNum(c.visits90)}</td>
+                    <td className="num">{fmtMAD(c.sales90, { compact: true })}</td>
+                    <td className="num text-muted">{c.salesPrev90 > 0 ? fmtMAD(c.salesPrev90, { compact: true }) : "—"}</td>
+                    <td className="num">{c.deltaPct === null ? <span className="text-faint">pas encore comparable</span> : <span className={c.deltaPct >= 0 ? "text-green" : "text-red"}>{fmtPct(c.deltaPct, 0, true)}</span>}</td>
                   </tr>
                 ))}
               </tbody>

@@ -1,17 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { users, objectives, type UserRole } from "@/db/schema";
-import { requireAccess } from "@/lib/access";
-import { hashPassword } from "@/lib/auth";
+import { requireAdmin, requirePermission } from "@/lib/access";
 import { getSettings, saveSettings, type ComanetSettings } from "@/lib/settings";
 
 const num = (fd: FormData, k: string, fallback: number) => { const n = Number(String(fd.get(k) ?? "").replace(",", ".")); return Number.isFinite(n) && String(fd.get(k) ?? "") !== "" ? n : fallback; };
 
 export async function updateSettings(formData: FormData) {
-  await requireAccess("parametres");
+  await requireAdmin();
   const cur = await getSettings();
   const next: ComanetSettings = {
     ...cur,
@@ -35,25 +33,8 @@ export async function updateSettings(formData: FormData) {
   revalidatePath("/", "layout");
 }
 
-export async function saveUser(formData: FormData) {
-  await requireAccess("parametres");
-  const id = String(formData.get("id") ?? "");
-  const name = String(formData.get("name") ?? "").trim();
-  const email = String(formData.get("email") ?? "").trim().toLowerCase();
-  const role = String(formData.get("role") ?? "TRADE") as UserRole;
-  const password = String(formData.get("password") ?? "");
-  if (!name || !email) return;
-  if (id) {
-    await db.update(users).set({ name, email, role, active: formData.get("active") === "on", ...(password ? { passwordHash: await hashPassword(password) } : {}) }).where(eq(users.id, id));
-  } else {
-    if (!password) return;
-    await db.insert(users).values({ name, email, role, passwordHash: await hashPassword(password) }).onConflictDoNothing();
-  }
-  revalidatePath("/parametres");
-}
-
 export async function saveObjectives(formData: FormData) {
-  await requireAccess("parametres");
+  await requirePermission("ventes", "validate");
   const year = Number(formData.get("year"));
   if (!year) return;
   const brandIds = String(formData.get("brandIds") ?? "").split(",").filter(Boolean);

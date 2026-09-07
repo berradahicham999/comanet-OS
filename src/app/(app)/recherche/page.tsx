@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireAccess, getUserPermissions, can } from "@/lib/access";
+import { requireAnyModule, getUserPermissions, can } from "@/lib/access";
 import { type ModuleKey } from "@/lib/access-shared";
 import { PageHeader, Card, Badge, BrandDot } from "@/components/ui";
 import { normKey } from "@/lib/import/normalize";
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Recherche" };
 
 export default async function RecherchePage(props: { searchParams: Promise<{ q?: string }> }) {
-  await requireAccess("recherche");
+  await requireAnyModule();
   const perms = await getUserPermissions();
   const { q = "" } = await props.searchParams;
   const key = normKey(q);
@@ -31,7 +31,7 @@ export default async function RecherchePage(props: { searchParams: Promise<{ q?:
   const sections: Section[] = ([
     { title: "Produits", module: "produits", rows: products.rows as R[], render: (r) => <Link href={`/produits/${r.id}`} className="card px-4 py-3 flex items-center gap-3 hover:border-line-2"><BrandDot color={String(r.color ?? "#999")} /><span className="font-medium flex-1 truncate">{r.name}</span><span className="text-[12px] text-muted">{r.brand}</span><span className="text-[12px] font-medium">{fmtMAD(r.revenue, { compact: true })} / 12 m</span></Link> },
     { title: "Clients", module: "clients", rows: clients.rows as R[], render: (r) => <Link href={`/clients/${r.id}`} className="card px-4 py-3 flex items-center gap-3 hover:border-line-2"><span className="font-medium flex-1 truncate">{r.name}</span><span className="text-[12px] text-muted">{r.city}</span><span className="text-[12px] text-muted">dernière cmd {fmtDateShort(r.last_order as string)}</span><span className="text-[12px] font-medium">{fmtMAD(r.revenue, { compact: true })}</span></Link> },
-    { title: "Marques", module: "marques", rows: brands.rows as R[], render: (r) => <Link href={`/marques/${r.id}`} className="card px-4 py-3 flex items-center gap-3 hover:border-line-2"><BrandDot color={String(r.color)} /><span className="font-medium">{r.name}</span></Link> },
+    { title: "Marques", module: "produits", rows: brands.rows as R[], render: (r) => <Link href={`/marques/${r.id}`} className="card px-4 py-3 flex items-center gap-3 hover:border-line-2"><BrandDot color={String(r.color)} /><span className="font-medium">{r.name}</span></Link> },
     { title: "Dossiers réglementaires", module: "reglementaire", rows: regs.rows as R[], render: (r) => <Link href={`/reglementaire/${r.id}`} className="card px-4 py-3 flex items-center gap-3 hover:border-line-2"><span className="font-medium flex-1 truncate">{r.product ?? r.dossier}</span><span className="text-[12px] text-muted">{r.dossier}</span><Badge tone="gray">{r.status}</Badge><span className="text-[12px]">exp. {fmtDateShort(r.expiry_date as string)}</span></Link> },
     { title: "Tâches", module: "taches", rows: tasks.rows as R[], render: (r) => <Link href={`/taches/${r.id}`} className="card px-4 py-3 flex items-center gap-3 hover:border-line-2"><span className="font-medium flex-1 truncate">{r.title}</span><span className="text-[12px] text-muted">{r.assignee}</span><Badge tone="gray">{r.status}</Badge></Link> },
     { title: "Campagnes", module: "marketing", rows: campaigns.rows as R[], render: (r) => <Link href={`/marketing/campagnes/${r.id}`} className="card px-4 py-3 flex items-center gap-3 hover:border-line-2"><span className="font-medium flex-1 truncate">{r.name}</span><span className="text-[12px] text-muted">{r.brand}</span><Badge tone="gray">{r.status}</Badge></Link> },

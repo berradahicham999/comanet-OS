@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, isOwnOnly } from "@/lib/access";
 import { getRefDate } from "@/lib/ref-date";
 import { resolvePeriod, PERIOD_OPTIONS, type PeriodParam } from "@/lib/periods";
 import { animationTotals, animationsByDim, animationDaily, animationObjectives, objectiveForRange, bestOf, type DimRow } from "@/lib/animations";
@@ -25,7 +25,7 @@ export default async function TerrainPage(props: {
   searchParams: Promise<{ period?: PeriodParam; start?: string; end?: string; dim?: string; animatrice?: string; city?: string }>;
 }) {
   const user = await requireAccess("terrain");
-  const isAnimatrice = user.role === "ANIMATRICE";
+  const isAnimatrice = await isOwnOnly();
   const sp = await props.searchParams;
   const { ref } = await getRefDate();
   const period = resolvePeriod(sp.period, ref, { start: sp.start, end: sp.end });

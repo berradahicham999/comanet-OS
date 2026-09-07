@@ -3,8 +3,27 @@
  * (partagé client / serveur)
  */
 import { normKey } from "./normalize";
+import type { ModuleKey } from "@/lib/access-shared";
 
 export type ImportType = "SALES" | "CLIENTS" | "PRODUCTS" | "STOCK" | "OBJECTIVES" | "BUDGETS" | "REGULATORY" | "ANIMATIONS" | "ANIM_OBJECTIVES" | "ADS" | "MEDECINS";
+
+/**
+ * Module dont relève chaque type d'import : importer = droit « Créer » sur ce module,
+ * annuler = droit « Valider ». La configuration du moteur reste en Administration.
+ */
+export const IMPORT_MODULE: Record<ImportType, ModuleKey> = {
+  SALES: "ventes",
+  CLIENTS: "clients",
+  PRODUCTS: "produits",
+  STOCK: "stock",
+  OBJECTIVES: "ventes",
+  BUDGETS: "budgets",
+  REGULATORY: "reglementaire",
+  ANIMATIONS: "terrain",
+  ANIM_OBJECTIVES: "terrain",
+  ADS: "marketing",
+  MEDECINS: "medical",
+};
 
 export type FieldDef = { key: string; label: string; required?: boolean; synonyms: string[]; hint?: string };
 

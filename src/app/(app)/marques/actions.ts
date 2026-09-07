@@ -7,7 +7,7 @@ import { brands } from "@/db/schema";
 import { requireAccess } from "@/lib/access";
 
 export async function updateBrand(formData: FormData) {
-  await requireAccess("marques");
+  await requireAccess("produits");
   const id = String(formData.get("id") ?? "");
   if (!id) return;
   await db.update(brands).set({

@@ -1,4 +1,5 @@
-import { requireAccess } from "@/lib/access";
+import { requireAnyModule, getAccess } from "@/lib/access";
+import { redirect } from "next/navigation";
 import { listEvents, countByStatus } from "@/lib/events/journal";
 import { PageHeader, Card, Badge, Tabs, Empty } from "@/components/ui";
 import { fmtDate, fmtTime } from "@/lib/format";
@@ -26,7 +27,9 @@ const OUTCOME_LABEL: Record<string, string> = {
 };
 
 export default async function EvenementsPage(props: { searchParams: Promise<{ status?: string; type?: string }> }) {
-  await requireAccess("parametres");
+  await requireAnyModule();
+  const access = (await getAccess())!;
+  if (!access.flags.readActivityLog && !access.perms.administration.validate) redirect(access.home);
   const sp = await props.searchParams;
   const [events, counts] = await Promise.all([
     listEvents({ status: sp.status, type: sp.type }),

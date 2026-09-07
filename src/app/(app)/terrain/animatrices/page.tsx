@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, canDo } from "@/lib/access";
 import { getRefDate } from "@/lib/ref-date";
 import { resolvePeriod, PERIOD_OPTIONS, type PeriodParam } from "@/lib/periods";
 import { animatriceScores, animationMonthly, type ActionPlanItem } from "@/lib/animations";
@@ -17,7 +17,7 @@ const SEV: Record<ActionPlanItem["severity"], { tone: "red" | "orange" | "blue" 
 };
 
 export default async function AnimatricesPage(props: { searchParams: Promise<{ period?: PeriodParam; start?: string; end?: string; focus?: string }> }) {
-  const user = await requireAccess("terrain");
+  await requireAccess("terrain");
   const sp = await props.searchParams;
   const { ref } = await getRefDate();
   const period = resolvePeriod(sp.period, ref, { start: sp.start, end: sp.end });
@@ -39,7 +39,7 @@ export default async function AnimatricesPage(props: { searchParams: Promise<{ p
     return `/terrain/animatrices${s ? `?${s}` : ""}`;
   };
 
-  if (user.role === "ANIMATRICE") return null;
+  if (!(await canDo("terrain", "validate"))) return null;
 
   return (
     <>

@@ -19,6 +19,8 @@ export function MedicalVisitForm({
     id?: string; doctorId?: string; date?: string; status?: string; durationMinutes?: number | null;
     visitType?: string; objective?: string | null; result?: string | null; doctorInterest?: string | null;
     comment?: string | null; nextAction?: string | null; nextVisitDate?: string | null;
+    objections?: string | null;
+    documentation?: string | null;
     productIds?: string[]; samples?: SampleLine[];
   };
   today: string;
@@ -105,6 +107,8 @@ export function MedicalVisitForm({
         </select>
       </label>
       <label className="block text-[13px]"><span className="label block mb-1">Résultat</span><textarea name="result" defaultValue={initial?.result ?? ""} className="textarea" /></label>
+      <label className="block text-[13px]"><span className="label block mb-1">Objections rencontrées</span><textarea name="objections" defaultValue={initial?.objections ?? ""} className="textarea" placeholder="Prix, habitude d’une autre marque, doute sur l’efficacité…" /></label>
+      <label className="block text-[13px]"><span className="label block mb-1">Documentation laissée</span><input name="documentation" defaultValue={initial?.documentation ?? ""} className="input h-11" placeholder="Brochure gamme, fiche produit, argumentaire…" /></label>
       <label className="block text-[13px]"><span className="label block mb-1">Commentaire</span><textarea name="comment" defaultValue={initial?.comment ?? ""} className="textarea" /></label>
       <div className="grid grid-cols-2 gap-2">
         <label className="block text-[13px]"><span className="label block mb-1">Prochaine action</span><input name="nextAction" defaultValue={initial?.nextAction ?? ""} className="input h-11" /></label>

@@ -4,11 +4,11 @@ import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { medicalSpecialties } from "@/db/schema";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, canDo } from "@/lib/access";
 
 export async function saveSpecialty(formData: FormData) {
-  const user = await requireAccess("medical");
-  if (user.role === "DELEGUE_MEDICAL") return;
+  await requireAccess("medical");
+  if (!(await canDo("medical", "validate"))) return;
   const id = String(formData.get("id") ?? "");
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return;

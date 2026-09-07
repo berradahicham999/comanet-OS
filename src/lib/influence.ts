@@ -102,7 +102,7 @@ export function collabKpis(r: CollabRow): CollabKpis {
   };
 }
 
-export async function listCollaborations(range: Range, filter?: { brandId?: string | null; influencerId?: string | null; status?: string | null }): Promise<CollabRow[]> {
+export async function listCollaborations(range: Range, filter?: { brandId?: string | null; influencerId?: string | null; status?: string | null; brandIds?: string[] | null }): Promise<CollabRow[]> {
   const res = await db.execute(sql`
     select c.id, c.date::text as date, c.influencer_id, i.name as influencer, i.followers, i.engagement_rate::float8 as engagement_rate,
            i.category, i.city, c.brand_id, b.name as brand, b.color as brand_color,
@@ -117,6 +117,7 @@ export async function listCollaborations(range: Range, filter?: { brandId?: stri
     left join campaigns ca on ca.id = c.campaign_id
     where c.date >= ${range.start}::date and c.date <= ${range.end}::date
       ${filter?.brandId ? sql`and c.brand_id = ${filter.brandId}::uuid` : sql``}
+      ${filter?.brandIds ? sql`and c.brand_id = any(${filter.brandIds}::uuid[])` : sql``}
       ${filter?.influencerId ? sql`and c.influencer_id = ${filter.influencerId}::uuid` : sql``}
       ${filter?.status ? sql`and c.status = ${filter.status}` : sql``}
     order by c.date desc`);

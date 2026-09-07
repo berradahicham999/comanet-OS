@@ -1,13 +1,11 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { users as usersTable } from "@/db/schema";
 import { requireAccess } from "@/lib/access";
 import { getSettings } from "@/lib/settings";
 import { listBrands } from "@/lib/users";
 import { getRefDate } from "@/lib/ref-date";
 import { PageHeader, Card, Badge, Tabs } from "@/components/ui";
-import { ROLE_LABELS } from "@/lib/access-shared";
-import { updateSettings, saveUser, saveObjectives } from "./actions";
+import { updateSettings, saveObjectives } from "./actions";
 import { seedDemoAction, purgeDemoAction } from "./demo-actions";
 import { fmtMAD, fmtNum } from "@/lib/format";
 
@@ -25,14 +23,13 @@ function Field({ name, label, value, hint, step }: { name: string; label: string
 }
 
 export default async function ParametresPage(props: { searchParams: Promise<{ tab?: string; year?: string }> }) {
-  await requireAccess("parametres");
+  await requireAccess("administration");
   const sp = await props.searchParams;
   const tab = sp.tab ?? "regles";
   const { ref } = await getRefDate();
   const year = Number(sp.year) || ref.getUTCFullYear();
-  const [s, users, brands, objRows, demoCount] = await Promise.all([
+  const [s, brands, objRows, demoCount] = await Promise.all([
     getSettings(),
-    db.select().from(usersTable).orderBy(usersTable.name),
     listBrands(),
     db.execute(sql`select brand_id, month, amount::float8 as amount from objectives where year = ${year} and product_id is null`),
     db.execute(sql`select (select count(*) from animations where comment like '[DÉMO]%')::int + (select count(*) from regulatory_files where notes like '[DÉMO]%')::int + (select count(*) from tasks where description like '[DÉMO]%')::int + (select count(*) from content_items where brief like '[DÉMO]%')::int + (select count(*) from marketing_expenses where notes like '[DÉMO]%')::int as n`),
@@ -44,8 +41,8 @@ export default async function ParametresPage(props: { searchParams: Promise<{ ta
 
   return (
     <>
-      <PageHeader eyebrow="Administration" title="Paramètres" subtitle="Seuils des règles, objectifs, utilisateurs et rôles. Aucune règle métier n'est codée en dur : tout se règle ici.">
-        <Tabs current={`/parametres?tab=${tab}`} tabs={[{ href: "/parametres?tab=regles", label: "Règles & seuils" }, { href: "/parametres?tab=objectifs", label: "Objectifs" }, { href: "/parametres?tab=utilisateurs", label: "Utilisateurs" }, { href: "/parametres?tab=demo", label: "Données de démo" }]} />
+      <PageHeader eyebrow="Administration" title="Paramètres" subtitle="Seuils des règles, objectifs et données de démonstration. Les comptes et leurs droits se gèrent dans « Utilisateurs & droits ». Aucune règle métier n'est codée en dur : tout se règle ici.">
+        <Tabs current={`/parametres?tab=${tab}`} tabs={[{ href: "/parametres?tab=regles", label: "Règles & seuils" }, { href: "/parametres?tab=objectifs", label: "Objectifs" }, { href: "/parametres/utilisateurs", label: "Utilisateurs & droits" }, { href: "/parametres/modeles", label: "Modèles de rôle" }, { href: "/parametres?tab=demo", label: "Données de démo" }]} />
       </PageHeader>
 
       {tab === "regles" && (
@@ -109,41 +106,6 @@ export default async function ParametresPage(props: { searchParams: Promise<{ ta
             <button className="btn-primary mt-3" type="submit">Enregistrer les objectifs</button>
           </form>
         </Card>
-      )}
-
-      {tab === "utilisateurs" && (
-        <div className="grid lg:grid-cols-[1fr_360px] gap-4">
-          <div className="space-y-2">
-            {users.map((u) => (
-              <details key={u.id} className="card px-4 py-3">
-                <summary className="cursor-pointer flex flex-wrap items-center gap-2 list-none">
-                  <span className="font-medium">{u.name}</span><span className="text-muted text-[12px]">{u.email}</span><Badge tone={u.role === "ADMIN" ? "accent" : "gray"}>{ROLE_LABELS[u.role]}</Badge>{!u.active && <Badge tone="red">inactif</Badge>}<span className="ml-auto text-[12px] text-accent">modifier</span>
-                </summary>
-                <form action={saveUser} className="mt-3 grid grid-cols-2 gap-2 text-[13px]">
-                  <input type="hidden" name="id" value={u.id} />
-                  <label className="block"><span className="label block mb-1">Nom</span><input name="name" defaultValue={u.name} className="input h-9" required /></label>
-                  <label className="block"><span className="label block mb-1">Email</span><input name="email" type="email" defaultValue={u.email} className="input h-9" required /></label>
-                  <label className="block"><span className="label block mb-1">Rôle</span><select name="role" defaultValue={u.role} className="select h-9">{Object.entries(ROLE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
-                  <label className="block"><span className="label block mb-1">Nouveau mot de passe</span><input name="password" type="password" className="input h-9" placeholder="(inchangé)" /></label>
-                  <label className="flex items-center gap-2"><input type="checkbox" name="active" defaultChecked={u.active} /> Compte actif</label>
-                  <div className="text-right"><button className="btn-secondary btn-sm" type="submit">Enregistrer</button></div>
-                </form>
-              </details>
-            ))}
-          </div>
-          <Card title="Nouvel utilisateur">
-            <form action={saveUser} className="space-y-2 text-[13px]">
-              <label className="block"><span className="label block mb-1">Nom</span><input name="name" className="input h-9" required /></label>
-              <label className="block"><span className="label block mb-1">Email</span><input name="email" type="email" className="input h-9" required /></label>
-              <label className="block"><span className="label block mb-1">Rôle</span><select name="role" defaultValue="TRADE" className="select h-9">{Object.entries(ROLE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
-              <label className="block"><span className="label block mb-1">Mot de passe</span><input name="password" type="password" className="input h-9" required /></label>
-              <button className="btn-primary btn-sm w-full" type="submit">Créer</button>
-            </form>
-            <div className="mt-4 text-[12px] text-muted space-y-1">
-              <div><b>Admin / DG</b> : accès complet.</div><div><b>Marketing</b> : budgets, campagnes, planning, produits.</div><div><b>Réglementaire</b> : dossiers & documents.</div><div><b>Trade</b> : ventes, clients, stock, terrain, imports.</div><div><b>Animatrice</b> : saisie terrain, ses animations, ses tâches.</div>
-            </div>
-          </Card>
-        </div>
       )}
 
       {tab === "demo" && (

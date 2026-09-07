@@ -203,7 +203,9 @@ export const users = pgTable("users", {
   jobTitle: text("job_title"),
   /** Responsable hiérarchique — rend le périmètre « équipe » calculable pour tous les modules. */
   managerId: uuid("manager_id").references((): AnyPgColumn => users.id, { onDelete: "set null" }),
+  /** `false` = compte suspendu : ses données et sa configuration de droits restent intactes. */
   active: boolean("active").notNull().default(true),
+  lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -289,6 +291,157 @@ export const userScopes = pgTable(
       sql`coalesce(${t.module}, '*')`,
     ),
     index("user_scopes_user_idx").on(t.userId),
+  ],
+);
+
+/* ------------------------------------------------------------------ */
+/* Permissions modulaires par utilisateur (remplace rôles → user_roles) */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Portée des données d'une personne : ses propres données, ses marques et
+ * clients assignés, ou tout. Enum distinct de `data_scope` (legacy, avec TEAM)
+ * pour que la migration n'ait pas à étendre un type en cours d'utilisation.
+ */
+export const userDataScopeEnum = pgEnum("user_data_scope", ["OWN", "ASSIGNED", "ALL"]);
+
+/**
+ * Matrice de droits d'un utilisateur : une ligne par module, quatre cases.
+ * C'est la SEULE source de vérité des droits ; les modèles de rôle ne servent
+ * qu'à pré-remplir cette table. Créer / Modifier / Valider impliquent Voir
+ * (contrainte SQL dans la migration, dépendance aussi gérée par l'interface).
+ */
+export const userPermissions = pgTable(
+  "user_permissions",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    module: varchar("module", { length: 50 }).notNull(),
+    canView: boolean("can_view").notNull().default(false),
+    canCreate: boolean("can_create").notNull().default(false),
+    canEdit: boolean("can_edit").notNull().default(false),
+    canValidate: boolean("can_validate").notNull().default(false),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.module] })],
+);
+
+/** Portée globale de la personne (une seule valeur, tous modules confondus). */
+export const userScope = pgTable("user_scope", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  scope: userDataScopeEnum("scope").notNull().default("ALL"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Marques rattachées à la personne — utilisées par la portée « assignés ». */
+export const userBrandAssignments = pgTable(
+  "user_brand_assignments",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    brandId: uuid("brand_id")
+      .notNull()
+      .references(() => brands.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.brandId] }), index("user_brand_assignments_brand_idx").on(t.brandId)],
+);
+
+/** Clients rattachés à la personne — utilisés par la portée « assignés ». */
+export const userClientAssignments = pgTable(
+  "user_client_assignments",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.clientId] }), index("user_client_assignments_client_idx").on(t.clientId)],
+);
+
+/**
+ * Interrupteurs transverses : contrôlent une information quel que soit le
+ * module qui l'affiche. Un commercial peut voir tout le module Ventes sans
+ * jamais voir une marge.
+ */
+export const userFlags = pgTable("user_flags", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** Prix d'achat, marges, prix COMANET. */
+  seeMargins: boolean("see_margins").notNull().default(false),
+  /** Totaux d'enveloppes toutes marques. */
+  seeGlobalBudgets: boolean("see_global_budgets").notNull().default(false),
+  /** Cachets d'influenceuses, rémunération des animatrices. */
+  seeInternalCosts: boolean("see_internal_costs").notNull().default(false),
+  /** Engager / valider une dépense. */
+  approveSpend: boolean("approve_spend").notNull().default(false),
+  /** Tout export xlsx / csv / impression. */
+  exportData: boolean("export_data").notNull().default(false),
+  /** Journal d'activité et journal des droits. */
+  readActivityLog: boolean("read_activity_log").notNull().default(false),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Modèles de rôle : simples raccourcis de pré-remplissage, éditables par
+ * l'administrateur. Appliquer un modèle cumule (OR) ses cases avec la matrice
+ * courante ; aucun lien n'est conservé ensuite avec l'utilisateur.
+ */
+export const roleTemplates = pgTable("role_templates", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  description: text("description"),
+  /** Page d'accueil proposée à l'application du modèle. */
+  homePath: text("home_path").notNull().default("/"),
+  scope: userDataScopeEnum("scope").notNull().default("ALL"),
+  flags: jsonb("flags").$type<Record<string, boolean>>().notNull().default({}),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const roleTemplatePermissions = pgTable(
+  "role_template_permissions",
+  {
+    templateId: uuid("template_id")
+      .notNull()
+      .references(() => roleTemplates.id, { onDelete: "cascade" }),
+    module: varchar("module", { length: 50 }).notNull(),
+    canView: boolean("can_view").notNull().default(false),
+    canCreate: boolean("can_create").notNull().default(false),
+    canEdit: boolean("can_edit").notNull().default(false),
+    canValidate: boolean("can_validate").notNull().default(false),
+  },
+  (t) => [primaryKey({ columns: [t.templateId, t.module] })],
+);
+
+/**
+ * Journal des modifications de droits : qui a changé quoi, pour qui, quand.
+ * Noms dénormalisés pour rester lisible après suppression d'un compte.
+ */
+export const permissionAuditLogs = pgTable(
+  "permission_audit_logs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorName: text("actor_name").notNull(),
+    targetUserId: uuid("target_user_id").references(() => users.id, { onDelete: "set null" }),
+    targetUserName: text("target_user_name").notNull(),
+    /** PERMISSIONS | SCOPE | ASSIGNMENTS | FLAGS | SUSPEND | REACTIVATE | TEMPLATE_APPLIED | DUPLICATED | CREATED | TEMPLATE_EDITED */
+    change: varchar("change", { length: 30 }).notNull(),
+    before: jsonb("before"),
+    after: jsonb("after"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("permission_audit_logs_created_idx").on(t.createdAt.desc()),
+    index("permission_audit_logs_target_idx").on(t.targetUserId),
   ],
 );
 
@@ -778,6 +931,20 @@ export const doctors = pgTable(
   ],
 );
 
+/** Marques concernées par un prescripteur (celles qu'il prescrit ou pourrait prescrire). */
+export const doctorBrands = pgTable(
+  "doctor_brands",
+  {
+    doctorId: uuid("doctor_id")
+      .notNull()
+      .references(() => doctors.id, { onDelete: "cascade" }),
+    brandId: uuid("brand_id")
+      .notNull()
+      .references(() => brands.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.doctorId, t.brandId] }), index("doctor_brands_brand_idx").on(t.brandId)],
+);
+
 export const doctorVisits = pgTable(
   "doctor_visits",
   {
@@ -797,6 +964,10 @@ export const doctorVisits = pgTable(
     comment: text("comment"),
     nextAction: text("next_action"),
     nextVisitDate: date("next_visit_date"),
+    /** Objections rencontrées chez le praticien (texte libre). */
+    objections: text("objections"),
+    /** Documentation laissée (brochures, fiches, argumentaires). */
+    documentation: text("documentation"),
     status: medicalVisitStatusEnum("status").notNull().default("PLANIFIEE"),
     dedupeKey: text("dedupe_key"),
     importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
@@ -1716,6 +1887,12 @@ export type Role = typeof roles.$inferSelect;
 export type RolePermission = typeof rolePermissions.$inferSelect;
 export type UserScope = typeof userScopes.$inferSelect;
 export type AuditLog = typeof auditLogs.$inferSelect;
+export type UserPermissionRow = typeof userPermissions.$inferSelect;
+export type UserFlagsRow = typeof userFlags.$inferSelect;
+export type RoleTemplate = typeof roleTemplates.$inferSelect;
+export type RoleTemplatePermission = typeof roleTemplatePermissions.$inferSelect;
+export type PermissionAuditLog = typeof permissionAuditLogs.$inferSelect;
+export type UserDataScope = (typeof userDataScopeEnum.enumValues)[number];
 
 export type UserRole = (typeof userRoleEnum.enumValues)[number];
 export type DataScope = (typeof dataScopeEnum.enumValues)[number];

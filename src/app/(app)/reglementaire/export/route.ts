@@ -1,7 +1,7 @@
 import * as XLSX from "xlsx";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, requireFlag } from "@/lib/access";
 import { getSettings } from "@/lib/settings";
 import { CERTIFICATE_STATUS, DOCUMENT_TYPES, SITUATIONS, packagingLabel, situationOf, variantLabel } from "@/lib/regulatory";
 import { today } from "@/lib/format";
@@ -19,6 +19,7 @@ type Row = {
 /** Export Excel de l'état réglementaire, avec l'écart recalculé au jour de l'export. */
 export async function GET() {
   await requireAccess("reglementaire");
+  await requireFlag("exportData");
   const s = await getSettings();
   const t = today();
   const rows = (await db.execute(sql`

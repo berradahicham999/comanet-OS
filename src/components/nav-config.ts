@@ -1,11 +1,16 @@
-import { type ModuleKey } from "@/lib/access-shared";
-import { can, type PermissionSet } from "@/lib/permissions-shared";
+import { type FlagKey, type ModuleKey } from "@/lib/access-shared";
+import { can, hasAnyModule, isAdmin, type FlagSet, type PermissionAction, type PermissionSet } from "@/lib/permissions-shared";
 
 export type NavItem = {
   href: string;
   label: string;
   icon: string; // clé lucide (voir nav-icons)
-  module: ModuleKey;
+  /** `any` : visible dès qu'un module l'est (Cockpit, Action Center). */
+  module: ModuleKey | "any";
+  /** Droit requis au-delà de « voir » (ex. Valider pour les fiches animatrices). */
+  action?: PermissionAction;
+  /** Interrupteur transverse requis (ou module Administration avec Valider). */
+  flag?: FlagKey;
   exact?: boolean;
 };
 
@@ -15,8 +20,8 @@ export const NAV: NavGroup[] = [
   {
     title: "Pilotage",
     items: [
-      { href: "/", label: "Cockpit", icon: "LayoutDashboard", module: "cockpit", exact: true },
-      { href: "/actions", label: "Action Center", icon: "Zap", module: "actions" },
+      { href: "/", label: "Cockpit", icon: "LayoutDashboard", module: "any", exact: true },
+      { href: "/actions", label: "Action Center", icon: "Zap", module: "any" },
     ],
   },
   {
@@ -25,7 +30,7 @@ export const NAV: NavGroup[] = [
       { href: "/ventes", label: "Ventes", icon: "ChartColumn", module: "ventes" },
       { href: "/clients", label: "Clients", icon: "Users", module: "clients" },
       { href: "/produits", label: "Produits", icon: "Package", module: "produits" },
-      { href: "/marques", label: "Marques", icon: "Tags", module: "marques" },
+      { href: "/marques", label: "Marques", icon: "Tags", module: "produits" },
       { href: "/stock", label: "Stock & achats", icon: "Boxes", module: "stock" },
     ],
   },
@@ -35,9 +40,9 @@ export const NAV: NavGroup[] = [
       { href: "/marketing", label: "Vue d'ensemble", icon: "Megaphone", module: "marketing", exact: true },
       { href: "/marketing/campagnes", label: "Campagnes", icon: "Rocket", module: "marketing" },
       { href: "/marketing/ads", label: "Digital Ads", icon: "MousePointerClick", module: "marketing" },
-      { href: "/marketing/influence", label: "Influence", icon: "Heart", module: "marketing" },
+      { href: "/marketing/influence", label: "Influence", icon: "Heart", module: "influence" },
       { href: "/marketing/planning", label: "Planning éditorial", icon: "CalendarDays", module: "marketing" },
-      { href: "/marketing/budgets", label: "Budgets", icon: "Wallet", module: "marketing" },
+      { href: "/marketing/budgets", label: "Budgets", icon: "Wallet", module: "budgets" },
     ],
   },
   {
@@ -45,7 +50,7 @@ export const NAV: NavGroup[] = [
     items: [
       { href: "/terrain", label: "Animations", icon: "Store", module: "terrain" },
       { href: "/terrain/saisie", label: "Saisie terrain", icon: "ClipboardList", module: "terrain" },
-      { href: "/terrain/animatrices", label: "Animatrices", icon: "Sparkles", module: "terrain_animatrices" },
+      { href: "/terrain/animatrices", label: "Animatrices", icon: "Sparkles", module: "terrain", action: "validate" },
     ],
   },
   {
@@ -57,10 +62,10 @@ export const NAV: NavGroup[] = [
       { href: "/medical/visites/saisie", label: "Saisie visite", icon: "ClipboardList", module: "medical" },
       { href: "/medical/planning", label: "Planning / tournée", icon: "Map", module: "medical" },
       { href: "/medical/echantillons", label: "Échantillons", icon: "FlaskConical", module: "medical" },
-      { href: "/medical/delegues", label: "Délégués médicaux", icon: "IdCard", module: "medical_admin" },
-      { href: "/medical/secteurs", label: "Secteurs", icon: "LandPlot", module: "medical_admin" },
-      { href: "/medical/specialites", label: "Spécialités", icon: "BriefcaseMedical", module: "medical_admin" },
-      { href: "/medical/parametrage", label: "Paramétrage médical", icon: "SlidersHorizontal", module: "medical_admin" },
+      { href: "/medical/delegues", label: "Délégués médicaux", icon: "IdCard", module: "medical", action: "validate" },
+      { href: "/medical/secteurs", label: "Secteurs", icon: "LandPlot", module: "medical", action: "validate" },
+      { href: "/medical/specialites", label: "Spécialités", icon: "BriefcaseMedical", module: "medical", action: "validate" },
+      { href: "/medical/parametrage", label: "Paramétrage médical", icon: "SlidersHorizontal", module: "medical", action: "validate" },
     ],
   },
   {
@@ -73,17 +78,24 @@ export const NAV: NavGroup[] = [
   {
     title: "Système",
     items: [
-      { href: "/imports", label: "Imports Sage", icon: "Upload", module: "imports" },
-      { href: "/parametres/evenements", label: "Événements", icon: "ScrollText", module: "parametres" },
-      { href: "/parametres", label: "Paramètres", icon: "Settings", module: "parametres" },
+      { href: "/imports", label: "Imports", icon: "Upload", module: "any" },
+      { href: "/parametres/utilisateurs", label: "Utilisateurs & droits", icon: "UserCog", module: "administration", action: "validate" },
+      { href: "/parametres/evenements", label: "Événements", icon: "ScrollText", module: "any", flag: "readActivityLog" },
+      { href: "/parametres", label: "Paramètres", icon: "Settings", module: "administration" },
     ],
   },
 ];
 
-export function navForPermissions(perms: PermissionSet): NavGroup[] {
+export function navItemVisible(perms: PermissionSet, i: NavItem, flags?: FlagSet): boolean {
+  if (i.flag && !(flags?.[i.flag] || isAdmin(perms))) return false;
+  if (i.module === "any") return hasAnyModule(perms);
+  return can(perms, i.module, i.action ?? "view");
+}
+
+export function navForPermissions(perms: PermissionSet, flags?: FlagSet): NavGroup[] {
   return NAV.map((g) => ({
     ...g,
-    items: g.items.filter((i) => can(perms, i.module, "view")),
+    items: g.items.filter((i) => navItemVisible(perms, i, flags)),
   })).filter((g) => g.items.length > 0);
 }
 
@@ -92,8 +104,8 @@ export function navForPermissions(perms: PermissionSet): NavGroup[] {
  * premier : c'est ce qui donne sa saisie à une animatrice ou à un délégué médical,
  * sans avoir à tester leur rôle.
  */
-export function mobileTabsForPermissions(perms: PermissionSet, homePath: string): NavItem[] {
-  const all = navForPermissions(perms).flatMap((g) => g.items);
+export function mobileTabsForPermissions(perms: PermissionSet, homePath: string, flags?: FlagSet): NavItem[] {
+  const all = navForPermissions(perms, flags).flatMap((g) => g.items);
   const prefer = [homePath, "/", "/actions", "/taches", "/ventes", "/marketing", "/reglementaire", "/terrain", "/medical"];
   const picked: NavItem[] = [];
   for (const href of prefer) {

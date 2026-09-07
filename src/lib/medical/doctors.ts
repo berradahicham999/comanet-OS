@@ -149,6 +149,8 @@ export async function listDoctors(filters: DoctorFilters = {}): Promise<DoctorRo
 }
 
 export type DoctorProfile = DoctorRow & {
+  brandIds: string[];
+  brandNames: string[];
   phone: string | null;
   email: string | null;
   subSpecialty: string | null;
@@ -163,8 +165,11 @@ export async function getDoctor(id: string): Promise<DoctorProfile | null> {
   if (!base) return null;
   const r = await db.execute(sql`select phone, email, sub_specialty, address_line, comments, notes from doctors where id = ${id}::uuid`);
   const extra = r.rows[0] as Record<string, unknown> | undefined;
+  const br = await db.execute(sql`select b.id, b.name from doctor_brands db join brands b on b.id = db.brand_id where db.doctor_id = ${id}::uuid order by b.name`);
   return {
     ...base,
+    brandIds: (br.rows as { id: string }[]).map((x) => x.id),
+    brandNames: (br.rows as { name: string }[]).map((x) => x.name),
     phone: (extra?.phone as string | null) ?? null,
     email: (extra?.email as string | null) ?? null,
     subSpecialty: (extra?.sub_specialty as string | null) ?? null,

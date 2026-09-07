@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, brandFilter, hasFlag } from "@/lib/access";
 import { listBrands, listUsers } from "@/lib/users";
 import { PageHeader, Card, Badge, BrandDot, Progress, Empty, Tabs } from "@/components/ui";
 import { fmtMAD, fmtNum, fmtDateShort, iso, today } from "@/lib/format";
@@ -31,7 +31,8 @@ const FILTERS = [
 export default async function CampagnesPage(props: { searchParams: Promise<{ brand?: string; status?: string }> }) {
   await requireAccess("marketing");
   const sp = await props.searchParams;
-  const brands = (await listBrands()).filter((b) => b.active);
+  const [scopeBrands, seeCosts] = await Promise.all([brandFilter(), hasFlag("seeInternalCosts")]);
+  const brands = (await listBrands()).filter((b) => b.active && (scopeBrands === null || scopeBrands.includes(b.id)));
   const brandId = sp.brand && brands.some((b) => b.id === sp.brand) ? sp.brand : null;
   const status = FILTERS.some((f) => f.key === sp.status) ? (sp.status ?? "") : "";
 
@@ -50,11 +51,12 @@ export default async function CampagnesPage(props: { searchParams: Promise<{ bra
              coalesce((select count(*) from campaign_products cp where cp.campaign_id = c.id), 0)::int as products
       from campaigns c join brands b on b.id = c.brand_id
       left join users u on u.id = c.responsible_id
-      where true ${brandId ? sql`and c.brand_id = ${brandId}::uuid` : sql``} ${status ? sql`and c.status = ${status}::campaign_status` : sql``}
+      where true ${brandId ? sql`and c.brand_id = ${brandId}::uuid` : sql``} ${scopeBrands ? sql`and c.brand_id = any(${scopeBrands}::uuid[])` : sql``} ${status ? sql`and c.status = ${status}::campaign_status` : sql``}
       order by (c.status = 'ACTIVE') desc, coalesce(c.start_date, '1900-01-01'::date) desc, c.name`),
     listUsers(),
   ]);
-  const rows = rowsRes.rows as Row[];
+  // Sans « voir les coûts internes », les cachets d'influence sortent du dépensé affiché.
+  const rows = (rowsRes.rows as Row[]).map((r) => (seeCosts ? r : { ...r, collab_cost: 0 }));
   const now = iso(today());
 
   const totals = rows.reduce((a, r) => ({

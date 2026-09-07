@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, hasFlag } from "@/lib/access";
 import { getRefDate } from "@/lib/ref-date";
 import { productStocks, stockSummary, LEVEL_LABEL, type CoverageLevel } from "@/lib/stock";
 import { getSettings } from "@/lib/settings";
@@ -14,6 +14,7 @@ const LEVEL_TONE: Record<CoverageLevel, "green" | "yellow" | "orange" | "red" | 
 
 export default async function StockPage(props: { searchParams: Promise<{ brand?: string; view?: string; sort?: string }> }) {
   await requireAccess("stock");
+  const seeMargins = await hasFlag("seeMargins");
   const sp = await props.searchParams;
   const { ref, lastSale } = await getRefDate();
   const [all, settings, brands] = await Promise.all([productStocks({ brandId: sp.brand || undefined }, ref), getSettings(), listBrands()]);
@@ -40,7 +41,7 @@ export default async function StockPage(props: { searchParams: Promise<{ brand?:
           <div className="card px-3 py-2.5"><div className="text-[11px] text-muted">🟡 À surveiller {settings.coverage.yellow}–{settings.coverage.green}</div><div className="text-[20px] font-semibold text-yellow">{sum.yellow}</div></div>
           <div className="card px-3 py-2.5"><div className="text-[11px] text-muted">🟢 &gt; {settings.coverage.green} mois</div><div className="text-[20px] font-semibold text-green">{sum.green}</div></div>
           <Link href={qs({ view: "over" })} className={`card px-3 py-2.5 ${view === "over" ? "ring-2 ring-accent/40" : ""}`}><div className="text-[11px] text-muted">Surstock &gt; 6 mois</div><div className="text-[20px] font-semibold">{sum.overstock}</div></Link>
-          <Link href={qs({ view: "order" })} className={`card px-3 py-2.5 ${view === "order" ? "ring-2 ring-accent/40" : ""}`}><div className="text-[11px] text-muted">À commander</div><div className="text-[20px] font-semibold">{sum.toOrder.length} <span className="text-[12px] font-medium text-muted">≈ {fmtMAD(toOrderValue, { compact: true })}</span></div></Link>
+          <Link href={qs({ view: "order" })} className={`card px-3 py-2.5 ${view === "order" ? "ring-2 ring-accent/40" : ""}`}><div className="text-[11px] text-muted">À commander</div><div className="text-[20px] font-semibold">{sum.toOrder.length} {seeMargins && <span className="text-[12px] font-medium text-muted">≈ {fmtMAD(toOrderValue, { compact: true })}</span>}</div></Link>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Tabs current={qs({ view })} tabs={[{ href: qs({ view: "all" }), label: "Tous", count: all.length }, { href: qs({ view: "order" }), label: "À commander", count: sum.toOrder.length }, { href: qs({ view: "risk" }), label: "À risque", count: sum.red + sum.orange }, { href: qs({ view: "over" }), label: "Surstock", count: sum.overstock }, { href: qs({ view: "unknown" }), label: "Stock non renseigné", count: sum.unknown }]} />
@@ -55,7 +56,7 @@ export default async function StockPage(props: { searchParams: Promise<{ brand?:
 
       <div className="table-wrap">
         <table className="tbl">
-          <thead><tr><th>Produit</th><th className="num">Stock</th><th className="num">En cours</th><th className="num">Ventes/mois</th><th className="num">Tendance</th><th>Couverture</th><th>Rupture estimée</th><th className="num">Lead time</th><th className="num">Stock cible</th><th className="num">Commande conseillée</th><th className="num">Valeur stock</th></tr></thead>
+          <thead><tr><th>Produit</th><th className="num">Stock</th><th className="num">En cours</th><th className="num">Ventes/mois</th><th className="num">Tendance</th><th>Couverture</th><th>Rupture estimée</th><th className="num">Lead time</th><th className="num">Stock cible</th><th className="num">Commande conseillée</th>{seeMargins && <th className="num">Valeur stock</th>}</tr></thead>
           <tbody>
             {list.map((p) => (
               <tr key={p.productId}>
@@ -69,7 +70,7 @@ export default async function StockPage(props: { searchParams: Promise<{ brand?:
                 <td className="num text-muted">{p.leadTimeDays} j</td>
                 <td className="num text-muted">{p.stockKnown ? fmtNum(p.targetStock) : "—"}</td>
                 <td className="num font-semibold">{p.recommendedOrder > 0 ? `${fmtNum(p.recommendedOrder)} u.` : <span className="text-faint">—</span>}</td>
-                <td className="num text-muted">{p.stockKnown ? fmtMAD(p.stockValue, { compact: true, suffix: false }) : "—"}</td>
+                {seeMargins && <td className="num text-muted">{p.stockKnown ? fmtMAD(p.stockValue, { compact: true, suffix: false }) : "—"}</td>}
               </tr>
             ))}
             {list.length === 0 && <tr><td colSpan={11} className="text-center text-muted py-8">Aucun produit dans cette vue.</td></tr>}

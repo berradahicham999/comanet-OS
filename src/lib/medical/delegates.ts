@@ -1,6 +1,7 @@
 import "server-only";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
+import { DELEGATE_SQL } from "@/lib/users";
 import { iso, startOfMonth, addMonths, addDays, mondayOf } from "@/lib/format";
 import { listDoctors, type DoctorRow } from "./doctors";
 
@@ -31,7 +32,7 @@ export async function delegatePerformance(ref: Date): Promise<DelegatePerf[]> {
       coalesce((select count(distinct d.id) from doctors d join doctor_visits v on v.doctor_id = d.id where d.delegate_id = u.id and v.status = 'REALISEE' and v.date >= ${monthStart}::date),0)::int as active_doctors
     from users u
     left join medical_delegates md on md.user_id = u.id
-    where u.role = 'DELEGUE_MEDICAL' and u.active
+    where ${DELEGATE_SQL} and u.active
     order by u.name`);
   return (r.rows as Record<string, unknown>[]).map((x) => {
     const monthlyObjective = Number(x.monthly_objective), visitsMonth = Number(x.visits_month);

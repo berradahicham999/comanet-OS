@@ -4,18 +4,20 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import clsx from "clsx";
-import { Menu, Search, X } from "lucide-react";
+import { Eye, Menu, Search, X } from "lucide-react";
 import type { NavGroup, NavItem } from "@/components/nav-config";
 import type { SessionUser } from "@/lib/auth";
 import { Sidebar, isActive } from "./sidebar";
 import { NavIcon } from "./nav-icons";
 
-export function AppShell({ groups, tabs, user, logout, canSearch, children }: {
+export function AppShell({ groups, tabs, user, logout, canSearch, preview, children }: {
   groups: NavGroup[];
   tabs: NavItem[];
   user: SessionUser;
   logout: () => Promise<void>;
   canSearch: boolean;
+  /** Prévisualisation « en tant que » : bandeau permanent, lecture seule. */
+  preview: { adminName: string; targetName: string; targetId: string } | null;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -56,6 +58,18 @@ export function AppShell({ groups, tabs, user, logout, canSearch, children }: {
       )}
 
       <div className="flex-1 min-w-0 flex flex-col">
+        {preview && (
+          <div className="sticky top-0 z-50 bg-amber-500 text-black text-[13px] px-3 sm:px-5 py-2 flex items-center gap-2 flex-wrap">
+            <Eye size={16} />
+            <span>
+              <b>Prévisualisation</b> : vous voyez l&apos;application comme <b>{preview.targetName}</b> la verra. Lecture seule, aucune action n&apos;est enregistrée.
+            </span>
+            <span className="ml-auto flex items-center gap-2">
+              <a href={`/api/preview/exit?next=/parametres/utilisateurs/${preview.targetId}`} className="btn-secondary btn-sm">Quitter et revenir à la fiche</a>
+              <a href="/api/preview/exit" className="btn-ghost btn-sm">Quitter</a>
+            </span>
+          </div>
+        )}
         {/* Header */}
         <header className="sticky top-0 z-40 h-14 bg-bg/85 backdrop-blur border-b border-line flex items-center gap-2 px-3 sm:px-5">
           <button className="btn-ghost h-9 w-9 p-0 rounded-lg lg:hidden" onClick={() => setOpen(true)} aria-label="Menu">

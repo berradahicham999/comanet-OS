@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, brandFilter, hasFlag } from "@/lib/access";
 import { getRefDate } from "@/lib/ref-date";
 import { listBrands } from "@/lib/users";
 import { resolvePeriod, PERIOD_OPTIONS, type PeriodParam } from "@/lib/periods";
@@ -17,16 +17,17 @@ export const metadata = { title: "Influence" };
 const ADVICE_TONE = { green: "green", orange: "orange", red: "red", blue: "blue" } as const;
 
 export default async function InfluencePage(props: { searchParams: Promise<{ brand?: string; period?: string; start?: string; end?: string; status?: string }> }) {
-  await requireAccess("marketing");
+  await requireAccess("influence");
   const sp = await props.searchParams;
+  const [scopeBrands, seeCosts] = await Promise.all([brandFilter(), hasFlag("seeInternalCosts")]);
   const { ref } = await getRefDate();
   const period = resolvePeriod((sp.period as PeriodParam) || "last90", ref, { start: sp.start, end: sp.end });
-  const brands = (await listBrands()).filter((b) => b.active);
+  const brands = (await listBrands()).filter((b) => b.active && (scopeBrands === null || scopeBrands.includes(b.id)));
   const brandId = sp.brand && brands.some((b) => b.id === sp.brand) ? sp.brand : null;
   const status = sp.status && sp.status in COLLAB_STATUS ? sp.status : null;
 
   const [rows, influencerRows, campaignRows, productRows] = await Promise.all([
-    listCollaborations({ start: period.start, end: period.end }, { brandId, status }),
+    listCollaborations({ start: period.start, end: period.end }, { brandId, status, brandIds: scopeBrands }),
     db.execute(sql`select id, name, instagram, tiktok, followers, engagement_rate::float8 as engagement_rate, category, city, usual_rate::float8 as usual_rate, active from influencers order by active desc, name`),
     db.execute(sql`select id, name, brand_id from campaigns where status in ('DRAFT','PLANNED','ACTIVE') order by name`),
     db.execute(sql`select id, name, brand_id from products where active order by name limit 600`),
@@ -68,7 +69,7 @@ export default async function InfluencePage(props: { searchParams: Promise<{ bra
           <button className="btn-secondary btn-sm h-9" type="submit">Appliquer</button>
         </form>
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-3">
-          <Kpi label="Investissement influence" value={fmtMAD(totals.cost, { compact: true })} sub="cachets + valeur produits" />
+          <Kpi label="Investissement influence" value={seeCosts ? fmtMAD(totals.cost, { compact: true }) : "masqué"} sub={seeCosts ? "cachets + valeur produits" : "coûts internes non visibles sur ce compte"} />
           <Kpi label="Personnes touchées" value={totals.reach !== null ? fmtNum(totals.reach) : "—"} sub={totals.reach !== null ? `CPM ${totals.cpm !== null ? fmtMAD(totals.cpm) : "—"}` : "reach non saisi"} />
           <Kpi label="Engagement moyen" value={totals.engagement !== null ? fmtPct(totals.engagement, 2) : "—"} sub={totals.interactions !== null ? `${fmtNum(totals.interactions)} interactions` : "statistiques non saisies"} />
           <Kpi label="CA attribué mesuré" value={totals.measuredRevenue ? fmtMAD(totals.measuredRevenue, { compact: true }) : "—"} sub={`${totals.measuredCollabs}/${totals.collabs} collaboration(s) mesurable(s)`} />
@@ -97,7 +98,7 @@ export default async function InfluencePage(props: { searchParams: Promise<{ bra
             <Link key={p.status} href={qs({ status: status === p.status ? "" : p.status })} className={`card p-3 hover:border-accent transition-colors ${status === p.status ? "border-accent" : ""}`}>
               <div className="text-[11px] text-muted">{p.label}</div>
               <div className="text-[19px] font-semibold mt-0.5">{p.count}</div>
-              <div className="text-[11px] text-faint">{p.cost ? fmtMAD(p.cost, { compact: true }) : "—"}</div>
+              <div className="text-[11px] text-faint">{!seeCosts ? "" : p.cost ? fmtMAD(p.cost, { compact: true }) : "—"}</div>
             </Link>
           ))}
         </div>
@@ -118,7 +119,7 @@ export default async function InfluencePage(props: { searchParams: Promise<{ bra
                       </td>
                       <td className="text-muted">{r.brands.join(", ")}</td>
                       <td className="num">{r.collabs}</td>
-                      <td className="num">{fmtMAD(r.cost, { compact: true, suffix: false })}</td>
+                      <td className="num">{seeCosts ? fmtMAD(r.cost, { compact: true, suffix: false }) : "•••"}</td>
                       <td className="num">{r.reach !== null ? fmtNum(r.reach) : "—"}</td>
                       <td className="num">{r.cpm !== null ? Math.round(r.cpm) : "—"}</td>
                       <td className="num">{r.engagement !== null ? r.engagement.toFixed(1) + " %" : "—"}</td>
@@ -146,7 +147,7 @@ export default async function InfluencePage(props: { searchParams: Promise<{ bra
                     <td className="font-medium">{r.influencer}</td>
                     <td><span className="flex items-center gap-1.5">{r.brand_color && <BrandDot color={r.brand_color} />}{r.brand}</span></td>
                     <td className="text-muted">{[r.reels ? `${r.reels} reel(s)` : null, r.stories ? `${r.stories} story(s)` : null, r.posts ? `${r.posts} post(s)` : null].filter(Boolean).join(" · ") || r.content_type || "—"}{r.campaign && <span className="text-faint"> · {r.campaign}</span>}</td>
-                    <td className="num">{fmtMAD(r.cost, { suffix: false })}</td>
+                    <td className="num">{seeCosts ? fmtMAD(r.cost, { suffix: false }) : "•••"}</td>
                     <td className="num">{r.reach !== null ? fmtNum(r.reach) : "—"}</td>
                     <td className="num">{r.engagement !== null ? r.engagement.toFixed(1) + " %" : "—"}</td>
                     <td className="num">{r.measured ? fmtMAD(r.attributed_revenue ?? 0, { suffix: false }) : <span className="text-faint" title="Aucun code promo ou lien tracké : impossible d'attribuer un CA à cette collaboration.">non mesurable</span>}</td>
@@ -193,7 +194,7 @@ export default async function InfluencePage(props: { searchParams: Promise<{ bra
               <label className="block"><span className="label block mb-1">Stories</span><input name="stories" className="input h-9" placeholder="0" /></label>
               <label className="block"><span className="label block mb-1">Posts</span><input name="posts" className="input h-9" placeholder="0" /></label>
             </div>
-            <label className="block"><span className="label block mb-1">Cachet (MAD)</span><input name="fee" className="input h-9" placeholder="0" /></label>
+            {seeCosts && <label className="block"><span className="label block mb-1">Cachet (MAD)</span><input name="fee" className="input h-9" placeholder="0" /></label>}
             <label className="block"><span className="label block mb-1">Valeur produits offerts</span><input name="productValue" className="input h-9" placeholder="0" /></label>
             <div className="sm:col-span-2 border-t border-line pt-2 mt-1"><span className="label">Après publication</span></div>
             <label className="block"><span className="label block mb-1">Reach</span><input name="reach" className="input h-9" /></label>

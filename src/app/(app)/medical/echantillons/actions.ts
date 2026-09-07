@@ -3,12 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { sampleMovements } from "@/db/schema";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, canDo } from "@/lib/access";
 import { iso, today } from "@/lib/format";
 
 export async function addSampleEntry(formData: FormData) {
   const user = await requireAccess("medical");
-  if (user.role === "DELEGUE_MEDICAL") return;
+  if (!(await canDo("medical", "validate"))) return;
   const delegateId = String(formData.get("delegateId") ?? "");
   const productId = String(formData.get("productId") ?? "");
   const quantity = Math.round(Number(formData.get("quantity") ?? 0) || 0);
