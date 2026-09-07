@@ -74,6 +74,7 @@ export const NAV: NavGroup[] = [
     title: "Système",
     items: [
       { href: "/imports", label: "Imports Sage", icon: "Upload", module: "imports" },
+      { href: "/parametres/evenements", label: "Événements", icon: "ScrollText", module: "parametres" },
       { href: "/parametres", label: "Paramètres", icon: "Settings", module: "parametres" },
     ],
   },
