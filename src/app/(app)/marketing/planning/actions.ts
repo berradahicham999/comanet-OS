@@ -12,6 +12,7 @@ import { syncBriefTask } from "@/lib/content/tasks";
 import { notify } from "@/lib/content/notify";
 import { MAX_ASSET_BYTES, deleteAsset as removeAsset, type AssetKind } from "@/lib/content/assets";
 import { applyTemplate, shiftIso, BRIEF_FIELDS } from "@/lib/content/shared";
+import { fmtDate } from "@/lib/format";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim() || null;
 const int = (fd: FormData, k: string) => { const v = str(fd, k); if (v === null) return null; const n = Number(v.replace(/\s/g, "")); return Number.isFinite(n) ? Math.round(n) : null; };
@@ -56,9 +57,9 @@ export async function quickCreateContent(formData: FormData): Promise<{ id: stri
   const fmt = refs.formats.find((f) => f.key === format);
   const brief = applyTemplate({ deliverables: fmt?.defaultDeliverable ?? null }, d);
   const responsibleId = str(formData, "responsibleId");
+  const deadline = str(formData, "deadline") ?? shiftIso(date, -(d.deadlineOffsetDays ?? 3));
   const [row] = await db.insert(contentItems).values({
-    brandId, title, date, publishTime: str(formData, "publishTime"),
-    deadline: str(formData, "deadline") ?? shiftIso(date, -(d.deadlineOffsetDays ?? 3)),
+    brandId, title, date, publishTime: str(formData, "publishTime"), deadline,
     platform: refs.platforms.some((p) => p.key === platform) ? platform : null,
     format: refs.formats.some((f) => f.key === format) ? format : null,
     objective: refs.objectives.some((o) => o.key === objective) ? objective : null,
@@ -70,8 +71,8 @@ export async function quickCreateContent(formData: FormData): Promise<{ id: stri
   await db.insert(contentStatusHistory).values({ contentId: row.id, fromStatus: null, toStatus: row.status, userId: user.id, comment: "Création" });
   await setProducts(row.id, formData.getAll("productIds").map(String));
   if (isUuid(responsibleId)) {
-    await syncBriefTask({ id: row.id, title, brandId, responsibleId, deadline: null, date, createdById: user.id });
-    await notify([responsibleId], { type: "BRIEF_ASSIGNED", title: `Brief assigné : ${title}`, body: `Par ${user.name}, à livrer avant le ${shiftIso(date, -(d.deadlineOffsetDays ?? 3))}.`, href: `${PLANNING}/${row.id}`, entityType: "content", entityId: row.id }, { except: user.id });
+    await syncBriefTask({ id: row.id, title, brandId, responsibleId, deadline, date, createdById: user.id });
+    await notify([responsibleId], { type: "BRIEF_ASSIGNED", title: `Brief assigné : ${title}`, body: `Par ${user.name}, à livrer avant le ${fmtDate(deadline)}.`, href: `${PLANNING}/${row.id}`, entityType: "content", entityId: row.id }, { except: user.id });
   }
   revalidateContent(row.id);
   return { id: row.id };
@@ -151,7 +152,7 @@ export async function saveBrief(formData: FormData) {
   const newResp = isUuid(responsibleId) ? responsibleId : null;
   await syncBriefTask({ id, title, brandId, responsibleId: newResp, deadline, date, createdById: user.id });
   if (newResp && newResp !== cur.responsibleId) {
-    await notify([newResp], { type: "BRIEF_ASSIGNED", title: `Brief assigné : ${title}`, body: `Par ${user.name}${deadline ? `, à livrer avant le ${deadline}` : ""}.`, href: `${PLANNING}/${id}`, entityType: "content", entityId: id }, { except: user.id });
+    await notify([newResp], { type: "BRIEF_ASSIGNED", title: `Brief assigné : ${title}`, body: `Par ${user.name}${deadline ? `, à livrer avant le ${fmtDate(deadline)}` : ""}.`, href: `${PLANNING}/${id}`, entityType: "content", entityId: id }, { except: user.id });
   }
   revalidateContent(id);
 }

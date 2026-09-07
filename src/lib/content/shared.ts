@@ -31,6 +31,15 @@ export function safeTone(t: string | null | undefined): Tone {
   return TONES.includes(t as Tone) ? (t as Tone) : "gray";
 }
 
+/** Classes Tailwind d'un badge selon le `tone` d'un statut (mêmes couleurs que `Badge` du design system). */
+const TONE_CLASS: Record<Tone, string> = {
+  red: "bg-red-soft text-red", orange: "bg-orange-soft text-orange", yellow: "bg-yellow-soft text-yellow", green: "bg-green-soft text-green",
+  blue: "bg-blue-soft text-blue", purple: "bg-purple-soft text-purple", gray: "bg-black/5 text-ink-2", accent: "bg-accent-soft text-accent-2",
+};
+export function toneClass(t: string | null | undefined): string {
+  return TONE_CLASS[safeTone(t)];
+}
+
 /** Clé technique dérivée d'un libellé saisi (« Visuel pharmacie » → VISUEL_PHARMACIE). */
 export function refKey(label: string): string {
   return label

@@ -1,13 +1,13 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import clsx from "clsx";
 import { AlertTriangle, ChevronLeft, ChevronRight, Copy, Plus, X } from "lucide-react";
 import { Badge, BrandDot } from "@/components/ui";
 import { PlatformIcon } from "@/components/platform-icon";
-import { safeTone, type ContentRefs } from "@/lib/content/shared";
+import { toneClass, type ContentRefs } from "@/lib/content/shared";
 import type { ContentCard, PeriodIndicators } from "@/lib/content/queries";
 
 /**
@@ -51,10 +51,8 @@ export function ContentCalendar(props: {
   const [cards, setCards] = useState(props.cards);
   const [prevCards, setPrevCards] = useState(props.cards);
   if (props.cards !== prevCards) { setPrevCards(props.cards); setCards(props.cards); }
-  // L'identifiant glissé vit dans une ref (lu au drop, sans attendre un re-rendu) ; l'état ne sert qu'à l'opacité.
-  const dragRef = useRef<string | null>(null);
-  const [dragId, setDragIdState] = useState<string | null>(null);
-  const setDragId = (id: string | null) => { dragRef.current = id; setDragIdState(id); };
+  // L'identifiant glissé voyage dans le `dataTransfer` (mécanique HTML5) ; l'état ne sert qu'à l'opacité.
+  const [dragId, setDragId] = useState<string | null>(null);
   const [overDate, setOverDate] = useState<string | null>(null);
   const [create, setCreate] = useState<{ date: string; brandId?: string; platform?: string } | null>(null);
   const [dup, setDup] = useState<ContentCard | null>(null);
@@ -76,9 +74,12 @@ export function ContentCalendar(props: {
     const x = d(props.anchor); x.setUTCMonth(x.getUTCMonth() + dir, 1); go({ d: x.toISOString().slice(0, 10) });
   };
 
-  function onDrop(date: string) {
+  const DRAG_TYPE = "application/x-comanet-content";
+  const isDrag = (e: React.DragEvent) => e.dataTransfer.types.includes(DRAG_TYPE);
+  function onDrop(e: React.DragEvent, date: string) {
+    e.preventDefault();
     setOverDate(null);
-    const id = dragRef.current;
+    const id = e.dataTransfer.getData(DRAG_TYPE);
     if (!id || !props.canEdit) return;
     setDragId(null);
     const cur = cards.find((c) => c.id === id);
@@ -92,12 +93,12 @@ export function ContentCalendar(props: {
   }
 
   /* --------------------------- Rendu d'une carte --------------------------- */
-  function CardView({ c, compact }: { c: ContentCard; compact?: boolean }) {
+  function cardView(c: ContentCard, compact?: boolean) {
     const st = statusOf.get(c.status); const pf = platformOf.get(c.platform ?? "");
     return (
       <div
         draggable={props.canEdit}
-        onDragStart={(e) => { setDragId(c.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", c.id); }}
+        onDragStart={(e) => { setDragId(c.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData(DRAG_TYPE, c.id); }}
         onDragEnd={() => { setDragId(null); setOverDate(null); }}
         className={clsx("group relative rounded-lg border bg-surface text-[12px] leading-tight transition-shadow", props.canEdit && "cursor-grab active:cursor-grabbing", dragId === c.id && "opacity-40", c.late ? "border-red/40" : "border-line")}
         style={{ borderLeftWidth: 3, borderLeftColor: c.color }}
@@ -126,14 +127,14 @@ export function ContentCalendar(props: {
     );
   }
 
-  function DayCell({ date, cardsOfDay, tall, children }: { date: string; cardsOfDay: ContentCard[]; tall?: boolean; children?: React.ReactNode }) {
+  function dayCell(date: string, cardsOfDay: ContentCard[], tall?: boolean) {
     const inMonth = date >= props.start && date < props.end;
     const isToday = date === todayIso;
     return (
       <div
-        onDragOver={(e) => { if (dragRef.current) { e.preventDefault(); setOverDate(date); } }}
+        onDragOver={(e) => { if (isDrag(e)) { e.preventDefault(); setOverDate(date); } }}
         onDragLeave={() => setOverDate((o) => (o === date ? null : o))}
-        onDrop={(e) => { e.preventDefault(); onDrop(date); }}
+        onDrop={(e) => onDrop(e, date)}
         className={clsx("group/cell relative flex flex-col gap-1 p-1.5 border-t border-l border-line min-w-0", tall ? "min-h-[320px]" : "min-h-[104px]", !inMonth && "bg-surface-2/60 text-faint", overDate === date && "bg-accent-soft ring-2 ring-inset ring-accent/50", date < todayIso && inMonth && "bg-black/[0.015]")}
       >
         <div className="flex items-center justify-between text-[11px]">
@@ -144,7 +145,7 @@ export function ContentCalendar(props: {
             </button>
           )}
         </div>
-        {children ?? cardsOfDay.map((c) => <CardView key={c.id} c={c} compact={!tall} />)}
+        {cardsOfDay.map((c) => <div key={c.id}>{cardView(c, !tall)}</div>)}
       </div>
     );
   }
@@ -158,19 +159,19 @@ export function ContentCalendar(props: {
   }, [props.start, props.end]);
   const weekDays = useMemo(() => range(props.start, 7), [props.start]);
 
-  const Grid = ({ days, tall }: { days: string[]; tall?: boolean }) => (
+  const grid = (days: string[], tall?: boolean) => (
     <div className="card overflow-hidden">
       <div className="grid grid-cols-7 text-[11px] font-medium text-muted">
         {DAYS.map((x, i) => <div key={x} className="px-2 py-1.5 border-l border-line first:border-l-0">{x}{tall && <span className="ml-1 text-ink">{fmtShort.format(d(days[i]))}</span>}</div>)}
       </div>
       <div className="grid grid-cols-7 border-b border-r border-line">
-        {days.map((date) => <DayCell key={date} date={date} cardsOfDay={byDate.get(date) ?? []} tall={tall} />)}
+        {days.map((date) => <div key={date} className="contents">{dayCell(date, byDate.get(date) ?? [], tall)}</div>)}
       </div>
     </div>
   );
 
   /** Lignes = marques ou plateformes, colonnes = jours. Les trous et les jours surchargés sautent aux yeux. */
-  const Matrix = ({ days }: { days: string[] }) => {
+  const matrix = (days: string[]) => {
     const rows = props.mode === "brand"
       ? props.brands.filter((b) => b.active || cards.some((c) => c.brandId === b.id)).map((b) => ({ key: b.id, label: b.name, color: b.color, icon: null as string | null, match: (c: ContentCard) => c.brandId === b.id }))
       : [...refs.platforms.filter((p) => p.active || cards.some((c) => c.platform === p.key)).map((p) => ({ key: p.key, label: p.label, color: null as string | null, icon: p.icon, match: (c: ContentCard) => c.platform === p.key })),
@@ -195,8 +196,8 @@ export function ContentCalendar(props: {
                     const cell = rowCards.filter((c) => c.date === date);
                     return (
                       <td key={date}
-                        onDragOver={(e) => { if (dragRef.current) { e.preventDefault(); setOverDate(date); } }}
-                        onDrop={(e) => { e.preventDefault(); onDrop(date); }}
+                        onDragOver={(e) => { if (isDrag(e)) { e.preventDefault(); setOverDate(date); } }}
+                        onDrop={(e) => onDrop(e, date)}
                         onDoubleClick={() => props.canCreate && setCreate({ date, brandId: props.mode === "brand" ? r.key : undefined, platform: props.mode === "platform" && r.key !== "__none" ? r.key : undefined })}
                         className={clsx("border-l border-line align-top p-0.5", overDate === date && "bg-accent-soft", cell.length >= 3 && "bg-orange-soft/60")}
                         title={cell.length ? cell.map((c) => c.title).join("\n") : props.canCreate ? "Double-clic : ajouter" : ""}>
@@ -204,8 +205,8 @@ export function ContentCalendar(props: {
                           {cell.map((c) => {
                             const st = statusOf.get(c.status); const pf = platformOf.get(c.platform ?? "");
                             return wide
-                              ? <Link key={c.id} href={`/marketing/planning/${c.id}`} draggable={props.canEdit} onDragStart={(e) => { setDragId(c.id); e.dataTransfer.setData("text/plain", c.id); }} onDragEnd={() => setDragId(null)} title={`${c.title} · ${st?.label ?? c.status}`} className={clsx("h-3.5 w-3.5 rounded-sm flex items-center justify-center", toneClass(st?.tone), c.late && "ring-1 ring-red")} style={props.mode === "platform" ? { background: c.color, color: "white" } : undefined}>{props.mode === "brand" && pf ? <PlatformIcon icon={pf.icon} label={pf.label} size={9} /> : null}</Link>
-                              : <div key={c.id} className="w-full"><CardView c={c} compact /></div>;
+                              ? <Link key={c.id} href={`/marketing/planning/${c.id}`} draggable={props.canEdit} onDragStart={(e) => { setDragId(c.id); e.dataTransfer.setData(DRAG_TYPE, c.id); }} onDragEnd={() => setDragId(null)} title={`${c.title} · ${st?.label ?? c.status}`} className={clsx("h-3.5 w-3.5 rounded-sm flex items-center justify-center", toneClass(st?.tone), c.late && "ring-1 ring-red")} style={props.mode === "platform" ? { background: c.color, color: "white" } : undefined}>{props.mode === "brand" && pf ? <PlatformIcon icon={pf.icon} label={pf.label} size={9} /> : null}</Link>
+                              : <div key={c.id} className="w-full">{cardView(c, true)}</div>;
                           })}
                         </div>
                       </td>
@@ -220,7 +221,7 @@ export function ContentCalendar(props: {
     );
   };
 
-  const ListView = () => {
+  const listView = () => {
     const dates = [...byDate.keys()].sort();
     return (
       <div className="space-y-3">
@@ -231,7 +232,7 @@ export function ContentCalendar(props: {
               <span className="capitalize">{fmtDay.format(d(date))}</span>{date === todayIso && <Badge tone="accent">Aujourd&apos;hui</Badge>}
               {props.canCreate && <button type="button" className="btn-ghost btn-sm h-6 px-1.5" onClick={() => setCreate({ date })} aria-label="Ajouter"><Plus size={12} /></button>}
             </div>
-            <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-2">{byDate.get(date)!.map((c) => <CardView key={c.id} c={c} />)}</div>
+            <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-2">{byDate.get(date)!.map((c) => <div key={c.id}>{cardView(c)}</div>)}</div>
           </div>
         ))}
       </div>
@@ -239,8 +240,8 @@ export function ContentCalendar(props: {
   };
 
   const period = effectiveView === "week" ? `Semaine du ${fmtShort.format(d(props.start))}` : capitalize(new Intl.DateTimeFormat("fr-FR", { month: "long", year: "numeric" }).format(d(props.start)));
-  const Sel = ({ name, value, children, label }: { name: string; value: string | null; children: React.ReactNode; label: string }) => (
-    <select aria-label={label} value={value ?? ""} onChange={(e) => go({ [name]: e.target.value || null })} className="select h-8 text-[12px] w-auto max-w-[170px]"><option value="">{label}</option>{children}</select>
+  const sel = (name: string, label: string, options: { value: string; label: string }[]) => (
+    <select key={name} aria-label={label} value={sp.get(name) ?? ""} onChange={(e) => go({ [name]: e.target.value || null })} className="select h-8 text-[12px] w-auto max-w-[170px]"><option value="">{label}</option>{options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
   );
   const anyFilter = ["brand", "platform", "format", "status", "responsible"].some((k) => sp.get(k));
 
@@ -263,11 +264,11 @@ export function ContentCalendar(props: {
           </div>
         )}
         <div className="flex flex-wrap gap-1.5 ml-auto">
-          <Sel name="brand" value={sp.get("brand")} label="Toutes les marques">{props.brands.filter((b) => b.active).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</Sel>
-          <Sel name="platform" value={sp.get("platform")} label="Toutes les plateformes">{refs.platforms.filter((p) => p.active).map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}</Sel>
-          <Sel name="format" value={sp.get("format")} label="Tous les formats">{refs.formats.filter((f) => f.active).map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}</Sel>
-          <Sel name="status" value={sp.get("status")} label="Tous les statuts">{refs.statuses.filter((s) => s.active).map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</Sel>
-          <Sel name="responsible" value={sp.get("responsible")} label="Tous les responsables">{props.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Sel>
+          {sel("brand", "Toutes les marques", props.brands.filter((b) => b.active).map((b) => ({ value: b.id, label: b.name })))}
+          {sel("platform", "Toutes les plateformes", refs.platforms.filter((p) => p.active).map((p) => ({ value: p.key, label: p.label })))}
+          {sel("format", "Tous les formats", refs.formats.filter((f) => f.active).map((f) => ({ value: f.key, label: f.label })))}
+          {sel("status", "Tous les statuts", refs.statuses.filter((s) => s.active).map((s) => ({ value: s.key, label: s.label })))}
+          {sel("responsible", "Tous les responsables", props.users.map((u) => ({ value: u.id, label: u.name })))}
           {anyFilter && <button type="button" className="btn-ghost btn-sm h-8" onClick={() => go({ brand: null, platform: null, format: null, status: null, responsible: null })}>Effacer</button>}
           {props.canCreate && <button type="button" className="btn-primary btn-sm h-8" onClick={() => setCreate({ date: props.start >= todayIso ? props.start : todayIso, brandId: sp.get("brand") ?? undefined, platform: sp.get("platform") ?? undefined })}><Plus size={14} /> Contenu</button>}
         </div>
@@ -280,12 +281,12 @@ export function ContentCalendar(props: {
       <div className={clsx(pending && "opacity-70 transition-opacity")}>
         {props.view === null ? (
           <>
-            <div className="lg:hidden"><ListView /></div>
-            <div className="hidden lg:block">{props.mode === "date" ? <Grid days={monthDays} /> : <Matrix days={monthDays.filter((x) => x >= props.start && x < props.end)} />}</div>
+            <div className="lg:hidden">{listView()}</div>
+            <div className="hidden lg:block">{props.mode === "date" ? grid(monthDays) : matrix(monthDays.filter((x) => x >= props.start && x < props.end))}</div>
           </>
-        ) : props.view === "list" ? <ListView />
-          : props.mode !== "date" ? <Matrix days={props.view === "week" ? weekDays : monthDays.filter((x) => x >= props.start && x < props.end)} />
-          : props.view === "week" ? <Grid days={weekDays} tall /> : <Grid days={monthDays} />}
+        ) : props.view === "list" ? listView()
+          : props.mode !== "date" ? matrix(props.view === "week" ? weekDays : monthDays.filter((x) => x >= props.start && x < props.end))
+          : props.view === "week" ? grid(weekDays, true) : grid(monthDays)}
       </div>
 
       {create && <QuickCreate init={create} {...props} onClose={() => setCreate(null)} onDone={(r) => { setCreate(null); if ("id" in r) { setToast({ text: "Contenu ajouté au planning.", href: `/marketing/planning/${r.id}`, tone: "ok" }); router.refresh(); } else setToast({ text: r.error, tone: "err" }); }} />}
@@ -394,9 +395,4 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
   );
 }
 
-const TONE_CLASS: Record<string, string> = {
-  red: "bg-red-soft text-red", orange: "bg-orange-soft text-orange", yellow: "bg-yellow-soft text-yellow", green: "bg-green-soft text-green",
-  blue: "bg-blue-soft text-blue", purple: "bg-purple-soft text-purple", gray: "bg-black/5 text-ink-2", accent: "bg-accent-soft text-accent-2",
-};
-export function toneClass(t: string | null | undefined) { return TONE_CLASS[safeTone(t)]; }
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
