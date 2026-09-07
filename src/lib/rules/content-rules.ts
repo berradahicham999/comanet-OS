@@ -42,7 +42,7 @@ export const contentLateRule: Rule = {
       rule: "content-late",
       category: "MARKETING",
       priority: x.kind === "PUBLICATION" ? "HIGH" : "MEDIUM",
-      title: `${x.brand} — ${x.title}`,
+      title: x.title.toLowerCase().startsWith(x.brand.toLowerCase()) ? x.title : `${x.brand} — ${x.title}`,
       subtitle: x.kind === "PUBLICATION" ? "Publication en retard" : "Livrable en retard",
       facts: [
         { label: "Statut", value: x.status },

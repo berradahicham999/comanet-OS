@@ -6,7 +6,7 @@ import { listBrands } from "@/lib/users";
 import { getRefDate } from "@/lib/ref-date";
 import { PageHeader, Card, Badge, Tabs } from "@/components/ui";
 import { updateSettings, saveObjectives } from "./actions";
-import { seedDemoAction, purgeDemoAction } from "./demo-actions";
+import { seedDemoAction, purgeDemoAction, seedContentDemoAction, purgeContentDemoAction } from "./demo-actions";
 import { fmtMAD, fmtNum } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -115,6 +115,12 @@ export default async function ParametresPage(props: { searchParams: Promise<{ ta
             <form action={seedDemoAction}><button className="btn-primary btn-sm" type="submit">Charger les données de démo</button></form>
             <form action={purgeDemoAction}><button className="btn-secondary btn-sm text-red" type="submit">Purger les données de démo</button></form>
             <Badge tone={demo ? "yellow" : "gray"}>{demo ? `${demo} entrées de démo présentes` : "Aucune donnée de démo"}</Badge>
+          </div>
+          <h3 className="font-medium text-[13.5px] mt-5 mb-1">Planning éditorial seul</h3>
+          <p className="text-[13px] text-ink-2 mb-2">Une trentaine de contenus sur vos marques et produits réels : publiés, en création, à valider, en retard, avec briefs, historique et commentaires. Indépendant des ventes importées. Vous devenez validateur de toutes les marques pour tester la file.</p>
+          <div className="flex flex-wrap gap-2 items-center">
+            <form action={seedContentDemoAction}><button className="btn-primary btn-sm" type="submit">Charger la démo du planning</button></form>
+            <form action={purgeContentDemoAction}><button className="btn-secondary btn-sm text-red" type="submit">Purger la démo du planning</button></form>
           </div>
         </Card>
       )}

@@ -29,8 +29,13 @@ export default async function ContenusSettingsPage() {
   const used = new Map(usage.rows.map((u) => [`${u.kind}:${u.key}`, u.n]));
   const valByBrand = new Map<string, Set<string>>();
   for (const v of validators.rows) (valByBrand.get(v.brand_id) ?? valByBrand.set(v.brand_id, new Set()).get(v.brand_id)!).add(v.user_id);
+  /** Suppression depuis un formulaire autonome (plateformes : hors du formulaire d'édition). */
   const del = (kind: string, key: string) => (
     <form action={deleteRef}><input type="hidden" name="kind" value={kind} /><input type="hidden" name="key" value={key} /><button className="text-faint hover:text-red text-[13px]" type="submit" title={used.get(`${kind}:${key}`) ? "Utilisé par des contenus : sera désactivé" : "Supprimer"}>×</button></form>
+  );
+  /** Suppression depuis le formulaire de la ligne : même données (`kind` + `key`), autre action — pas de <form> imbriqué. */
+  const delInline = (kind: string, key: string) => (
+    <><input type="hidden" name="kind" value={kind} /><button formAction={deleteRef} className="text-faint hover:text-red text-[13px]" type="submit" title={used.get(`${kind}:${key}`) ? "Utilisé par des contenus : sera désactivé" : "Supprimer"}>×</button></>
   );
   const usedBadge = (kind: string, key: string) => { const n = used.get(`${kind}:${key}`); return n ? <span className="text-[11px] text-muted whitespace-nowrap">{n} contenu{n > 1 ? "s" : ""}</span> : null; };
 
@@ -67,7 +72,7 @@ export default async function ContenusSettingsPage() {
                       <label className="text-center"><input type="checkbox" name="isArchived" defaultChecked={s.isArchived} /></label>
                       <label className="text-center"><input type="checkbox" name="active" defaultChecked={s.active} /></label>
                       <button className="btn-ghost btn-sm text-[11px]" type="submit">OK</button>
-                      <span className="flex items-center gap-1">{usedBadge("status", s.key)}{del("status", s.key)}</span>
+                      <span className="flex items-center gap-1">{usedBadge("status", s.key)}{delInline("status", s.key)}</span>
                     </form>
                   </td>
                 </tr>
@@ -153,7 +158,7 @@ export default async function ContenusSettingsPage() {
                   <input name="defaultDeliverable" defaultValue={f.defaultDeliverable ?? ""} className="input h-8 text-[12px]" placeholder="Livrable par défaut" />
                   <label className="text-center" title="Actif"><input type="checkbox" name="active" defaultChecked={f.active} /></label>
                   <button className="btn-ghost btn-sm text-[11px]" type="submit">OK</button>
-                  <span className="flex items-center gap-1">{usedBadge("format", f.key)}{del("format", f.key)}</span>
+                  <span className="flex items-center gap-1">{usedBadge("format", f.key)}{delInline("format", f.key)}</span>
                 </form>
               ))}
               <form action={saveFormat} className="grid grid-cols-[50px_1fr_1.4fr_50px_80px] items-center gap-1 text-[12.5px] pt-1">
@@ -174,7 +179,7 @@ export default async function ContenusSettingsPage() {
                   <input name="label" defaultValue={o.label} className="input h-8 text-[12px]" />
                   <label className="text-center" title="Actif"><input type="checkbox" name="active" defaultChecked={o.active} /></label>
                   <button className="btn-ghost btn-sm text-[11px]" type="submit">OK</button>
-                  <span className="flex items-center gap-1">{usedBadge("objective", o.key)}{del("objective", o.key)}</span>
+                  <span className="flex items-center gap-1">{usedBadge("objective", o.key)}{delInline("objective", o.key)}</span>
                 </form>
               ))}
               <form action={saveObjective} className="grid grid-cols-[50px_1fr_50px_80px] items-center gap-1 text-[12.5px] pt-1">
