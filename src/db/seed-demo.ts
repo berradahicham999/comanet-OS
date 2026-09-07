@@ -115,14 +115,14 @@ export async function seedDemo() {
 
   // ---- Planning éditorial : mois courant + suivant
   const mk = U("MARKETING");
-  const formats = ["Reel", "Carrousel", "Story", "UGC", "Post"], platforms = ["Instagram", "TikTok", "Facebook"], objectives = ["Notoriété", "Conversion", "Éducation", "Engagement", "Drive-to-store"];
-  const statuses: s.ContentStatus[] = ["IDEE", "BRIEF", "CREATION", "VALIDATION", "PROGRAMME", "PUBLIE", "ANALYSE"];
+  const formats = ["REEL", "CARROUSEL", "STORY", "UGC", "POST"], platforms = ["INSTAGRAM", "TIKTOK", "FACEBOOK"], objectives = ["NOTORIETE", "CONVERSION", "EDUCATION", "ENGAGEMENT", "DRIVE_TO_STORE"];
+  const statuses: s.ContentStatus[] = ["IDEE", "BRIEF_PRET", "EN_CREATION", "A_VALIDER", "PROGRAMME", "PUBLIE", "ARCHIVE"];
   const contentValues: (typeof s.contentItems.$inferInsert)[] = [];
   const som = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1, 12));
   for (let i = 0; i < 24; i++) {
     const p = pick(prodList);
     const date = addDays(som, i * 2 + 1);
-    contentValues.push({ date: iso(date), brandId: p.brandId!, productId: p.id, title: `${p.name} — ${pick(["bénéfices clés", "avant / après", "routine du soir", "témoignage cliente", "conseil pharmacien", "unboxing"])}`, format: formats[i % 5], platform: platforms[i % 3], objective: objectives[i % 5], responsibleId: mk.id, status: date < today ? pick(["PUBLIE", "ANALYSE", "PROGRAMME"]) : statuses[i % 5], brief: `${TAG} Reprendre l'angle marketing et les claims autorisés de la fiche produit.` });
+    contentValues.push({ date: iso(date), brandId: p.brandId!, productId: p.id, title: `${p.name} — ${pick(["bénéfices clés", "avant / après", "routine du soir", "témoignage cliente", "conseil pharmacien", "unboxing"])}`, format: formats[i % 5], platform: platforms[i % 3], objective: objectives[i % 5], responsibleId: mk.id, status: date < today ? pick(["PUBLIE", "ARCHIVE", "PROGRAMME"]) : statuses[i % 5], brief: `${TAG} Reprendre l'angle marketing et les claims autorisés de la fiche produit.` });
   }
   await db.insert(s.contentItems).values(contentValues);
 

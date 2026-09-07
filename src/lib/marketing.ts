@@ -137,7 +137,7 @@ export async function marketingTimeline(endExclusive: string, months = 13, brand
     ),
     content_m as (
       select to_char(date, 'YYYY-MM') as month, count(*)::int as n
-      from content_items where status = 'PUBLIE' and date >= ${startMonth}::date and date < ${endExclusive}::date ${bf("brand_id")}
+      from content_items where status in (select key from content_statuses where is_published) and date >= ${startMonth}::date and date < ${endExclusive}::date ${bf("brand_id")}
       group by 1
     ),
     act_m as (
@@ -226,8 +226,8 @@ export async function marketingCounters(range: Range, brandId?: string | null) {
       (select count(*) from campaigns c where c.status in ('DRAFT','PLANNED') ${bf("c.brand_id")})::int as planned_campaigns,
       (select count(*) from activations a where a.date >= ${range.start}::date and a.date < ${range.end}::date ${bf("a.brand_id")})::int as activations,
       (select count(*) from collaborations co where co.date >= ${range.start}::date and co.date < ${range.end}::date ${bf("co.brand_id")})::int as collaborations,
-      (select count(*) from content_items ci where ci.status = 'PUBLIE' and ci.date >= ${range.start}::date and ci.date < ${range.end}::date ${bf("ci.brand_id")})::int as published,
-      (select count(*) from content_items ci where ci.status <> 'PUBLIE' and ci.status <> 'ANALYSE' and ci.date >= ${range.start}::date and ci.date < ${range.end}::date ${bf("ci.brand_id")})::int as pending_content`);
+      (select count(*) from content_items ci where ci.status in (select key from content_statuses where is_published) and ci.date >= ${range.start}::date and ci.date < ${range.end}::date ${bf("ci.brand_id")})::int as published,
+      (select count(*) from content_items ci where ci.status not in (select key from content_statuses where is_published or is_archived) and ci.date >= ${range.start}::date and ci.date < ${range.end}::date ${bf("ci.brand_id")})::int as pending_content`);
   const x = r.rows[0] as Record<string, number>;
   return {
     activeCampaigns: Number(x.active_campaigns), plannedCampaigns: Number(x.planned_campaigns),
