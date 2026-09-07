@@ -6,7 +6,7 @@ import { sql } from "drizzle-orm";
 import { SignJWT, jwtVerify } from "jose";
 import { db } from "@/db";
 import { requireUser, getSession, type SessionUser } from "./auth";
-import { MODULE_LABELS, PREVIEW_COOKIE, type FlagKey, type ModuleKey, type ScopeKey, FLAG_LABELS } from "./access-shared";
+import { MODULE_LABELS, MODULE_KEYS, FLAG_KEYS, PREVIEW_COOKIE, type FlagKey, type ModuleKey, type ScopeKey, FLAG_LABELS } from "./access-shared";
 import {
   can,
   isAdmin,
@@ -54,8 +54,68 @@ export function homeFor(perms: PermissionSet, scope: ScopeKey): string {
   return "/taches";
 }
 
+/**
+ * Repli tant que la migration 0012 n'est pas appliquée (les tables `user_permissions`,
+ * `user_scope`, `user_flags` n'existent pas encore) : les droits sont déduits de l'ancien
+ * enum `users.role`, avec la même correspondance que la migration. Sans ce repli, personne
+ * ne pourrait se connecter pour appliquer la migration depuis /installation.
+ */
+function legacyAccessFor(role: SessionUser["role"]): ResolvedAccess {
+  const perms = noPermissions();
+  const all = (m: ModuleKey, validate = true) => { perms[m] = { view: true, create: true, edit: true, validate }; };
+  const view = (m: ModuleKey) => { perms[m] = { view: true, create: false, edit: false, validate: false }; };
+  let scope: ScopeKey = "ALL";
+  const flags = noFlags();
+  switch (role) {
+    case "ADMIN":
+      for (const m of MODULE_KEYS) all(m);
+      for (const f of FLAG_KEYS) flags[f] = true;
+      break;
+    case "MARKETING":
+      for (const m of ["ventes", "produits", "stock", "marketing", "influence", "budgets", "assets", "taches", "rapports"] as ModuleKey[]) all(m, false);
+      flags.seeGlobalBudgets = flags.seeInternalCosts = flags.exportData = true;
+      break;
+    case "TRADE":
+      for (const m of ["ventes", "clients", "produits", "stock", "terrain", "taches", "rapports"] as ModuleKey[]) all(m, m === "terrain");
+      flags.seeMargins = flags.exportData = true;
+      break;
+    case "REGLEMENTAIRE":
+      for (const m of ["produits", "reglementaire", "taches"] as ModuleKey[]) all(m, false);
+      flags.exportData = true;
+      break;
+    case "ANIMATRICE":
+      all("terrain", false); all("taches", false); view("produits");
+      scope = "OWN";
+      break;
+    case "DELEGUE_MEDICAL":
+      all("medical", false); all("taches", false); view("produits");
+      scope = "OWN";
+      break;
+    case "MANAGER_MEDICAL":
+      all("medical"); all("taches");
+      break;
+  }
+  return { perms, scope, flags, brandIds: [], clientIds: [], home: homeFor(perms, scope) };
+}
+
+/** Table absente : la migration 0012 n'est pas encore appliquée. */
+function isMissingTable(e: unknown) {
+  const code = (e as { code?: string; cause?: { code?: string } })?.code ?? (e as { cause?: { code?: string } })?.cause?.code;
+  return code === "42P01";
+}
+
 /** Droits d'une personne, lus en base. Utilisé pour la requête courante, la prévisualisation et l'administration. */
-export async function resolveAccessFor(userId: string): Promise<ResolvedAccess> {
+export async function resolveAccessFor(userId: string, legacyRole?: SessionUser["role"]): Promise<ResolvedAccess> {
+  try {
+    return await resolveFromTables(userId);
+  } catch (e) {
+    if (!isMissingTable(e)) throw e;
+    const role = legacyRole ?? (await db.execute<{ role: SessionUser["role"] }>(sql`select role from users where id = ${userId}::uuid`)).rows[0]?.role;
+    return legacyAccessFor(role ?? "TRADE");
+  }
+}
+
+async function resolveFromTables(userId: string): Promise<ResolvedAccess> {
   const [permRows, scopeRows, flagRows, brandRows, clientRows] = await Promise.all([
     db.execute<{ module: string; can_view: boolean; can_create: boolean; can_edit: boolean; can_validate: boolean }>(
       sql`select module, can_view, can_create, can_edit, can_validate from user_permissions where user_id = ${userId}::uuid`,
@@ -129,7 +189,7 @@ async function readPreview(admin: SessionUser): Promise<{ targetId: string } | n
 export const getAccess = cache(async (): Promise<Access | null> => {
   const session = await getSession();
   if (!session) return null;
-  const own = await resolveAccessFor(session.id);
+  const own = await resolveAccessFor(session.id, session.role);
   if (isAdmin(own.perms)) {
     const preview = await readPreview(session);
     if (preview && preview.targetId !== session.id) {

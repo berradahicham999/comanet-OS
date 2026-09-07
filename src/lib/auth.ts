@@ -50,7 +50,8 @@ export const getSession = cache(async (): Promise<SessionUser | null> => {
     const { payload } = await jwtVerify(token, secret());
     if (!payload.sub) return null;
     // On revérifie que l'utilisateur est toujours actif (et on rafraîchit son rôle).
-    const u = await db.query.users.findFirst({ where: eq(users.id, payload.sub) });
+    // Colonnes explicites : `last_login_at` n'existe qu'après la migration 0012, un `select *` casserait la session avant.
+    const u = (await db.select({ id: users.id, name: users.name, email: users.email, role: users.role, active: users.active }).from(users).where(eq(users.id, payload.sub)))[0];
     if (!u || !u.active) return null;
     return { id: u.id, name: u.name, email: u.email, role: u.role };
   } catch {
@@ -65,7 +66,7 @@ export async function requireUser(): Promise<SessionUser> {
 }
 
 export async function verifyCredentials(email: string, password: string): Promise<SessionUser | null> {
-  const u = await db.query.users.findFirst({ where: eq(users.email, email.trim().toLowerCase()) });
+  const u = (await db.select({ id: users.id, name: users.name, email: users.email, role: users.role, active: users.active, passwordHash: users.passwordHash }).from(users).where(eq(users.email, email.trim().toLowerCase())))[0];
   if (!u || !u.active) return null;
   const ok = await bcrypt.compare(password, u.passwordHash);
   if (!ok) return null;
