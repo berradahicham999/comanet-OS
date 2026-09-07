@@ -540,6 +540,13 @@ export const animations = pgTable(
     photoUrl: text("photo_url"),
     /** Identité d'une ligne du fichier quotidien : date | ville | point de vente | animatrice. */
     dedupeKey: text("dedupe_key"),
+    /**
+     * Qui a écrit cette ligne EN DERNIER : 'saisie' (un humain, dans l'application) ou
+     * 'import' (le fichier quotidien). L'import ne remplace jamais une ligne 'saisie' —
+     * il journalise le conflit. `import_id` ne suffisait pas : une animation importée puis
+     * corrigée dans l'application garde son `import_id`.
+     */
+    source: text("source").notNull().default("import"),
     importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -551,6 +558,7 @@ export const animations = pgTable(
     index("animations_animatrice_idx").on(t.animatriceId),
     index("animations_brand_idx").on(t.brandId),
     index("animations_import_idx").on(t.importId),
+    index("animations_source_date_idx").on(t.source, t.date),
   ],
 );
 
@@ -1353,6 +1361,91 @@ export const contentItems = pgTable(
 );
 
 /* ------------------------------------------------------------------ */
+/* Event Engine                                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Journal des faits métier et de leur traitement.
+ *
+ * Ce n'est ni un cache de KPI ni un stock de recommandations : les chiffres du cockpit et
+ * les cartes de l'Action Center restent calculés à la lecture depuis les tables sources.
+ * Cette table enregistre qu'un fait s'est produit, quand, à cause de quoi, et où en est son
+ * traitement — ce qu'aucune règle évaluée à la lecture ne peut reconstituer.
+ *
+ * `dedupeKey` porte l'identifiant de l'entité (`ANIMATION_COMPLETED:<animation_id>`), pas la
+ * clé naturelle jour|ville|POS|animatrice : renommer un point de vente ne doit pas créer un
+ * second événement. Une correction réutilise la même clé, incrémente `revision` et repasse
+ * `status` à `pending`.
+ *
+ * Ne pas confondre avec `audit_logs` (qui a modifié quoi) ni avec `regulatory_events`
+ * (journal métier d'un dossier réglementaire, descriptif et non déclencheur).
+ */
+export const events = pgTable(
+  "events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** ANIMATION_COMPLETED — un seul type dans cette phase. */
+    type: text("type").notNull(),
+    entityType: text("entity_type").notNull(),
+    entityId: uuid("entity_id"),
+    dedupeKey: text("dedupe_key").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    /** saisie_terrain | import_animations */
+    source: text("source").notNull(),
+    /** Temps métier : la date de l'animation, pas celle de la saisie. */
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    /** Temps technique : quand la ligne a été écrite. */
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** pending | processing | done | failed | obsolete */
+    status: text("status").notNull().default("pending"),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    attempts: integer("attempts").notNull().default(0),
+    error: text("error"),
+    /** Incrémentée à chaque ré-émission (animation corrigée). */
+    revision: integer("revision").notNull().default(1),
+  },
+  (t) => [
+    uniqueIndex("events_dedupe_uq").on(t.dedupeKey),
+    index("events_pending_idx").on(t.status, t.createdAt),
+    index("events_entity_idx").on(t.entityType, t.entityId),
+    index("events_type_idx").on(t.type, t.occurredAt),
+  ],
+);
+
+/**
+ * Ce qu'un événement a déclenché : quelle règle, quel verdict, quelle tâche.
+ *
+ * `detail` conserve la couverture AVANT et APRÈS le fait, les seuils appliqués et les unités
+ * qui ont provoqué le mouvement. C'est la trace du franchissement de seuil : une règle
+ * évaluée à la lecture sait qu'un produit est sous le seuil, jamais depuis quand ni pourquoi.
+ */
+export const eventConsequences = pgTable(
+  "event_consequences",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    eventId: uuid("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
+    /** Identifiant de la règle évaluée, tel qu'enregistré dans `src/lib/rules`. */
+    ruleId: text("rule_id").notNull(),
+    /** no_risk | already_at_risk | threshold_crossed | task_created | task_existing | task_flagged */
+    outcome: text("outcome").notNull(),
+    /** Clé de recommandation de l'Action Center (ex. `stock-coverage:<product_id>`). */
+    recommendationKey: text("recommendation_key"),
+    taskId: uuid("task_id").references(() => tasks.id, { onDelete: "set null" }),
+    entityType: text("entity_type"),
+    entityId: uuid("entity_id"),
+    detail: jsonb("detail").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("event_consequences_event_idx").on(t.eventId),
+    index("event_consequences_task_idx").on(t.taskId),
+    index("event_consequences_entity_idx").on(t.entityType, t.entityId, t.createdAt),
+    // Retraitement d'un même événement : une conséquence par (événement, règle, entité).
+    uniqueIndex("event_consequences_uq").on(t.eventId, t.ruleId, t.entityId),
+  ],
+);
+
+/* ------------------------------------------------------------------ */
 /* Objectifs & paramètres                                              */
 /* ------------------------------------------------------------------ */
 
@@ -1482,6 +1575,15 @@ export const regulatoryEventsRelations = relations(regulatoryEvents, ({ one }) =
   user: one(users, { fields: [regulatoryEvents.userId], references: [users.id] }),
 }));
 
+export const eventsRelations = relations(events, ({ many }) => ({
+  consequences: many(eventConsequences),
+}));
+
+export const eventConsequencesRelations = relations(eventConsequences, ({ one }) => ({
+  event: one(events, { fields: [eventConsequences.eventId], references: [events.id] }),
+  task: one(tasks, { fields: [eventConsequences.taskId], references: [tasks.id] }),
+}));
+
 export const tasksRelations = relations(tasks, ({ one, many }) => ({
   assignee: one(users, { fields: [tasks.assigneeId], references: [users.id] }),
   createdBy: one(users, { fields: [tasks.createdById], references: [users.id] }),
@@ -1607,6 +1709,8 @@ export type MedicalDelegate = typeof medicalDelegates.$inferSelect;
 export type Doctor = typeof doctors.$inferSelect;
 export type DoctorVisit = typeof doctorVisits.$inferSelect;
 export type SampleMovement = typeof sampleMovements.$inferSelect;
+export type EventRow = typeof events.$inferSelect;
+export type EventConsequence = typeof eventConsequences.$inferSelect;
 
 export type Role = typeof roles.$inferSelect;
 export type RolePermission = typeof rolePermissions.$inferSelect;
