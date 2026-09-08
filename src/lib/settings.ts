@@ -72,6 +72,83 @@ export type ComanetSettings = {
   ads: AdThresholds;
   /** Fenêtres et délais du module Activations (mesure du retour, rappels). */
   activations: ActivationSettings;
+  /** Couche d'analyse marketing transverse : fenêtres, répartition, coûts, seuils de verdict. */
+  analytics: AnalyticsSettings;
+};
+
+/**
+ * Réglages de l'analytics marketing transverse. Rien de ces nombres n'est écrit dans
+ * `src/lib/analytics-marketing/` ; chaque page affiche le réglage appliqué à côté du chiffre.
+ */
+export type AnalyticsSettings = {
+  /** Fenêtre d'attribution simple : jours de ventes comparés AVANT une action. */
+  windowBeforeDays: number;
+  /** Jours de ventes observés APRÈS une action. */
+  windowAfterDays: number;
+  /** Répartition d'une dépense multi-produits : au prorata du sell-in récent ou à parts égales. */
+  productSplit: "PRORATA_SALES" | "EQUAL";
+  /** Jours de sell-in utilisés pour le prorata. */
+  productSplitLookbackDays: number;
+  /**
+   * Coût d'une journée d'animation (MAD), appliqué à tout l'historique terrain dont le coût
+   * n'est pas saisi. `null` = coût non mesurable : le canal Animation affiche des résultats
+   * sans dépense, jamais une dépense à 0.
+   */
+  animationDayCost: number | null;
+  /** Poids du score de santé marketing (0-100 chacun ; une composante non mesurable sort du dénominateur). */
+  healthWeights: { objective: number; roi: number; intensity: number; stockCoverage: number; dataQuality: number };
+  /** Écart de points (part budget − part CA) au-delà duquel une marque est sur- ou sous-investie. */
+  investmentBalancePts: number;
+  /** Classification des produits en 4 cas. */
+  productCases: {
+    /** Dépense allouée minimale (MAD) sur la période pour considérer un produit « poussé ». */
+    pushedMinSpend: number;
+    /** Ou nombre d'expositions (contenus + activations + animations) minimal. */
+    pushedMinExposures: number;
+    /** Croissance de sell-in (%) vs période précédente à partir de laquelle un produit « se vend ». */
+    sellingGrowthPct: number;
+  };
+  /** Verdict par canal × marque hors Ads (les Ads gardent `settings.ads`). */
+  channelDiagnosis: {
+    /** Dépense minimale (MAD) sur la période pour rendre un verdict. */
+    minSpend: number;
+    /** Hausse du coût par résultat (%) vs période précédente déclenchant OPTIMIZE. */
+    costRisePct: number;
+    /** Baisse du coût par résultat (%) ouvrant SCALE. */
+    costDropPct: number;
+    /** Coût par résultat supérieur à N fois la moyenne du canal sur le portefeuille : STOP. */
+    costVsPortfolioFactor: number;
+    /** Semaines consécutives de dégradation déclenchant une alerte Action Center. */
+    degradingWeeks: number;
+  };
+  /** Recommandations de réallocation mensuelles. */
+  reallocation: {
+    /** Montant minimal (MAD) d'un déplacement proposé. */
+    minShiftMad: number;
+    /** Part maximale (%) de la dépense du canal source déplaçable en un mois. */
+    maxShiftPct: number;
+  };
+  /** Alertes automatiques. */
+  alerts: {
+    /** Engagé supérieur au prévu de plus de N % : dérive budget. */
+    budgetDriftPct: number;
+    /** Objectif de vente décroché de plus de N % alors que la marque n'a aucune dépense : alerte. */
+    brandNoSpendObjectiveDropPct: number;
+  };
+};
+
+export const DEFAULT_ANALYTICS_SETTINGS: AnalyticsSettings = {
+  windowBeforeDays: 30,
+  windowAfterDays: 30,
+  productSplit: "PRORATA_SALES",
+  productSplitLookbackDays: 90,
+  animationDayCost: null,
+  healthWeights: { objective: 30, roi: 25, intensity: 15, stockCoverage: 15, dataQuality: 15 },
+  investmentBalancePts: 5,
+  productCases: { pushedMinSpend: 500, pushedMinExposures: 2, sellingGrowthPct: 10 },
+  channelDiagnosis: { minSpend: 300, costRisePct: 20, costDropPct: 15, costVsPortfolioFactor: 1.8, degradingWeeks: 3 },
+  reallocation: { minShiftMad: 1000, maxShiftPct: 30 },
+  alerts: { budgetDriftPct: 10, brandNoSpendObjectiveDropPct: 15 },
 };
 
 /** Réglages du module Activations : aucun de ces nombres n'est écrit dans le code de mesure. */
@@ -179,6 +256,7 @@ export const DEFAULT_SETTINGS: ComanetSettings = {
   metaSyncWindowDays: 28,
   ads: DEFAULT_AD_THRESHOLDS,
   activations: DEFAULT_ACTIVATION_SETTINGS,
+  analytics: DEFAULT_ANALYTICS_SETTINGS,
 };
 
 export const SETTINGS_KEY = "comanet.rules";
@@ -198,6 +276,22 @@ export function mergeSettings(stored: Partial<ComanetSettings> | null | undefine
     coverage: { ...DEFAULT_SETTINGS.coverage, ...(stored.coverage ?? {}) },
     ads: { ...DEFAULT_AD_THRESHOLDS, ...(stored.ads ?? {}) },
     activations: { ...DEFAULT_ACTIVATION_SETTINGS, ...(stored.activations ?? {}) },
+    analytics: mergeAnalytics(stored.analytics),
+  };
+}
+
+/** Fusion profonde des réglages analytics : un objet imbriqué partiel ne doit pas effacer les autres seuils. */
+export function mergeAnalytics(stored: Partial<AnalyticsSettings> | null | undefined): AnalyticsSettings {
+  const d = DEFAULT_ANALYTICS_SETTINGS;
+  if (!stored) return d;
+  return {
+    ...d,
+    ...stored,
+    healthWeights: { ...d.healthWeights, ...(stored.healthWeights ?? {}) },
+    productCases: { ...d.productCases, ...(stored.productCases ?? {}) },
+    channelDiagnosis: { ...d.channelDiagnosis, ...(stored.channelDiagnosis ?? {}) },
+    reallocation: { ...d.reallocation, ...(stored.reallocation ?? {}) },
+    alerts: { ...d.alerts, ...(stored.alerts ?? {}) },
   };
 }
 

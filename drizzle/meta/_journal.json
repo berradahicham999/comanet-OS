@@ -120,6 +120,13 @@
       "when": 1789330000000,
       "tag": "0016_activations",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1789500000000,
+      "tag": "0017_analytics_marketing",
+      "breakpoints": true
     }
   ]
 }
