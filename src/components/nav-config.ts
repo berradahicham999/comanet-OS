@@ -45,6 +45,7 @@ export const NAV: NavGroup[] = [
       { href: "/marketing/activations", label: "Activations", icon: "PartyPopper", module: ["marketing", "clients"] },
       { href: "/marketing/materiel", label: "Matériel", icon: "Boxes", module: ["marketing", "clients"] },
       { href: "/marketing/budgets", label: "Budgets", icon: "Wallet", module: "budgets" },
+      { href: "/marketing/analytics", label: "Analytics marketing", icon: "ChartLine", module: "marketing" },
     ],
   },
   {

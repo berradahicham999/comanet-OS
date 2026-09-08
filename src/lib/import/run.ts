@@ -10,6 +10,7 @@ import { isComputedColumn, type ImportType } from "./fields";
 import { normalizeCity, animationKey, animatriceName, animatriceEmail } from "@/lib/animations-shared";
 import { emitEvents, eventKey, EVENT_TYPES, EVENT_SOURCES, type EmitInput } from "@/lib/events/emit";
 import { normalizePlatform } from "@/lib/marketing-shared";
+import { refreshMarketingFacts } from "@/lib/analytics-marketing/refresh";
 import { cityToSector } from "@/lib/sectors";
 import {
   VARIANT_TYPES, normalizeBool, normalizeDocumentType, normalizeObservation,
@@ -249,6 +250,8 @@ export async function runImport(params: {
       status: "DONE", insertedRows: summary.inserted, updatedRows: summary.updated, duplicateRows: summary.duplicates,
       errorRows: summary.errors.length, errors: summary.errors.slice(0, 200), warnings: [...summary.warnings, ...resolver.fuzzy.slice(0, 300).map((f) => `≈ « ${f.raw} » → « ${f.to} » (${Math.round(f.score * 100)} %)`)],
     }).where(eq(s.imports.id, imp.id));
+    // L'import est validé : la couche analytique se recalcule (ne lève jamais).
+    await refreshMarketingFacts(undefined, "IMPORT");
   } catch (e) {
     await db.update(s.imports).set({ status: "FAILED", errors: [{ row: 0, message: String((e as Error).message ?? e) }] }).where(eq(s.imports.id, imp.id));
     throw e;

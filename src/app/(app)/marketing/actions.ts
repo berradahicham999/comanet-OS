@@ -15,6 +15,7 @@ import { matchKeyFor, backfillLink, clearLink } from "@/lib/meta/links";
 import { syncAccount, syncAll } from "@/lib/meta/sync";
 import { hasMetaToken, listAccounts, MetaError } from "@/lib/meta/client";
 import { getSettings, saveSettings } from "@/lib/settings";
+import { refreshAfterWrite } from "@/lib/analytics-marketing/refresh";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim() || null;
 const num = (fd: FormData, k: string) => { const s = String(fd.get(k) ?? "").replace(/\s/g, "").replace(",", "."); const n = Number(s); return s === "" || Number.isNaN(n) ? null : n; };
@@ -67,6 +68,7 @@ export async function saveExpense(formData: FormData) {
   };
   if (id) await db.update(marketingExpenses).set(values).where(eq(marketingExpenses.id, id));
   else await db.insert(marketingExpenses).values(values);
+  await refreshAfterWrite(["EXPENSE"]);
   revalidatePath("/marketing"); revalidatePath("/");
 }
 
@@ -74,6 +76,7 @@ export async function deleteExpense(formData: FormData) {
   await requirePermission("budgets", "validate");
   const id = str(formData, "id"); if (!id) return;
   await db.delete(marketingExpenses).where(eq(marketingExpenses.id, id));
+  await refreshAfterWrite(["EXPENSE"]);
   revalidatePath("/marketing");
 }
 
@@ -169,6 +172,7 @@ export async function saveCollaboration(formData: FormData) {
   };
   if (id) await db.update(collaborations).set(values).where(eq(collaborations.id, id));
   else await db.insert(collaborations).values(values);
+  await refreshAfterWrite(["COLLABORATION"]);
   revalidatePath("/marketing/influence"); revalidatePath("/marketing");
 }
 
@@ -177,6 +181,7 @@ export async function setCollaborationStatus(formData: FormData) {
   const id = str(formData, "id"); const status = str(formData, "status");
   if (!id || !status) return;
   await db.update(collaborations).set({ status, updatedAt: new Date() }).where(eq(collaborations.id, id));
+  await refreshAfterWrite(["COLLABORATION"]);
   revalidatePath("/marketing/influence");
 }
 
@@ -184,6 +189,7 @@ export async function deleteCollaboration(formData: FormData) {
   await requirePermission("influence", "validate");
   const id = str(formData, "id"); if (!id) return;
   await db.delete(collaborations).where(eq(collaborations.id, id));
+  await refreshAfterWrite(["COLLABORATION"]);
   revalidatePath("/marketing/influence");
 }
 

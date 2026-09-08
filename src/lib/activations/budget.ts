@@ -5,6 +5,7 @@ import { activations, activationBudgetLines } from "@/db/schema";
 import { pgArray } from "@/lib/sql-array";
 import { activationRefs } from "./refs";
 import { budgetTotals, expenseRowsFor, type BudgetTotals, type ExpenseRow } from "./shared";
+import { refreshAfterWrite } from "@/lib/analytics-marketing/refresh";
 
 /**
  * Budget d'une activation et son reflet dans les budgets marketing existants.
@@ -89,6 +90,7 @@ export async function syncActivationExpenses(activationId: string): Promise<void
     }
     await tx.update(activations).set({ budgetPlanned: String(planned), updatedAt: new Date() }).where(eq(activations.id, activationId));
   });
+  await refreshAfterWrite(["EXPENSE"]);
 }
 
 /** Réordonne les lignes budgétaires après suppression (tri stable, sans trou). */

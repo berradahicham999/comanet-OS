@@ -12,6 +12,10 @@
     {
       "path": "/api/cron/meta?mode=full",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/analytics",
+      "schedule": "30 6 * * *"
     }
   ]
 }
