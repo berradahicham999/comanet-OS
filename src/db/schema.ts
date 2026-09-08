@@ -541,6 +541,8 @@ export const clients = pgTable(
     importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
     type: clientTypeEnum("type").notNull().default("AUTRE"),
     city: text("city"),
+    /** Secteur commercial (maille d'analyse des ventes) — déduit de la ville, corrigeable à la main. Voir `src/lib/sectors.ts`. */
+    sector: text("sector"),
     channel: text("channel"), // ex: pharmacie / parapharmacie / grossiste / e-commerce
     salesRep: text("sales_rep"), // commercial
     phone: text("phone"),
@@ -548,7 +550,7 @@ export const clients = pgTable(
     needsReview: boolean("needs_review").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("clients_city_idx").on(t.city), index("clients_rep_idx").on(t.salesRep), index("clients_code_idx").on(t.code)],
+  (t) => [index("clients_city_idx").on(t.city), index("clients_sector_idx").on(t.sector), index("clients_rep_idx").on(t.salesRep), index("clients_code_idx").on(t.code)],
 );
 
 /** Raisons sociales / libellés bruts rattachés à un client fonctionnel. */

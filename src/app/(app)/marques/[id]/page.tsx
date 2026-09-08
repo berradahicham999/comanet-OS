@@ -31,7 +31,7 @@ export default async function BrandPage(props: { params: Promise<{ id: string }>
   const [cmp, ytdT, ytdN1T, series, seriesN1, products, clients, cities, stocks, recs, users, annualObj, monthObj, budget, lines, expenses, medicalActivity] = await Promise.all([
     compareMonth(f, ref), totals(ytd.start, ytd.end, f), totals(ytdN1.start, ytdN1.end, f),
     monthlySeries(13, f, ref), monthlySeries(13, f, new Date(Date.UTC(ref.getUTCFullYear() - 1, ref.getUTCMonth(), ref.getUTCDate(), 12))),
-    byDim("product", ytd.start, ytd.end, f, 50), byDim("client", ytd.start, ytd.end, f, 10), byDim("city", ytd.start, ytd.end, f, 8),
+    byDim("product", ytd.start, ytd.end, f, 50), byDim("client", ytd.start, ytd.end, f, 10), byDim("sector", ytd.start, ytd.end, f, 8),
     productStocks({ brandId: id }, ref), getRecommendations(), listUsers(), annualObjective(year, id), objectiveFor(year, month, id),
     db.execute(sql`select amount::float8 as amount, reference_revenue::float8 as ref, pct_of_revenue::float8 as pct from budgets where brand_id = ${id}::uuid and year = ${year}`),
     db.execute(sql`select label, category::text as category, amount::float8 as amount from budget_lines where brand_id = ${id}::uuid and year = ${year} order by amount desc`),
@@ -64,7 +64,7 @@ export default async function BrandPage(props: { params: Promise<{ id: string }>
 
       <div className="grid lg:grid-cols-3 gap-4 mb-4">
         <Card className="lg:col-span-2" title="CA mensuel — 13 mois vs N-1"><MonthlyRevenueChart data={chart} height={220} /></Card>
-        <Card title={`Top villes ${year}`}><HBarChart data={cities.map((c) => ({ name: c.name, amount: c.amount }))} color={brand.color} /></Card>
+        <Card title={`Top secteurs ${year}`}><HBarChart data={cities.map((c) => ({ name: c.name, amount: c.amount }))} color={brand.color} /></Card>
       </div>
 
       {brandRecs.length > 0 && (
@@ -88,7 +88,7 @@ export default async function BrandPage(props: { params: Promise<{ id: string }>
             </div>
           </Section>
           <Section title={`Top clients — ${year} à date`}>
-            <div className="table-wrap"><table className="tbl"><thead><tr><th>Client</th><th>Ville</th><th className="num">CA</th><th className="num">Unités</th><th className="num">Commandes</th></tr></thead><tbody>
+            <div className="table-wrap"><table className="tbl"><thead><tr><th>Client</th><th>Secteur</th><th className="num">CA</th><th className="num">Unités</th><th className="num">Commandes</th></tr></thead><tbody>
               {clients.map((c) => <tr key={c.id}><td><Link href={`/clients/${c.id}`} className="font-medium hover:underline">{c.name}</Link></td><td className="text-muted">{c.extra}</td><td className="num font-medium">{fmtMAD(c.amount, { suffix: false })}</td><td className="num">{fmtNum(c.quantity)}</td><td className="num">{c.orders}</td></tr>)}
             </tbody></table></div>
           </Section>

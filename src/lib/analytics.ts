@@ -1,6 +1,7 @@
 import { sql, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { addMonths, iso, startOfMonth, today } from "./format";
+import { NO_SECTOR, SECTORS } from "./sectors";
 
 /* ------------------------------------------------------------------ */
 /* Filtres                                                             */
@@ -13,7 +14,8 @@ export type SalesFilter = {
   clientIds?: string[];
   productId?: string;
   clientId?: string;
-  city?: string;
+  /** Secteurs commerciaux retenus (plusieurs possibles) ; `NO_SECTOR` désigne les clients sans secteur. */
+  sectors?: string[];
   channel?: string;
   salesRep?: string;
   clientType?: string;
@@ -26,7 +28,13 @@ function whereClause(start: string, end: string, f: SalesFilter = {}): SQL {
   if (f.clientIds && f.clientIds.length) parts.push(sql`s.client_id = any(${f.clientIds}::uuid[])`);
   if (f.productId) parts.push(sql`s.product_id = ${f.productId}::uuid`);
   if (f.clientId) parts.push(sql`s.client_id = ${f.clientId}::uuid`);
-  if (f.city) parts.push(sql`c.city = ${f.city}`);
+  if (f.sectors?.length) {
+    const named = f.sectors.filter((x) => x !== NO_SECTOR);
+    const alts: SQL[] = [];
+    if (named.length) alts.push(sql`c.sector = any(${named}::text[])`);
+    if (f.sectors.includes(NO_SECTOR)) alts.push(sql`c.sector is null`);
+    parts.push(sql`(${sql.join(alts, sql` or `)})`);
+  }
   if (f.channel) parts.push(sql`${SALES_CHANNEL} = ${f.channel}`);
   if (f.salesRep) parts.push(sql`${SALES_REP} = ${f.salesRep}`);
   if (f.clientType) parts.push(sql`c.type = ${f.clientType}::client_type`);
@@ -71,13 +79,13 @@ export async function totals(start: string, end: string, f: SalesFilter = {}): P
   return { amount: row.amount, quantity: row.quantity, orders: row.orders, clients: row.clients, lines: row.lines };
 }
 
-export type Dim = "brand" | "product" | "client" | "city" | "channel" | "rep" | "clientType";
+export type Dim = "brand" | "product" | "client" | "sector" | "channel" | "rep" | "clientType";
 
 const DIM_SQL: Record<Dim, { id: SQL; name: SQL; extra?: SQL }> = {
   brand: { id: sql`p.brand_id::text`, name: sql`coalesce(b.name, 'Sans marque')`, extra: sql`max(b.color)` },
   product: { id: sql`s.product_id::text`, name: sql`p.name`, extra: sql`max(coalesce(b.name,''))` },
-  client: { id: sql`s.client_id::text`, name: sql`c.name`, extra: sql`max(coalesce(c.city,''))` },
-  city: { id: sql`coalesce(c.city,'—')`, name: sql`coalesce(c.city,'Non renseignée')` },
+  client: { id: sql`s.client_id::text`, name: sql`c.name`, extra: sql`max(coalesce(c.sector, c.city, ''))` },
+  sector: { id: sql`coalesce(c.sector,'—')`, name: sql`coalesce(c.sector,'Non affecté')` },
   channel: { id: sql`coalesce(${SALES_CHANNEL}, '—')`, name: sql`coalesce(${SALES_CHANNEL}, 'Non renseigné')` },
   rep: { id: sql`coalesce(${SALES_REP}, '—')`, name: sql`coalesce(${SALES_REP}, 'Non affecté')` },
   clientType: { id: sql`c.type::text`, name: sql`c.type::text` },
@@ -220,12 +228,11 @@ export function monthProjection(mtd: number, ref = today()) {
 /* ------------------------------------------------------------------ */
 
 export async function filterOptions() {
-  const [cities, channels, reps, brands] = await Promise.all([
-    db.execute(sql`select distinct city as v from clients where city is not null and city <> '' order by 1`),
+  const [channels, reps, brands] = await Promise.all([
     db.execute(sql`select distinct site as v from sales where site is not null and site <> '' order by 1`),
     db.execute(sql`select distinct v from (select sales_rep as v from sales union select sales_rep from clients) x where v is not null and v <> '' order by 1`),
     db.execute(sql`select id, name, color from brands where active order by name`),
   ]);
   const vals = (r: { rows: unknown[] }) => (r.rows as { v: string }[]).map((x) => x.v);
-  return { cities: vals(cities), channels: vals(channels), reps: vals(reps), brands: brands.rows as { id: string; name: string; color: string }[] };
+  return { sectors: [...SECTORS] as string[], channels: vals(channels), reps: vals(reps), brands: brands.rows as { id: string; name: string; color: string }[] };
 }

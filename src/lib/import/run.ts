@@ -10,6 +10,7 @@ import { isComputedColumn, type ImportType } from "./fields";
 import { normalizeCity, animationKey, animatriceName, animatriceEmail } from "@/lib/animations-shared";
 import { emitEvents, eventKey, EVENT_TYPES, EVENT_SOURCES, type EmitInput } from "@/lib/events/emit";
 import { normalizePlatform } from "@/lib/marketing-shared";
+import { cityToSector } from "@/lib/sectors";
 import {
   VARIANT_TYPES, normalizeBool, normalizeDocumentType, normalizeObservation,
   normalizePackaging, normalizeSize, normalizeState, normalizeVariantType, regulatoryKey,
@@ -167,7 +168,7 @@ class Resolver {
     const key = normKey(name);
     if (!key) return null;
     const [row] = await db.insert(s.clients).values({
-      name, nameKey: key, code: code ?? null, city: city ?? null, type: inferClientType(name), needsReview: !functionalName || !city, importId: this.importId, ...extra,
+      name, nameKey: key, code: code ?? null, city: city ?? null, sector: cityToSector(city), type: inferClientType(name), needsReview: !functionalName || !city, importId: this.importId, ...extra,
     }).onConflictDoNothing().returning();
     if (!row) {
       const existing = await db.query.clients.findFirst({ where: eq(s.clients.nameKey, key) });
@@ -333,7 +334,7 @@ async function importClients(rows: Record<string, unknown>[], mapping: Mapping, 
     else {
       // mise à jour des attributs connus
       const set: Partial<typeof s.clients.$inferInsert> = {};
-      if (city) set.city = city;
+      if (city) { set.city = city; const sector = cityToSector(city); if (sector) set.sector = sector; }
       if (type) set.type = type;
       const channel = txt(r, mapping, "channel"); if (channel) set.channel = channel;
       const rep = txt(r, mapping, "rep"); if (rep) set.salesRep = rep;
@@ -729,7 +730,7 @@ async function importAnimations(rows: Record<string, unknown>[], mapping: Mappin
     if (!clientId) { out.errors.push({ row: 0, message: `Point de vente illisible : ${pos}` }); continue; }
     posIds.set(k, clientId);
     if (city) {
-      const upd = await db.execute(sql`update clients set city = ${city} where id = ${clientId}::uuid and (city is null or city = '')`);
+      const upd = await db.execute(sql`update clients set city = ${city}, sector = coalesce(sector, ${cityToSector(city)}) where id = ${clientId}::uuid and (city is null or city = '')`);
       if (upd.rowCount) cityFixes++;
     }
   }

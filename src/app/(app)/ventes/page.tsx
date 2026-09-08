@@ -4,7 +4,7 @@ import { byDim, dailySeries, filterOptions, monthlySeries, totals, type Dim, typ
 import { getRefDate } from "@/lib/ref-date";
 import { resolvePeriod, type PeriodParam } from "@/lib/periods";
 import { PageHeader, Card, Delta, Tabs, BrandDot, Badge } from "@/components/ui";
-import { SalesFilters, type FilterValues } from "@/components/sales-filters";
+import { SalesFilters, selectedSectors, type FilterValues } from "@/components/sales-filters";
 import { MonthlyRevenueChart, SimpleLine } from "@/components/charts";
 import { delta, fmtMAD, fmtNum, fmtPct, fmtDateShort } from "@/lib/format";
 
@@ -15,7 +15,7 @@ const DIMS: { key: Dim; label: string; href: (id: string) => string | null }[] =
   { key: "brand", label: "Par marque", href: (id) => `/marques/${id}` },
   { key: "product", label: "Par produit", href: (id) => `/produits/${id}` },
   { key: "client", label: "Par client", href: (id) => `/clients/${id}` },
-  { key: "city", label: "Par ville", href: () => null },
+  { key: "sector", label: "Par secteur", href: () => null },
   { key: "channel", label: "Par canal", href: () => null },
   { key: "rep", label: "Par commercial", href: () => null },
   { key: "clientType", label: "Par type de client", href: () => null },
@@ -27,8 +27,9 @@ export default async function VentesPage(props: { searchParams: Promise<FilterVa
   const { ref } = await getRefDate();
   const period = resolvePeriod(sp.period as PeriodParam, ref, { start: sp.start, end: sp.end });
   const [scopeBrands, scopeClients] = await Promise.all([brandFilter(), clientFilter()]);
+  const sectors = selectedSectors(sp.sector);
   // Portée « marques et clients assignés » : les marques restreignent ; les clients assignés restreignent aussi s'il y en a.
-  const filter: SalesFilter = { brandId: sp.brand || undefined, brandIds: scopeBrands ?? undefined, clientIds: scopeClients ?? undefined, city: sp.city || undefined, channel: sp.channel || undefined, salesRep: sp.rep || undefined, clientType: sp.type || undefined };
+  const filter: SalesFilter = { brandId: sp.brand || undefined, brandIds: scopeBrands ?? undefined, clientIds: scopeClients ?? undefined, sectors: sectors.length ? sectors : undefined, channel: sp.channel || undefined, salesRep: sp.rep || undefined, clientType: sp.type || undefined };
   const dim = (DIMS.find((d) => d.key === sp.dim)?.key ?? "brand") as Dim;
 
   const [cur, prev, n1, rows, prevRows, options, series] = await Promise.all([
@@ -44,7 +45,10 @@ export default async function VentesPage(props: { searchParams: Promise<FilterVa
   const total = rows.reduce((a, r) => a + r.amount, 0);
   const qs = (extra: Record<string, string | undefined>) => {
     const p = new URLSearchParams();
-    for (const [k, v] of Object.entries({ ...sp, ...extra })) if (v) p.set(k, String(v));
+    for (const [k, v] of Object.entries({ ...sp, ...extra })) {
+      if (Array.isArray(v)) v.forEach((x) => x && p.append(k, x));
+      else if (v) p.set(k, String(v));
+    }
     return `/ventes?${p.toString()}`;
   };
   const dimDef = DIMS.find((d) => d.key === dim)!;
@@ -91,7 +95,7 @@ export default async function VentesPage(props: { searchParams: Promise<FilterVa
         <table className="tbl">
           <thead>
             <tr>
-              <th>#</th><th>{dimDef.label.replace("Par ", "")}</th>{dim === "product" && <th>Marque</th>}{dim === "client" && <th>Ville</th>}
+              <th>#</th><th>{dimDef.label.replace("Par ", "")}</th>{dim === "product" && <th>Marque</th>}{dim === "client" && <th>Secteur</th>}
               <th className="num">CA HT</th><th className="num">Part</th><th className="num">Unités</th><th className="num">Commandes</th><th className="num">Clients</th><th className="num">vs {period.prev.label}</th>
             </tr>
           </thead>

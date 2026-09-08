@@ -11,6 +11,7 @@ import { PageHeader, Card, Badge, Delta, Section, PriorityBadge, StatusBadge } f
 import { MonthlyRevenueChart } from "@/components/charts";
 import { fmtMAD, fmtNum, fmtDate, fmtDateShort, addDays, iso } from "@/lib/format";
 import { updateClient } from "../actions";
+import { SECTORS, cityToSector } from "@/lib/sectors";
 
 export const dynamic = "force-dynamic";
 
@@ -52,7 +53,7 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
       <PageHeader
         eyebrow={<Link href="/clients" className="hover:underline">Clients</Link>}
         title={<span className="flex items-center gap-2 flex-wrap">{client.name} {intel.highPotential && <span title="Fort potentiel">⭐</span>} <Badge tone={seg.tone}>{seg.label}</Badge></span>}
-        subtitle={[client.code, client.type, client.city, client.salesRep ? `Commercial : ${client.salesRep}` : null].filter(Boolean).join(" · ")}
+        subtitle={[client.code, client.type, client.city, client.sector ? `Secteur : ${client.sector}` : null, client.salesRep ? `Commercial : ${client.salesRep}` : null].filter(Boolean).join(" · ")}
         actions={<Link href={`/taches/nouvelle?entityType=client&entityId=${id}&title=${encodeURIComponent(rec.title + " — " + client.name)}`} className="btn-primary btn-sm">+ Tâche</Link>}
       />
 
@@ -82,6 +83,12 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
                 <select name="type" defaultValue={client.type} className="select h-9"><option value="PHARMACIE">Pharmacie</option><option value="PARAPHARMACIE">Parapharmacie</option><option value="GROSSISTE">Grossiste</option><option value="AUTRE">Autre</option></select>
               </label>
               <label className="block"><span className="label block mb-1">Ville</span><input name="city" defaultValue={client.city ?? ""} className="input h-9" /></label>
+              <label className="block"><span className="label block mb-1">Secteur</span>
+                <select name="sector" defaultValue={client.sector ?? ""} className="select h-9">
+                  <option value="">{cityToSector(client.city) ? `Auto (${cityToSector(client.city)})` : "Auto — d'après la ville"}</option>
+                  {SECTORS.map((sct) => <option key={sct} value={sct}>{sct}</option>)}
+                </select>
+              </label>
               <label className="block"><span className="label block mb-1">Commercial</span><input name="salesRep" defaultValue={client.salesRep ?? ""} className="input h-9" /></label>
               <label className="block"><span className="label block mb-1">Téléphone</span><input name="phone" defaultValue={client.phone ?? ""} className="input h-9" /></label>
             </div>
