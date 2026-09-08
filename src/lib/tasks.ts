@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { pgArray } from "@/lib/sql-array";
 import { db } from "@/db";
 import type { TaskPriority, TaskStatus } from "@/db/schema";
 
@@ -24,7 +25,7 @@ export async function listTasks(opts: { assigneeId?: string; brandId?: string; b
     where true
       ${opts.assigneeId ? sql`and t.assignee_id = ${opts.assigneeId}::uuid` : sql``}
       ${opts.brandId ? sql`and t.brand_id = ${opts.brandId}::uuid` : sql``}
-      ${opts.brandIds ? sql`and (t.brand_id is null or t.brand_id = any(${opts.brandIds}::uuid[]) or t.assignee_id = ${opts.assigneeId ?? "00000000-0000-0000-0000-000000000000"}::uuid)` : sql``}
+      ${opts.brandIds ? sql`and (t.brand_id is null or t.brand_id = any(${pgArray(opts.brandIds)}) or t.assignee_id = ${opts.assigneeId ?? "00000000-0000-0000-0000-000000000000"}::uuid)` : sql``}
       ${opts.source ? sql`and t.source = ${opts.source}::task_source` : sql``}
       ${opts.overdue ? sql`and t.due_date < current_date and t.status in ('TODO','IN_PROGRESS')` : sql``}
       ${opts.includeDone ? sql`` : sql`and (t.status in ('TODO','IN_PROGRESS') or t.completed_at > now() - interval '14 days')`}

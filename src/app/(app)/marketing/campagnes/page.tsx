@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { pgArray } from "@/lib/sql-array";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { requireAccess, brandFilter, hasFlag } from "@/lib/access";
@@ -51,7 +52,7 @@ export default async function CampagnesPage(props: { searchParams: Promise<{ bra
              coalesce((select count(*) from campaign_products cp where cp.campaign_id = c.id), 0)::int as products
       from campaigns c join brands b on b.id = c.brand_id
       left join users u on u.id = c.responsible_id
-      where true ${brandId ? sql`and c.brand_id = ${brandId}::uuid` : sql``} ${scopeBrands ? sql`and c.brand_id = any(${scopeBrands}::uuid[])` : sql``} ${status ? sql`and c.status = ${status}::campaign_status` : sql``}
+      where true ${brandId ? sql`and c.brand_id = ${brandId}::uuid` : sql``} ${scopeBrands ? sql`and c.brand_id = any(${pgArray(scopeBrands)})` : sql``} ${status ? sql`and c.status = ${status}::campaign_status` : sql``}
       order by (c.status = 'ACTIVE') desc, coalesce(c.start_date, '1900-01-01'::date) desc, c.name`),
     listUsers(),
   ]);

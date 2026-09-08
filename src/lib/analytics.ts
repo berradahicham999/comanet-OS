@@ -1,4 +1,5 @@
 import { sql, type SQL } from "drizzle-orm";
+import { pgArray } from "@/lib/sql-array";
 import { db } from "@/db";
 import { addMonths, iso, startOfMonth, today } from "./format";
 import { NO_SECTOR, SECTORS } from "./sectors";
@@ -24,14 +25,14 @@ export type SalesFilter = {
 function whereClause(start: string, end: string, f: SalesFilter = {}): SQL {
   const parts: SQL[] = [sql`s.date >= ${start}::date`, sql`s.date < ${end}::date`];
   if (f.brandId) parts.push(sql`p.brand_id = ${f.brandId}::uuid`);
-  if (f.brandIds) parts.push(f.brandIds.length ? sql`p.brand_id = any(${f.brandIds}::uuid[])` : sql`false`);
-  if (f.clientIds && f.clientIds.length) parts.push(sql`s.client_id = any(${f.clientIds}::uuid[])`);
+  if (f.brandIds) parts.push(f.brandIds.length ? sql`p.brand_id = any(${pgArray(f.brandIds)})` : sql`false`);
+  if (f.clientIds && f.clientIds.length) parts.push(sql`s.client_id = any(${pgArray(f.clientIds)})`);
   if (f.productId) parts.push(sql`s.product_id = ${f.productId}::uuid`);
   if (f.clientId) parts.push(sql`s.client_id = ${f.clientId}::uuid`);
   if (f.sectors?.length) {
     const named = f.sectors.filter((x) => x !== NO_SECTOR);
     const alts: SQL[] = [];
-    if (named.length) alts.push(sql`c.sector = any(${named}::text[])`);
+    if (named.length) alts.push(sql`c.sector = any(${pgArray(named, "text")})`);
     if (f.sectors.includes(NO_SECTOR)) alts.push(sql`c.sector is null`);
     parts.push(sql`(${sql.join(alts, sql` or `)})`);
   }
