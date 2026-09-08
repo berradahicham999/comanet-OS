@@ -7,6 +7,7 @@
  * ou une mesure d'exposition (reach, engagement), jamais une causalité.
  */
 
+import { pgArray } from "@/lib/sql-array";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { COLLAB_STATUS } from "@/lib/marketing-shared";
@@ -117,7 +118,7 @@ export async function listCollaborations(range: Range, filter?: { brandId?: stri
     left join campaigns ca on ca.id = c.campaign_id
     where c.date >= ${range.start}::date and c.date <= ${range.end}::date
       ${filter?.brandId ? sql`and c.brand_id = ${filter.brandId}::uuid` : sql``}
-      ${filter?.brandIds ? sql`and c.brand_id = any(${filter.brandIds}::uuid[])` : sql``}
+      ${filter?.brandIds ? sql`and c.brand_id = any(${pgArray(filter.brandIds)})` : sql``}
       ${filter?.influencerId ? sql`and c.influencer_id = ${filter.influencerId}::uuid` : sql``}
       ${filter?.status ? sql`and c.status = ${filter.status}` : sql``}
     order by c.date desc`);

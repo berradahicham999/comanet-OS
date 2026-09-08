@@ -1,4 +1,5 @@
 import "server-only";
+import { pgArray } from "@/lib/sql-array";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { iso, addDays } from "@/lib/format";
@@ -35,7 +36,7 @@ export async function listContents(f: ContentFilters, refs: ContentRefs, todayIs
     left join users u on u.id = c.responsible_id
     left join products p on p.id = c.product_id
     where c.date >= ${f.start}::date and c.date < ${f.end}::date
-      ${f.brandIds ? sql`and c.brand_id = any(${f.brandIds}::uuid[])` : sql``}
+      ${f.brandIds ? sql`and c.brand_id = any(${pgArray(f.brandIds)})` : sql``}
       ${f.brand ? sql`and c.brand_id = ${f.brand}::uuid` : sql``}
       ${f.platform ? sql`and c.platform = ${f.platform}` : sql``}
       ${f.format ? sql`and c.format = ${f.format}` : sql``}
@@ -81,7 +82,7 @@ export async function validationQueue(brandIds: string[] | null) {
     from content_items c join brands b on b.id = c.brand_id left join users u on u.id = c.responsible_id
     left join lateral (select id, mime, name from content_assets x where x.content_id = c.id and x.kind = 'LIVRABLE' order by version desc limit 1) a on true
     where c.status in (select key from content_statuses where awaiting_validation)
-      ${brandIds ? sql`and c.brand_id = any(${brandIds}::uuid[])` : sql``}
+      ${brandIds ? sql`and c.brand_id = any(${pgArray(brandIds)})` : sql``}
     order by since asc`);
   return r.rows;
 }

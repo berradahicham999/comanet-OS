@@ -125,3 +125,11 @@ describe("Planning éditorial — une seule façon de changer un statut", () => 
     assert.deepEqual(found, [], `Nom de statut de contenu en dur dans : ${found.join(", ")}`);
   });
 });
+
+describe("Tableaux SQL — toujours via pgArray()", () => {
+  test("plus aucun `any(${tableau}::type[])` : drizzle développe le tableau en `($1, $2)`, qui n'est pas un tableau Postgres", () => {
+    // Un tableau vide donnait `any(()::uuid[])` (erreur de syntaxe) : la page Ventes plantait dès qu'un secteur était coché.
+    const found = codeHits(/=\s*any\(\$\{(?!pgArray\()[^}]*\}\s*::\s*\w+\[\]\)/, ["lib/sql-array.ts"]);
+    assert.deepEqual(found, [], `Tableau passé sans pgArray() dans : ${found.join(", ")}`);
+  });
+});

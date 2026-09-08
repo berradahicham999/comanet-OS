@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { pgArray } from "@/lib/sql-array";
 import { db } from "@/db";
 import { getSettings, type ComanetSettings } from "./settings";
 import { ORDER_KEY } from "./analytics";
@@ -108,8 +109,8 @@ export async function clientIntel(opts: { clientId?: string; clientIds?: string[
     left join field_sellout fso on fso.client_id = c.id
     left join last_anim la on la.client_id = c.id
     where c.active ${opts.clientId ? sql`and c.id = ${opts.clientId}::uuid` : sql``}
-      ${opts.clientIds && opts.clientIds.length ? sql`and c.id = any(${opts.clientIds}::uuid[])` : sql``}
-      ${opts.brandIds && !(opts.clientIds && opts.clientIds.length) ? (opts.brandIds.length ? sql`and exists (select 1 from sales s2 join products p2 on p2.id = s2.product_id where s2.client_id = c.id and p2.brand_id = any(${opts.brandIds}::uuid[]))` : sql`and false`) : sql``}
+      ${opts.clientIds && opts.clientIds.length ? sql`and c.id = any(${pgArray(opts.clientIds)})` : sql``}
+      ${opts.brandIds && !(opts.clientIds && opts.clientIds.length) ? (opts.brandIds.length ? sql`and exists (select 1 from sales s2 join products p2 on p2.id = s2.product_id where s2.client_id = c.id and p2.brand_id = any(${pgArray(opts.brandIds)}))` : sql`and false`) : sql``}
     order by revenue12 desc`);
 
   const rows = r.rows as Record<string, unknown>[];
