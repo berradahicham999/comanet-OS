@@ -5,7 +5,7 @@
 import { normKey } from "./normalize";
 import type { ModuleKey } from "@/lib/access-shared";
 
-export type ImportType = "SALES" | "CLIENTS" | "PRODUCTS" | "STOCK" | "OBJECTIVES" | "BUDGETS" | "REGULATORY" | "ANIMATIONS" | "ANIM_OBJECTIVES" | "ADS" | "MEDECINS";
+export type ImportType = "SALES" | "CLIENTS" | "PRODUCTS" | "STOCK" | "OBJECTIVES" | "BUDGETS" | "REGULATORY" | "ANIMATIONS" | "ANIM_OBJECTIVES" | "ADS" | "MEDECINS" | "INVENTORY";
 
 /**
  * Module dont relève chaque type d'import : importer = droit « Créer » sur ce module,
@@ -23,6 +23,7 @@ export const IMPORT_MODULE: Record<ImportType, ModuleKey> = {
   ANIM_OBJECTIVES: "terrain",
   ADS: "marketing",
   MEDECINS: "medical",
+  INVENTORY: "marketing",
 };
 
 export type FieldDef = { key: string; label: string; required?: boolean; synonyms: string[]; hint?: string };
@@ -39,9 +40,22 @@ export const IMPORT_TYPES: { key: ImportType; label: string; description: string
   { key: "ANIM_OBJECTIVES", label: "Objectifs animation par ville", description: "Tableau croisé ville × marque (unités par an). Choisir la ligne d'en-tête du bloc YEARLY ; l'objectif mensuel est calculé automatiquement." },
   { key: "ADS", label: "Publicités (Meta / TikTok / Google)", description: "Export de la régie : une ligne par jour × campagne (ou par publicité). Dépense, impressions, clics, achats, CA." },
   { key: "MEDECINS", label: "Médecins (référentiel)", description: "Référentiel des médecins visités : identité, spécialité, ville, secteur, délégué responsable." },
+  { key: "INVENTORY", label: "Inventaire matériel (PLV, échantillons, goodies)", description: "Inventaire initial du matériel marketing : une ligne par article avec catégorie, marque, quantité en stock, coût unitaire et seuil d'alerte." },
 ];
 
 export const FIELDS: Record<ImportType, FieldDef[]> = {
+  INVENTORY: [
+    { key: "name", label: "Article", required: true, synonyms: ["article", "designation", "nom", "libelle", "materiel", "item"] },
+    { key: "category", label: "Catégorie (PLV / échantillon / goodie / print)", synonyms: ["categorie", "type", "famille", "category"], hint: "Vide : PLV." },
+    { key: "brand", label: "Marque", synonyms: ["marque", "brand", "gamme"] },
+    { key: "productName", label: "Produit lié (facultatif)", synonyms: ["produit", "produit lie", "product"] },
+    { key: "sku", label: "Référence", synonyms: ["reference", "ref", "sku", "code"] },
+    { key: "quantity", label: "Stock (unités)", required: true, synonyms: ["stock", "quantite", "qte", "quantity", "unites", "en stock"] },
+    { key: "unitCost", label: "Coût unitaire (MAD)", synonyms: ["cout unitaire", "prix unitaire", "cout", "pu", "unit cost", "valeur unitaire"] },
+    { key: "unit", label: "Unité", synonyms: ["unite", "unit", "conditionnement"], hint: "pièce, lot, carton…" },
+    { key: "alertThreshold", label: "Seuil d'alerte", synonyms: ["seuil", "seuil d alerte", "stock mini", "minimum", "alerte"] },
+    { key: "location", label: "Emplacement", synonyms: ["emplacement", "lieu", "depot", "stockage"] },
+  ],
   SALES: [
     { key: "date", label: "Date", required: true, synonyms: ["date lvc", "date", "date facture", "date fac", "date piece", "dt"] },
     { key: "clientName", label: "Client (fonctionnel)", required: true, synonyms: ["client fonctionnel", "client", "nom client", "intitule client", "tiers"] },

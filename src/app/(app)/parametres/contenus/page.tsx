@@ -42,7 +42,7 @@ export default async function ContenusSettingsPage() {
   return (
     <>
       <PageHeader eyebrow="Administration" title="Paramètres" subtitle="Référentiels du planning éditorial : plateformes, formats, objectifs, statuts, transitions et validateurs par marque. Rien n'est codé en dur : ce que vous changez ici s'applique immédiatement au calendrier, aux fiches et à la file de validation.">
-        <Tabs current="/parametres/contenus" tabs={[{ href: "/parametres?tab=regles", label: "Règles & seuils" }, { href: "/parametres?tab=objectifs", label: "Objectifs" }, { href: "/parametres/utilisateurs", label: "Utilisateurs & droits" }, { href: "/parametres/modeles", label: "Modèles de rôle" }, { href: "/parametres/contenus", label: "Contenus" }, { href: "/parametres?tab=demo", label: "Données de démo" }]} />
+        <Tabs current="/parametres/contenus" tabs={[{ href: "/parametres?tab=regles", label: "Règles & seuils" }, { href: "/parametres?tab=objectifs", label: "Objectifs" }, { href: "/parametres/utilisateurs", label: "Utilisateurs & droits" }, { href: "/parametres/modeles", label: "Modèles de rôle" }, { href: "/parametres/contenus", label: "Contenus" }, { href: "/parametres/activations", label: "Activations" }, { href: "/parametres?tab=demo", label: "Données de démo" }]} />
       </PageHeader>
 
       {(consistency.awaiting === 0 || consistency.published === 0 || consistency.archived === 0) && (

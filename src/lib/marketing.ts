@@ -250,7 +250,7 @@ export async function attribution(range: Range, brandId?: string | null): Promis
       (select coalesce(sum(attributed_revenue), 0)::float8 from collaborations c where c.date >= ${range.start}::date and c.date < ${range.end}::date ${bf("c.brand_id")}) as influence_revenue,
       (select coalesce(sum(fee + product_value), 0)::float8 from collaborations c where c.date >= ${range.start}::date and c.date < ${range.end}::date ${bf("c.brand_id")}) as influence_cost,
       (select coalesce(sum(attributed_revenue), 0)::float8 from activations a where a.date >= ${range.start}::date and a.date < ${range.end}::date ${bf("a.brand_id")}) as activation_revenue,
-      (select coalesce(sum(budget_planned), 0)::float8 from activations a where a.date >= ${range.start}::date and a.date < ${range.end}::date ${bf("a.brand_id")}) as activation_cost,
+      (select coalesce(sum(e.amount), 0)::float8 from marketing_expenses e join activations a on a.id = e.activation_id where e.activation_ref is not null and e.status = 'SPENT' and a.date >= ${range.start}::date and a.date < ${range.end}::date ${bf("a.brand_id")}) as activation_cost,
       (select coalesce(sum(attributed_revenue), 0)::float8 from marketing_expenses e where e.date >= ${range.start}::date and e.date < ${range.end}::date ${bf("e.brand_id")}) as expense_revenue`);
   const x = r.rows[0] as Record<string, number>;
   return {

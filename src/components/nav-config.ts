@@ -5,8 +5,8 @@ export type NavItem = {
   href: string;
   label: string;
   icon: string; // clé lucide (voir nav-icons)
-  /** `any` : visible dès qu'un module l'est (Cockpit, Action Center). */
-  module: ModuleKey | "any";
+  /** `any` : visible dès qu'un module l'est (Cockpit, Action Center). Une liste : l'un des modules suffit (Activations). */
+  module: ModuleKey | ModuleKey[] | "any";
   /** Droit requis au-delà de « voir » (ex. Valider pour les fiches animatrices). */
   action?: PermissionAction;
   /** Interrupteur transverse requis (ou module Administration avec Valider). */
@@ -42,6 +42,8 @@ export const NAV: NavGroup[] = [
       { href: "/marketing/ads", label: "Digital Ads", icon: "MousePointerClick", module: "marketing" },
       { href: "/marketing/influence", label: "Influence", icon: "Heart", module: "influence" },
       { href: "/marketing/planning", label: "Planning éditorial", icon: "CalendarDays", module: "marketing" },
+      { href: "/marketing/activations", label: "Activations", icon: "PartyPopper", module: ["marketing", "clients"] },
+      { href: "/marketing/materiel", label: "Matériel", icon: "Boxes", module: ["marketing", "clients"] },
       { href: "/marketing/budgets", label: "Budgets", icon: "Wallet", module: "budgets" },
     ],
   },
@@ -89,6 +91,7 @@ export const NAV: NavGroup[] = [
 export function navItemVisible(perms: PermissionSet, i: NavItem, flags?: FlagSet): boolean {
   if (i.flag && !(flags?.[i.flag] || isAdmin(perms))) return false;
   if (i.module === "any") return hasAnyModule(perms);
+  if (Array.isArray(i.module)) return i.module.some((m) => can(perms, m, i.action ?? "view"));
   return can(perms, i.module, i.action ?? "view");
 }
 

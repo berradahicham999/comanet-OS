@@ -157,3 +157,10 @@ body {
   background: #d6d6d1;
   border-radius: 8px;
 }
+
+/* Impression (fiche synthèse d'activation, récapitulatifs) : le contenu seul, sans navigation. */
+@media print {
+  aside, nav, header, .print\:hidden { display: none !important; }
+  main { padding: 0 !important; margin: 0 !important; max-width: none !important; }
+  .card { break-inside: avoid; box-shadow: none !important; }
+}

@@ -10,7 +10,7 @@ import { transition, canValidateBrand } from "@/lib/content/workflow";
 import { contentRefs, defaultStatusKey } from "@/lib/content/refs";
 import { syncBriefTask } from "@/lib/content/tasks";
 import { notify } from "@/lib/content/notify";
-import { MAX_ASSET_BYTES, deleteAsset as removeAsset, type AssetKind } from "@/lib/content/assets";
+import { beginAsset, appendChunk, deleteAsset as removeAsset, type AssetKind } from "@/lib/content/assets";
 import { applyTemplate, shiftIso, BRIEF_FIELDS } from "@/lib/content/shared";
 import { fmtDate } from "@/lib/format";
 
@@ -237,34 +237,22 @@ export async function deleteContentHard(formData: FormData) {
 export async function beginAssetUpload(input: { contentId: string; kind: AssetKind; name: string; size: number; mime: string }) {
   const user = await requirePermission("marketing", "edit");
   if (!isUuid(input.contentId)) throw new Error("Contenu introuvable.");
-  if (input.size <= 0) throw new Error("Fichier vide.");
-  if (input.size > MAX_ASSET_BYTES) throw new Error("Fichier trop volumineux (max 25 Mo).");
   const kind: AssetKind = input.kind === "REFERENCE" ? "REFERENCE" : "LIVRABLE";
-  const last = await db.select({ v: sql<number>`coalesce(max(version), 0)::int` }).from(contentAssets).where(and(eq(contentAssets.contentId, input.contentId), eq(contentAssets.kind, kind)));
-  const [row] = await db.insert(contentAssets).values({
-    contentId: input.contentId, kind, name: input.name.slice(0, 200), mime: input.mime || "application/octet-stream", size: 0,
-    version: (last[0]?.v ?? 0) + 1, data: Buffer.alloc(0), uploadedById: user.id,
-  }).returning({ id: contentAssets.id });
-  return { id: row.id, chunkBytes: 1.5 * 1024 * 1024 };
+  return beginAsset({ owner: { contentId: input.contentId }, kind, name: input.name, mime: input.mime, size: input.size, uploadedById: user.id });
 }
 
 export async function appendAssetChunk(formData: FormData) {
   await requirePermission("marketing", "edit");
   const id = str(formData, "id"); const chunk = formData.get("chunk");
   if (!isUuid(id) || !(chunk instanceof Blob)) throw new Error("Morceau invalide.");
-  const buf = Buffer.from(await chunk.arrayBuffer());
-  const cur = (await db.execute<{ n: number }>(sql`select octet_length(data)::int as n from content_assets where id = ${id}::uuid`)).rows[0];
-  if (!cur) throw new Error("Fichier introuvable.");
-  if (cur.n + buf.length > MAX_ASSET_BYTES) { await removeAsset(id); throw new Error("Fichier trop volumineux (max 25 Mo)."); }
-  await db.execute(sql`update content_assets set data = data || ${buf}::bytea, size = octet_length(data || ${buf}::bytea) where id = ${id}::uuid`);
-  return { received: cur.n + buf.length };
+  return appendChunk(id, Buffer.from(await chunk.arrayBuffer()));
 }
 
 /** Fin de téléversement : notifie le validateur qu'un livrable est déposé. */
 export async function finishAssetUpload(input: { assetId: string }) {
   const user = await requirePermission("marketing", "edit");
   const a = (await db.select({ contentId: contentAssets.contentId, kind: contentAssets.kind, name: contentAssets.name, version: contentAssets.version }).from(contentAssets).where(eq(contentAssets.id, input.assetId)))[0];
-  if (!a) return;
+  if (!a?.contentId) return;
   await db.update(contentItems).set({ updatedAt: new Date() }).where(eq(contentItems.id, a.contentId));
   if (a.kind === "LIVRABLE") {
     const c = (await db.select({ title: contentItems.title, validatorId: contentItems.validatorId, createdById: contentItems.createdById }).from(contentItems).where(eq(contentItems.id, a.contentId)))[0];

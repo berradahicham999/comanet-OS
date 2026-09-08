@@ -45,11 +45,12 @@ src/lib/import/       moteur d'import (parse → mapping → run → rollback)
 src/lib/meta/         connexion Meta Ads en lecture seule (client → sync → links)
 src/lib/rules/        moteur de recommandations (Action Center)
 src/lib/content/      planning éditorial (référentiels, workflow, notifications, fichiers, démo)
+src/lib/activations/  activations marketing hors digital (référentiels, workflow, budget, inventaire, ROI, démo)
 drizzle/              migrations SQL + meta/_journal.json
 ```
 
 Modules : Cockpit, Action Center, Ventes, Clients, Produits, Marques, Stock,
-**Marketing** (vue d'ensemble, campagnes, Digital Ads, Influence, planning éditorial, budgets),
+**Marketing** (vue d'ensemble, campagnes, Digital Ads, Influence, planning éditorial, activations, matériel, budgets),
 Terrain (animations, animatrices, saisie), Réglementaire, Tâches, Imports, Paramètres.
 
 ---
@@ -85,6 +86,8 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Droits d'accès, portée, interrupteurs | `src/lib/permissions.ts` + `src/lib/access.ts` | `requireAccess()`, `requirePermission()`, `requireAdmin()`, `requireFlag()`, `canDo()`, `isOwnOnly()`, `brandFilter()`, `clientFilter()`, `hasFlag()` |
 | Qui est animatrice / délégué | `src/lib/users.ts` | `listAnimatrices()`, `listDelegates()`, `ANIMATRICE_SQL`, `DELEGATE_SQL` |
 | Statut d'un contenu éditorial, transitions, retards | `src/lib/content/workflow.ts` + `src/lib/content/shared.ts` | `transition()` (seule écriture du statut), `checkTransition()`, `nextTransitions()`, `lateness()`, `canValidateBrand()` |
+| Statut d'une activation, budget, retards, retour | `src/lib/activations/workflow.ts` + `shared.ts` + `budget.ts` + `roi.ts` | `transitionActivation()` (seule écriture du statut), `budgetTotals()`, `expenseRowsFor()`, `syncActivationExpenses()` (seul reflet dans `marketing_expenses`), `activationLateness()`, `compareSales()`, `roiVerdict()`, `canValidateActivation()` |
+| Stock d'un article d'inventaire | `src/lib/activations/inventory.ts` + `shared.ts` | `recordMovement()` (seule écriture du stock), `consumeMaterial()`, `inventoryStatus()` |
 
 `tests/definitions-uniques.test.ts` échoue si une seconde définition réapparaît.
 
@@ -94,6 +97,17 @@ aucun nom de statut, il lit les drapeaux (`is_published`, `awaiting_validation`,
 `is_archived`). Archiver ne supprime rien. Les livrables sont stockés en `bytea` dans `content_assets`
 via `src/lib/content/assets.ts` (seul module à toucher pour passer à un stockage objet). Les notifications
 in-app vivent dans `notifications` (`src/lib/content/notify.ts`).
+
+**Activations** (`docs/guide-activations.md`). Types (avec checklist par défaut), statuts (drapeaux `awaiting_validation`,
+`is_validated`, `is_running`, `is_done`, `is_measured`, `is_archived`, `is_cancelled`), transitions, objectifs, cibles,
+postes budgétaires, catégories d'inventaire et modèles sont des tables de référence modifiables dans
+`/parametres/activations` ; les fenêtres de mesure et seuils de verdict dans `settings.activations`. Pas de module de
+permission dédié : Voir / Créer / Modifier via « marketing » OU « clients » (`requireActivationAccess()`), validation via
+administrateur, interrupteur « Valider une dépense » ou `brand_validators`. Une activation VALIDÉE engage chaque poste
+pour son prévu (devis puis facture remplacent) : le reflet vit dans `marketing_expenses` (`activation_ref`), jamais
+ailleurs. Le matériel sorti est une dépense au coût du moment. L'impact ventes (sell-in HT avant / pendant / après sur les
+clients et produits rattachés) est une corrélation observée ; une fenêtre « après » incomplète affiche « pas encore
+comparable ». Les fichiers réutilisent `content_assets` (polymorphe : contenu, activation, article d'inventaire).
 
 **Permissions modulaires par utilisateur** (`docs/permissions-modulaires.md`). Chaque compte porte
 sa propre matrice `user_permissions` (14 modules × Voir / Créer / Modifier / Valider), une portée
