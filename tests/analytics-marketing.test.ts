@@ -342,3 +342,28 @@ describe("réallocation mensuelle", () => {
     assert.equal(isDegrading(pts([11, 12, 13]), 3), false, "il faut n + 1 points");
   });
 });
+
+/* ------------------------------ Bloc question (sans LLM) ------------------------------ */
+import { parseQuestion } from "@/lib/analytics-marketing/ask";
+
+describe("bloc question", () => {
+  const vocab = { brands: [{ id: "g", name: "Gamarde" }, { id: "a", name: "Alphascience" }], channels: [{ key: "META_ADS", label: "Meta Ads" }, { key: "ANIMATION_POS", label: "Animation en point de vente" }, { key: "INFLUENCE", label: "Influence" }], cities: ["MARRAKECH", "CASABLANCA"], products: [{ id: "p1", name: "Ultra Shield SPF50+" }] };
+  test("marque, ville, période et intention reconnues", () => {
+    const p = parseQuestion("Quel canal marche le mieux pour Gamarde à Marrakech ce trimestre ?", vocab);
+    assert.equal(p.intent, "BEST_CHANNEL"); assert.equal(p.brandId, "g"); assert.equal(p.city, "MARRAKECH"); assert.equal(p.period, "quarter");
+    assert.deepEqual(p.unknown, []);
+  });
+  test("canal par synonyme, dépense sur 90 jours", () => {
+    const p = parseQuestion("Combien avons-nous dépensé en animation à Casablanca sur les 90 derniers jours ?", vocab);
+    assert.equal(p.intent, "SPEND"); assert.equal(p.channelKey, "ANIMATION_POS"); assert.equal(p.city, "CASABLANCA"); assert.equal(p.period, "last90");
+  });
+  test("produit reconnu, mots inconnus signalés, jamais devinés", () => {
+    const p = parseQuestion("Faut-il pousser Ultra Shield SPF50+ chez les grossistes ?", vocab);
+    assert.equal(p.intent, "PRODUCTS"); assert.equal(p.productId, "p1"); assert.ok(p.unknown.includes("grossistes"));
+    assert.equal(p.brandId, null);
+  });
+  test("sans mot-clé : vue d'ensemble sur le mois", () => {
+    const p = parseQuestion("Alphascience", vocab);
+    assert.equal(p.intent, "OVERVIEW"); assert.equal(p.brandId, "a"); assert.equal(p.period, "month");
+  });
+});
