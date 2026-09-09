@@ -265,11 +265,18 @@ describe("verdict par canal × marque", () => {
     const mid = diagnoseChannel({ cur: agg({ spend: spend(3180, 10), results: { SELLOUT_AMOUNT: 10000 }, sources: ["ANIMATION"] }), prev: null, portfolio: null, channel: anim, days: 30 }, settings, DEFAULT_AD_THRESHOLDS);
     assert.equal(mid.verdict, "OPTIMIZE");
   });
-  test("régie : passe par le moteur Digital Ads (aucune conversion → STOP)", () => {
+  test("régie : moteur Digital Ads quand il y a des conversions ; STOP sans aucun résultat", () => {
+    const meta = { key: "META_ADS", family: "DIGITAL_PAID", resultMetric: "PURCHASES" as const, fallbackResultMetric: "MESSAGES_STARTED" as const };
+    const none = diagnoseChannel({ cur: agg({ spend: spend(5000), results: { IMPRESSIONS: 100000, CLICKS: 900 }, sources: ["AD_METRIC"] }), prev: null, portfolio: null, channel: meta, days: 30 }, S, DEFAULT_AD_THRESHOLDS);
+    assert.equal(none.engine, "ADS"); assert.equal(none.verdict, "STOP");
+    const buys = diagnoseChannel({ cur: agg({ spend: spend(5000), results: { IMPRESSIONS: 100000, CLICKS: 900, PURCHASES: 20 }, attributed: { spend: 5000, revenue: 20000 }, sources: ["AD_METRIC"] }), prev: null, portfolio: null, channel: meta, days: 30 }, S, DEFAULT_AD_THRESHOLDS);
+    assert.equal(buys.engine, "ADS"); assert.notEqual(buys.verdict, "STOP");
+  });
+  test("régie « Messages » : sans achat ni lead mais avec des conversations, jugée au coût par conversation", () => {
     const meta = { key: "META_ADS", family: "DIGITAL_PAID", resultMetric: "PURCHASES" as const, fallbackResultMetric: "MESSAGES_STARTED" as const };
     const v = diagnoseChannel({ cur: agg({ spend: spend(5000), results: { IMPRESSIONS: 100000, CLICKS: 900, MESSAGES_STARTED: 40 }, sources: ["AD_METRIC"] }), prev: null, portfolio: null, channel: meta, days: 30 }, S, DEFAULT_AD_THRESHOLDS);
-    assert.equal(v.engine, "ADS"); assert.equal(v.verdict, "STOP");
-    assert.equal(v.costPerResult?.key, "MESSAGES_STARTED");
+    assert.equal(v.engine, "GENERIC"); assert.equal(v.verdict, "MAINTAIN");
+    assert.equal(v.costPerResult?.key, "MESSAGES_STARTED"); assert.equal(v.costPerResult?.value, 125);
   });
 });
 

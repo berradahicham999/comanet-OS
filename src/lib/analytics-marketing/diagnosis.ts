@@ -78,8 +78,11 @@ export function diagnoseChannel(input: DiagnosisInput, settings: AnalyticsSettin
     return v;
   };
 
-  /* ---- Régie : moteur officiel des Ads ---- */
-  if (ADS_CHANNELS.has(channel.key)) {
+  /* ---- Régie : moteur officiel des Ads. Campagnes « Messages » (ni achat ni lead, mais des
+     conversations) : le moteur Ads conclurait STOP faute de conversion ; on juge alors sur le
+     coût par conversation (règle générique), comme le fait /marketing/ads par objectif. ---- */
+  const messagesOnly = (cur.results.PURCHASES ?? 0) === 0 && (cur.results.LEADS ?? 0) === 0 && (cur.results.MESSAGES_STARTED ?? 0) > 0;
+  if (ADS_CHANNELS.has(channel.key) && !messagesOnly) {
     const curK = kpis(adRowOf(cur, days, channel.key));
     const refK = prev ? kpis(adRowOf(prev, days, channel.key)) : null;
     const portK = portfolio ? kpis(adRowOf(portfolio, days, channel.key)) : null;
