@@ -17,6 +17,7 @@ import { animationPerformanceRule } from "./animation-rules";
 import { medicalRules } from "./medical-rules";
 import { contentLateRule } from "./content-rules";
 import { activationRules } from "./activation-rules";
+import { analyticsRules } from "./analytics-rules";
 
 export * from "./types";
 
@@ -36,6 +37,7 @@ export const RULES: Rule[] = [
   overdueTasksRule,
   contentLateRule,
   ...activationRules,
+  ...analyticsRules,
   dataQualityRule,
   ...medicalRules,
 ];

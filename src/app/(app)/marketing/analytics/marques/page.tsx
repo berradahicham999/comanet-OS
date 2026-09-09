@@ -52,7 +52,8 @@ export default async function AnalyticsBrandsPage(props: { searchParams: Promise
 
   return (
     <>
-      <PageHeader eyebrow="Marketing · Analytics" title="Par marque" subtitle={`Le portefeuille : qui reçoit l'argent, qui fait le chiffre. ${period.label}.`} />
+      <PageHeader eyebrow="Marketing · Analytics" title="Par marque" subtitle={`Le portefeuille : qui reçoit l'argent, qui fait le chiffre. ${period.label}.`}
+        actions={<Link href={`/marketing/analytics/revue/${ctx.brandId ?? brands[0]?.id ?? ""}`} className="btn-ghost btn-sm">Revue mensuelle</Link>} />
       <div className="mb-4"><Tabs tabs={ANALYTICS_TABS} current="/marketing/analytics/marques" /></div>
       <AnalyticsFilters period={ctx.periodKey} brand={ctx.brandId} channel={ctx.channelKey} city={ctx.city} brands={ctx.brands} channels={ctx.channels.filter((c) => c.active)} cities={ctx.cities} />
 

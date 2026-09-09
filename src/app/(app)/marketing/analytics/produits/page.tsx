@@ -53,6 +53,8 @@ export default async function AnalyticsProductsPage(props: { searchParams: Promi
     byBrandSales.set(p.brand_id, [...(byBrandSales.get(p.brand_id) ?? []), r.aggregate.sales.sellIn]);
   }
   const median = (xs: number[]) => { const a = [...xs].sort((x, y) => x - y); const m = Math.floor(a.length / 2); return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
+  // Marque à un seul produit : la médiane de la marque n'a pas de sens, on compare au portefeuille.
+  const portfolioMedian = median([...byBrandSales.values()].flat().filter((v) => v > 0));
 
   const table = products.rows
     .filter((p) => p.brand_id && brandIds.includes(p.brand_id))
@@ -62,7 +64,7 @@ export default async function AnalyticsProductsPage(props: { searchParams: Promi
       const e = expo.get(p.id);
       const st = stockOf.get(p.id);
       const sib = byBrandSales.get(p.brand_id!) ?? [];
-      const signal = { spent: a?.spend.spent ?? 0, exposures: e?.exposures ?? 0, sellIn: a?.sales.sellIn ?? 0, sellInPrev: prev && prev.sales.rows > 0 ? prev.sales.sellIn : null, brandMedianSellIn: sib.length > 1 ? median(sib) : null };
+      const signal = { spent: a?.spend.spent ?? 0, exposures: e?.exposures ?? 0, sellIn: a?.sales.sellIn ?? 0, sellInPrev: prev && prev.sales.rows > 0 ? prev.sales.sellIn : null, brandMedianSellIn: sib.length > 1 ? median(sib) : Number.isFinite(portfolioMedian) ? portfolioMedian : null };
       const c = classifyProduct(signal, t);
       const advice = stockAdvice({ stockKnown: st?.stockKnown ?? false, stock: st?.stock ?? 0, coverageMonths: st?.coverageMonths ?? null, underTension: st ? isUnderTension(st, settings) : false, overstock: st ? isOverstock(st, { overstockMonths: t.overstockMonths, overstockMinUnits: t.overstockMinUnits }) : false });
       return { p, a, signal, c, advice, kinds: e?.kinds ?? [], st };

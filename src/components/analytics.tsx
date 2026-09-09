@@ -46,6 +46,12 @@ export function MeasuredValue({ m, unit, attribution = "NONE", size = "md" }: { 
   );
 }
 
+/** Un coût par MAD de sell-out ou de commande se lit mieux « pour 100 MAD ». */
+export const PER_100_KEYS = new Set(["SELLOUT_AMOUNT", "ORDERS_AMOUNT"]);
+export function fmtCostPerResult(value: number, resultKey: string | null): string {
+  return resultKey && PER_100_KEYS.has(resultKey) ? `${fmtMAD(value * 100)} pour 100 MAD` : fmtMAD(value);
+}
+
 export const ANALYTICS_TABS = [
   { href: "/marketing/analytics", label: "Synthèse" },
   { href: "/marketing/analytics/marques", label: "Par marque" },

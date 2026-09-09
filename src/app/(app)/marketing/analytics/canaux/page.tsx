@@ -1,27 +1,23 @@
 import Link from "next/link";
 import { requireAccess } from "@/lib/access";
 import { pageContext, withFilters, type SearchParams } from "@/lib/analytics-marketing/context";
-import { aggregate, aggregateBy, pairKey } from "@/lib/analytics-marketing/queries";
+import { aggregateBy } from "@/lib/analytics-marketing/queries";
 import { compute } from "@/lib/analytics-marketing/metrics";
-import { diagnoseChannel, type ChannelVerdict } from "@/lib/analytics-marketing/diagnosis";
+import type { ChannelVerdict } from "@/lib/analytics-marketing/diagnosis";
+import { channelVerdicts } from "@/lib/analytics-marketing/decision";
 import { CHANNEL_FAMILIES, type ChannelFamily } from "@/lib/analytics-marketing/shared";
-import { productStocks } from "@/lib/stock";
-import { isUnderTension } from "@/lib/stock-math";
 import { verdictMeta } from "@/lib/ads";
 import { PageHeader, Card, Tabs, Section, Badge, BrandDot, Empty } from "@/components/ui";
-import { ANALYTICS_TABS, MeasuredValue } from "@/components/analytics";
+import { ANALYTICS_TABS, MeasuredValue, PER_100_KEYS, fmtCostPerResult } from "@/components/analytics";
 import { AnalyticsFilters } from "@/components/analytics-filters";
 import { Bars } from "@/components/analytics-charts";
 import { fmtMAD, fmtNum, fmtPct } from "@/lib/format";
-import { sql } from "drizzle-orm";
-import { db } from "@/db";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Analytics · Par canal" };
 
-/** Un coût par MAD de sell-out se lit mieux « pour 100 MAD de sell-out ». */
-const PER_100 = new Set(["SELLOUT_AMOUNT", "ORDERS_AMOUNT"]);
-const fmtCpr = (value: number, key: string | null) => (key && PER_100.has(key) ? `${fmtMAD(value * 100)} pour 100 MAD` : fmtMAD(value));
+const PER_100 = PER_100_KEYS;
+const fmtCpr = fmtCostPerResult;
 const TONE: Record<string, "green" | "blue" | "orange" | "red" | "gray"> = { SCALE: "green", MAINTAIN: "blue", OPTIMIZE: "orange", STOP: "red", WATCH: "gray" };
 
 export default async function AnalyticsChannelsPage(props: { searchParams: Promise<SearchParams> }) {
@@ -32,17 +28,12 @@ export default async function AnalyticsChannelsPage(props: { searchParams: Promi
   const scopeFilter = { ...filter, channelKeys: null };
   const scopePrev = { ...prevFilter, channelKeys: null };
 
-  const [byChannel, prevByChannel, pairs, prevPairs, portfolioByChannel, stocks, pushed] = await Promise.all([
+  const [byChannel, prevByChannel, allVerdicts] = await Promise.all([
     aggregateBy("channel", scopeFilter), aggregateBy("channel", scopePrev),
-    aggregateBy("brand_channel", scopeFilter), aggregateBy("brand_channel", scopePrev),
-    aggregateBy("channel", { range: filter.range, prev: filter.prev, n1: filter.n1 }),
-    productStocks({}, ctx.ref),
-    db.execute<{ k: string; product_ids: string[] }>(sql`select brand_id::text || '|' || channel_key as k, array_agg(distinct product_id::text) as product_ids from fact_marketing_spend where product_id is not null and day >= ${filter.range.start}::date and day < ${filter.range.end}::date group by 1`),
+    channelVerdicts({ range: filter.range, prev: filter.prev!, brandIds: filter.brandIds ?? null, ref: ctx.ref, settings }),
   ]);
   const channelOf = (k: string) => ctx.channels.find((c) => c.key === k);
   const brandOf = (id: string) => ctx.brands.find((b) => b.id === id);
-  const tensionIds = new Set(stocks.filter((s) => isUnderTension(s, settings)).map((s) => s.productId));
-  const pushedMap = new Map(pushed.rows.map((r) => [r.k, r.product_ids]));
   const totalSpend = byChannel.reduce((s, r) => s + r.aggregate.spend.spent, 0);
 
   const channelRows = byChannel
@@ -58,20 +49,10 @@ export default async function AnalyticsChannelsPage(props: { searchParams: Promi
       return { c, key: r.key, a: r.aggregate, spend: compute("SPEND_SPENT", r.aggregate, mctx), cpr, trend, resultKey, resultValue: resultKey ? r.aggregate.results[resultKey] ?? 0 : null, attributed: compute("ATTRIBUTED_REVENUE", r.aggregate, mctx), share: totalSpend > 0 ? (r.aggregate.spend.spent / totalSpend) * 100 : null };
     });
 
-  // Verdicts canal × marque
-  const verdicts = pairs
-    .filter((p) => !ctx.channelKey || p.key.endsWith(`|${ctx.channelKey}`))
-    .map((p) => {
-      const [brandId, channelKey] = p.key.split("|");
-      const c = channelOf(channelKey);
-      if (!c) return null;
-      const prev = prevPairs.find((x) => x.key === p.key)?.aggregate ?? null;
-      const portfolio = portfolioByChannel.find((x) => x.key === channelKey)?.aggregate ?? null;
-      const stockTension = (pushedMap.get(pairKey(brandId, channelKey)) ?? []).filter((id) => tensionIds.has(id));
-      const v = diagnoseChannel({ cur: p.aggregate, prev, portfolio, channel: { key: c.key, family: c.family, resultMetric: c.resultMetric, fallbackResultMetric: c.fallbackResultMetric }, days: period.days, stockTension }, settings.analytics, settings.ads);
-      return { brandId, channelKey, c, b: brandOf(brandId), a: p.aggregate, v, stockTension };
-    })
-    .filter((x): x is NonNullable<typeof x> => !!x)
+  // Verdicts canal × marque (point d'entrée unique : decision.ts)
+  const verdicts = allVerdicts
+    .filter((p) => !ctx.channelKey || p.channelKey === ctx.channelKey)
+    .map((p) => ({ brandId: p.brandId, channelKey: p.channelKey, c: p.channel, b: brandOf(p.brandId), a: p.agg, v: p.verdict, stockTension: p.stockTension }))
     .sort((x, y) => ORDER[x.v.verdict] - ORDER[y.v.verdict] || y.a.spend.spent - x.a.spend.spent);
 
   const compareMode = ctx.brandId ? "inter-canaux à marque constante" : ctx.channelKey ? "inter-marques à canal constant" : "vue d'ensemble";
