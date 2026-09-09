@@ -74,6 +74,32 @@ export type ComanetSettings = {
   activations: ActivationSettings;
   /** Couche d'analyse marketing transverse : fenêtres, répartition, coûts, seuils de verdict. */
   analytics: AnalyticsSettings;
+  /** Copilote IA : limites d'usage et plafond de coût (les modèles et la clé restent en variables d'environnement). */
+  ai: AiSettings;
+};
+
+export type AiSettings = {
+  /** Requêtes au copilote par personne et par heure glissante. */
+  requestsPerHour: number;
+  /** Tokens (entrée + sortie) autorisés par jour, toutes personnes et surfaces confondues. */
+  dailyTokenBudget: number;
+  /** Coût mensuel estimé (USD) au-delà duquel les surfaces automatiques (brief, explications) sont suspendues. Les questions manuelles d'un administrateur restent possibles. */
+  monthlyCostAlertUsd: number;
+  /** Nombre maximal d'appels d'outils par question. */
+  maxToolCalls: number;
+  /** Délai maximal d'une réponse, en secondes. */
+  timeoutSeconds: number;
+  /** Durée de cache d'une explication de carte, en minutes. */
+  explainCacheMinutes: number;
+};
+
+export const DEFAULT_AI_SETTINGS: AiSettings = {
+  requestsPerHour: 60,
+  dailyTokenBudget: 2_000_000,
+  monthlyCostAlertUsd: 100,
+  maxToolCalls: 8,
+  timeoutSeconds: 60,
+  explainCacheMinutes: 60,
 };
 
 /**
@@ -274,6 +300,7 @@ export const DEFAULT_SETTINGS: ComanetSettings = {
   ads: DEFAULT_AD_THRESHOLDS,
   activations: DEFAULT_ACTIVATION_SETTINGS,
   analytics: DEFAULT_ANALYTICS_SETTINGS,
+  ai: DEFAULT_AI_SETTINGS,
 };
 
 export const SETTINGS_KEY = "comanet.rules";
@@ -294,6 +321,7 @@ export function mergeSettings(stored: Partial<ComanetSettings> | null | undefine
     ads: { ...DEFAULT_AD_THRESHOLDS, ...(stored.ads ?? {}) },
     activations: { ...DEFAULT_ACTIVATION_SETTINGS, ...(stored.activations ?? {}) },
     analytics: mergeAnalytics(stored.analytics),
+    ai: { ...DEFAULT_AI_SETTINGS, ...(stored.ai ?? {}) },
   };
 }
 

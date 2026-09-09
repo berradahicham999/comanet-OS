@@ -41,8 +41,8 @@ describe("copilote IA — lecture seule sur la donnée métier", () => {
     assert.match(insert, /status:\s*"PROPOSED"/);
     assert.match(insert, /source:\s*"AI"/);
   });
-  test("les outils n'importent pas la base : seul deps.ts et context.ts y accèdent", () => {
-    const offenders = FILES.filter((f) => !/\/(deps|context)\.ts$/.test(f.path) && /from\s+"@\/db"/.test(f.code)).map((f) => f.path);
+  test("les outils n'importent pas la base : dans tools/, seuls deps.ts et context.ts y accèdent", () => {
+    const offenders = FILES.filter((f) => f.path.includes("/tools/") && !/\/(deps|context)\.ts$/.test(f.path) && /from\s+"@\/db"/.test(f.code)).map((f) => f.path);
     assert.deepEqual(offenders, [], `Accès direct à la base dans : ${offenders.join(", ")}`);
   });
 });

@@ -9,8 +9,9 @@ import type { NavGroup, NavItem } from "@/components/nav-config";
 import type { SessionUser } from "@/lib/auth";
 import { Sidebar, isActive } from "./sidebar";
 import { NavIcon } from "./nav-icons";
+import { CopilotPanel } from "@/components/ai/copilot-panel";
 
-export function AppShell({ groups, tabs, user, logout, canSearch, preview, unread = 0, children }: {
+export function AppShell({ groups, tabs, user, logout, canSearch, preview, unread = 0, copilot, children }: {
   groups: NavGroup[];
   tabs: NavItem[];
   user: SessionUser;
@@ -20,6 +21,8 @@ export function AppShell({ groups, tabs, user, logout, canSearch, preview, unrea
   preview: { adminName: string; targetName: string; targetId: string } | null;
   /** Notifications non lues (cloche de l'en-tête). */
   unread?: number;
+  /** Copilote IA : ouvert à ce profil ? clé configurée sur le serveur ? */
+  copilot?: { enabled: boolean; configured: boolean };
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -100,6 +103,8 @@ export function AppShell({ groups, tabs, user, logout, canSearch, preview, unrea
         <main className="flex-1 px-3 sm:px-5 lg:px-7 py-4 sm:py-6 pb-24 lg:pb-8 max-w-[1440px] w-full mx-auto">
           {children}
         </main>
+
+        {copilot && !preview && <CopilotPanel enabled={copilot.enabled} configured={copilot.configured} />}
 
         {/* Barre d'onglets mobile */}
         <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-surface/95 backdrop-blur border-t border-line pb-[env(safe-area-inset-bottom)]">
