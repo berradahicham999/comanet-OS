@@ -483,6 +483,12 @@ export const brands = pgTable("brands", {
   positioning: text("positioning"),
   target: text("target"),
   objectives: text("objectives"),
+  /**
+   * Marque fusionnée dans une autre (doublon de référentiel, ex. un compte publicitaire nommé
+   * autrement). La fiche est conservée désactivée ; toute la couche analytique lit ses lignes
+   * sous la marque cible. Rien n'est supprimé.
+   */
+  mergedIntoId: uuid("merged_into_id").references((): AnyPgColumn => brands.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -2201,6 +2207,181 @@ export const settings = pgTable("settings", {
   value: jsonb("value").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/* ------------------------------------------------------------------ */
+/* Analytics marketing transverse (Phase 4)                            */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Couche de faits alimentée depuis les modules existants par `src/lib/analytics-marketing/refresh.ts`.
+ * Aucun second référentiel : les faits pointent vers `brands`, `products`, `campaigns`, `clients`.
+ * Seuls les canaux (`dim_channel`), leurs correspondances (`channel_mappings`) et le calendrier
+ * (`dim_period`) sont nouveaux. `fact_sales` est une VUE SQL (voir la migration 0017), lue en SQL brut.
+ */
+
+/** Référentiel des canaux marketing — modifiable dans /parametres/analytics. */
+export const dimChannel = pgTable("dim_channel", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  /** DIGITAL_PAID | ORGANIC | INFLUENCE | TERRAIN | EVENT | TRADE | PRESCRIPTION | PRODUCTION | OTHER */
+  family: text("family").notNull().default("OTHER"),
+  /** Résultat « propre » du canal (clé de `metrics_definitions`) : base du coût par résultat. */
+  resultMetric: text("result_metric"),
+  /** Résultat de repli quand le principal est à zéro sur la période. */
+  fallbackResultMetric: text("fallback_result_metric"),
+  color: text("color").notNull().default("#64748b"),
+  sort: integer("sort").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+});
+
+/** Comment chaque source se range dans un canal. `source_key = '*'` : toute la source. */
+export const channelMappings = pgTable(
+  "channel_mappings",
+  {
+    /** BUDGET_CATEGORY | AD_PLATFORM | CONTENT_PLATFORM | ACTIVATION_TYPE | COLLABORATION | ANIMATION | SAMPLE */
+    sourceKind: text("source_kind").notNull(),
+    sourceKey: text("source_key").notNull(),
+    channelKey: text("channel_key").notNull().references(() => dimChannel.key, { onDelete: "restrict" }),
+  },
+  (t) => [primaryKey({ columns: [t.sourceKind, t.sourceKey] })],
+);
+
+/** Calendrier jour (2024 → 2028) : jointures de tendance et détection des mois sans import. */
+export const dimPeriod = pgTable(
+  "dim_period",
+  {
+    day: date("day").primaryKey(),
+    month: text("month").notNull(),
+    quarter: text("quarter").notNull(),
+    year: integer("year").notNull(),
+    isoWeek: text("iso_week").notNull(),
+    monthStart: date("month_start").notNull(),
+    isMonthEnd: boolean("is_month_end").notNull(),
+  },
+  (t) => [index("dim_period_month_idx").on(t.month)],
+);
+
+/**
+ * Une ligne = une dépense × jour × marque × produit, après répartition.
+ * Reconstruite par `source_kind` ; `source_id` mène à la ligne d'origine (lien « corriger »).
+ * Un montant NULL est « non mesurable » — jamais 0 par défaut.
+ */
+export const factMarketingSpend = pgTable(
+  "fact_marketing_spend",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    day: date("day").notNull(),
+    brandId: uuid("brand_id").notNull().references(() => brands.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
+    city: text("city"),
+    campaignId: uuid("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
+    channelKey: text("channel_key").notNull().references(() => dimChannel.key, { onDelete: "restrict" }),
+    subChannel: text("sub_channel"),
+    budgetCategory: budgetCategoryEnum("budget_category").notNull().default("AUTRES"),
+    /** AD_METRIC | EXPENSE | ACTIVATION_LINE | COLLABORATION | CONTENT | ANIMATION | SAMPLE */
+    sourceKind: text("source_kind").notNull(),
+    sourceId: uuid("source_id").notNull(),
+    sourceLabel: text("source_label"),
+    /** Pourquoi un montant manque (ex. COUT_NON_MESURE). */
+    sourceRef: text("source_ref"),
+    planned: numeric("planned", { precision: 14, scale: 2 }),
+    committed: numeric("committed", { precision: 14, scale: 2 }),
+    spent: numeric("spent", { precision: 14, scale: 2 }),
+    /** Quote-part appliquée à la ligne d'origine et sa base : PRORATA_SALES | EQUAL | DECLARED | NONE. */
+    share: numeric("share", { precision: 8, scale: 6 }).notNull().default("1"),
+    shareBasis: text("share_basis").notNull().default("NONE"),
+    isPartial: boolean("is_partial").notNull().default(false),
+    /** MEASURED (régie, code promo, saisie) | NONE. */
+    attributionMode: text("attribution_mode").notNull().default("NONE"),
+    attributedRevenue: numeric("attributed_revenue", { precision: 14, scale: 2 }),
+    refreshedAt: timestamp("refreshed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("fms_day_idx").on(t.day),
+    index("fms_brand_day_idx").on(t.brandId, t.day),
+    index("fms_channel_day_idx").on(t.channelKey, t.day),
+    index("fms_product_day_idx").on(t.productId, t.day),
+    index("fms_campaign_idx").on(t.campaignId),
+    index("fms_source_idx").on(t.sourceKind, t.sourceId),
+    index("fms_city_idx").on(t.city),
+  ],
+);
+
+/** Une ligne = un résultat mesuré × type (clé de `metrics_definitions`), même grain que les dépenses. */
+export const factMarketingResult = pgTable(
+  "fact_marketing_result",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    day: date("day").notNull(),
+    brandId: uuid("brand_id").notNull().references(() => brands.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
+    city: text("city"),
+    campaignId: uuid("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
+    channelKey: text("channel_key").notNull().references(() => dimChannel.key, { onDelete: "restrict" }),
+    subChannel: text("sub_channel"),
+    sourceKind: text("source_kind").notNull(),
+    sourceId: uuid("source_id").notNull(),
+    sourceLabel: text("source_label"),
+    resultKey: text("result_key").notNull(),
+    value: numeric("value", { precision: 16, scale: 2 }).notNull(),
+    share: numeric("share", { precision: 8, scale: 6 }).notNull().default("1"),
+    /** MEASURED | DECLARED (saisi à la main). */
+    measurement: text("measurement").notNull().default("MEASURED"),
+    isPartial: boolean("is_partial").notNull().default(false),
+    refreshedAt: timestamp("refreshed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("fmr_day_idx").on(t.day),
+    index("fmr_brand_day_idx").on(t.brandId, t.day),
+    index("fmr_channel_key_idx").on(t.channelKey, t.resultKey, t.day),
+    index("fmr_product_day_idx").on(t.productId, t.day),
+    index("fmr_source_idx").on(t.sourceKind, t.sourceId),
+  ],
+);
+
+/**
+ * Dictionnaire des métriques : libellé, unité, sens, seuils, mode d'attribution.
+ * La formule est documentaire ; le calcul vit dans `src/lib/analytics-marketing/metrics.ts`
+ * et un test vérifie que chaque clé a sa fonction.
+ */
+export const metricsDefinitions = pgTable("metrics_definitions", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  description: text("description"),
+  formula: text("formula").notNull(),
+  /** MAD | PCT | RATIO | COUNT | MULTIPLE | SCORE | POINTS */
+  unit: text("unit").notNull(),
+  /** HIGHER_BETTER | LOWER_BETTER | NEUTRAL */
+  direction: text("direction").notNull().default("NEUTRAL"),
+  /** MEASURED | CORRELATION | NONE — affiché à côté du chiffre. */
+  attribution: text("attribution").notNull().default("NONE"),
+  source: text("source").notNull(),
+  /** MONEY | SALES | RESULT | RETURN | COMPOSITE */
+  family: text("family").notNull().default("RESULT"),
+  warnThreshold: numeric("warn_threshold", { precision: 14, scale: 4 }),
+  alertThreshold: numeric("alert_threshold", { precision: 14, scale: 4 }),
+  sort: integer("sort").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Journal des rafraîchissements de la couche de faits — la fraîcheur affichée à l'écran. */
+export const analyticsRefreshLog = pgTable(
+  "analytics_refresh_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sourceKind: text("source_kind").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    spendRows: integer("spend_rows").notNull().default(0),
+    resultRows: integer("result_rows").notNull().default(0),
+    ok: boolean("ok").notNull().default(false),
+    error: text("error"),
+    /** IMPORT | SYNC | WORKFLOW | CRON | MANUAL */
+    triggeredBy: text("triggered_by").notNull().default("MANUAL"),
+  },
+  (t) => [index("analytics_refresh_log_source_idx").on(t.sourceKind, t.startedAt)],
+);
 
 /* ------------------------------------------------------------------ */
 /* Relations (pour les requêtes relationnelles drizzle)                */

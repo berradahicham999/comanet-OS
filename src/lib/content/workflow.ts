@@ -9,6 +9,7 @@ import { contentRefs } from "./refs";
 import { checkTransition } from "./shared";
 import { notify } from "./notify";
 import { closeBriefTask } from "./tasks";
+import { refreshAfterWrite } from "@/lib/analytics-marketing/refresh";
 
 /**
  * Qui peut « valider » un contenu de cette marque ?
@@ -81,5 +82,6 @@ export async function transition(contentId: string, to: string, user: SessionUse
   // La production est terminée dès que le contenu est validé, publié ou archivé.
   const validatedNow = !!from?.awaitingValidation && !!target && !target.inProduction && !target.awaitingValidation;
   if (target?.isPublished || target?.isArchived || validatedNow) await closeBriefTask(contentId);
+  await refreshAfterWrite(["CONTENT"]);
   return { ok: true, to };
 }

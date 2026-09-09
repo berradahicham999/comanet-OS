@@ -24,6 +24,7 @@ import { adMetrics, adCampaignStates, brands } from "@/db/schema";
 import { getSettings } from "@/lib/settings";
 import { matchBrandInText } from "@/lib/import/match";
 import { nameKey } from "./links";
+import { refreshMarketingFacts } from "@/lib/analytics-marketing/refresh";
 import { fetchInsights, getAccount, listCampaigns, minorToMajor, MetaError } from "./client";
 
 export type SyncAccount = {
@@ -384,6 +385,8 @@ export async function syncAccount(
       set sync_status = 'OK', last_error = null, last_sync_at = now(), sync_enabled = true,
           imported_rows = (select count(*) from ad_metrics where account_id = ${account.id}::uuid)
       where id = ${account.id}::uuid`);
+
+    await refreshMarketingFacts(["AD_METRIC"], "SYNC");
 
     return {
       ...base, ok: true, currency, fxRate, campaignStates,

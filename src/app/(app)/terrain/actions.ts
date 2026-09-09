@@ -6,6 +6,7 @@ import { requirePermission, isOwnOnly } from "@/lib/access";
 import { parseAnimationInput, type RawAnimationInput } from "@/lib/terrain/animation-input";
 import { saveAnimation as persistAnimation, deleteAnimation as removeAnimation } from "@/lib/terrain/save-animation";
 import { dispatchEvent } from "@/lib/events/dispatch";
+import { refreshAfterWrite } from "@/lib/analytics-marketing/refresh";
 
 /**
  * Saisie d'une animation depuis l'application.
@@ -66,6 +67,7 @@ export async function saveAnimation(formData: FormData) {
   // La transaction est validée : à partir d'ici, plus rien ne peut défaire la saisie.
   // `dispatchEvent` ne lève jamais — un handler en échec met l'événement en `failed`.
   if (saved.eventId) await dispatchEvent(saved.eventId);
+  await refreshAfterWrite(["ANIMATION"]);
 
   revalidatePath("/terrain");
   revalidatePath("/terrain/animatrices");
@@ -81,6 +83,7 @@ export async function deleteAnimation(formData: FormData) {
   const id = str(formData, "id").trim();
   if (!id) return;
   await removeAnimation(id);
+  await refreshAfterWrite(["ANIMATION"]);
   revalidatePath("/terrain");
   revalidatePath("/terrain/animatrices");
   redirect("/terrain");
