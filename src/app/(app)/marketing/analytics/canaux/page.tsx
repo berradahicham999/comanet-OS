@@ -19,6 +19,9 @@ import { db } from "@/db";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Analytics · Par canal" };
 
+/** Un coût par MAD de sell-out se lit mieux « pour 100 MAD de sell-out ». */
+const PER_100 = new Set(["SELLOUT_AMOUNT", "ORDERS_AMOUNT"]);
+const fmtCpr = (value: number, key: string | null) => (key && PER_100.has(key) ? `${fmtMAD(value * 100)} pour 100 MAD` : fmtMAD(value));
 const TONE: Record<string, "green" | "blue" | "orange" | "red" | "gray"> = { SCALE: "green", MAINTAIN: "blue", OPTIMIZE: "orange", STOP: "red", WATCH: "gray" };
 
 export default async function AnalyticsChannelsPage(props: { searchParams: Promise<SearchParams> }) {
@@ -93,7 +96,7 @@ export default async function AnalyticsChannelsPage(props: { searchParams: Promi
                     <td className="px-2 py-2 text-right"><MeasuredValue m={r.spend} unit="MAD" size="sm" /></td>
                     <td className="px-2 py-2 text-right tabular-nums text-xs">{r.share === null ? "—" : fmtPct(r.share)}</td>
                     <td className="px-2 py-2 text-right tabular-nums text-xs">{r.resultValue ? <>{fmtNum(r.resultValue)}<div className="text-muted">{ctx.metrics.get(r.resultKey ?? "")?.label ?? r.resultKey}</div></> : <span className="text-muted">non mesuré</span>}</td>
-                    <td className="px-2 py-2 text-right"><MeasuredValue m={r.cpr} unit="MAD" size="sm" /></td>
+                    <td className="px-2 py-2 text-right">{r.cpr.ok ? <span className="text-sm font-medium tabular-nums">{fmtCpr(r.cpr.value, r.resultKey)}</span> : <MeasuredValue m={r.cpr} unit="MAD" size="sm" />}</td>
                     <td className="px-2 py-2 text-right tabular-nums text-xs">{r.trend === null ? <span className="text-muted">pas encore comparable</span> : <span className={r.trend > 0 ? "text-orange-700" : "text-green-700"}>{r.trend > 0 ? "+" : ""}{Math.round(r.trend)} % coût/résultat</span>}</td>
                     <td className="px-4 py-2 text-right"><MeasuredValue m={r.attributed} unit="MAD" attribution="MEASURED" size="sm" /></td>
                   </tr>
@@ -119,7 +122,7 @@ export default async function AnalyticsChannelsPage(props: { searchParams: Promi
                 <ul className="text-sm mt-2 space-y-1 list-disc pl-5">{v.actions.map((x) => <li key={x}>{x}</li>)}</ul>
                 <div className="text-[11px] text-muted mt-2 flex flex-wrap gap-x-3">
                   <span>dépense {a.spend.measurableRows ? fmtMAD(a.spend.spent, { compact: true }) : "non mesurée"}</span>
-                  {v.costPerResult && <span>coût par {ctx.metrics.get(v.costPerResult.key)?.label.toLowerCase() ?? v.costPerResult.key} {fmtMAD(v.costPerResult.value)}</span>}
+                  {v.costPerResult && <span>coût par {ctx.metrics.get(v.costPerResult.key)?.label.toLowerCase() ?? v.costPerResult.key} : {fmtCpr(v.costPerResult.value, v.costPerResult.key)}</span>}
                   <span>moteur {v.engine === "ADS" ? "Digital Ads" : v.engine === "ANIMATION" ? "rentabilité animation" : "coût par résultat"}</span>
                 </div>
               </Card>
@@ -133,7 +136,7 @@ export default async function AnalyticsChannelsPage(props: { searchParams: Promi
           <Card><Bars rows={channelRows.map((r) => ({ label: r.c?.label ?? r.key, value: r.a.spend.measurableRows ? r.a.spend.spent : null, color: r.c?.color }))} /></Card>
         </Section>
         <Section title="Coût par résultat" description="Comparable au sein d'un même canal seulement : chaque canal mesure un résultat différent.">
-          <Card><Bars rows={channelRows.filter((r) => r.cpr.ok).map((r) => ({ label: r.c?.label ?? r.key, value: (r.cpr as { value: number }).value, color: r.c?.color, sub: ctx.metrics.get(r.resultKey ?? "")?.label }))} /></Card>
+          <Card><Bars rows={channelRows.filter((r) => r.cpr.ok).map((r) => ({ label: r.c?.label ?? r.key, value: PER_100.has(r.resultKey ?? "") ? (r.cpr as { value: number }).value * 100 : (r.cpr as { value: number }).value, color: r.c?.color, sub: PER_100.has(r.resultKey ?? "") ? `pour 100 MAD de ${ctx.metrics.get(r.resultKey ?? "")?.label.toLowerCase()}` : ctx.metrics.get(r.resultKey ?? "")?.label }))} /></Card>
         </Section>
       </div>
     </>

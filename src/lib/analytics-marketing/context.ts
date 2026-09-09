@@ -12,6 +12,7 @@ import { getSettings } from "@/lib/settings";
 import { resolvePeriod, type PeriodParam, type ResolvedPeriod } from "@/lib/periods";
 import { listChannels, listMetricDefinitions, type ChannelRef, type Filter, type MetricDef } from "./queries";
 import { dataCompleteness } from "./quality";
+import { normalizeCity } from "@/lib/animations-shared";
 
 export type SearchParams = { period?: string; brand?: string; channel?: string; city?: string; product?: string };
 
@@ -50,7 +51,7 @@ export async function pageContext(sp: SearchParams): Promise<PageContext> {
   const base = { brandIds, channelKeys: channelKey ? [channelKey] : null, city };
   return {
     period, periodKey, ref, staleDays, brands, brandId, channelKey, city, channels,
-    cities: cityRows.rows.map((r) => r.city), metrics: new Map(defs.map((d) => [d.key, d])), settings, completeness,
+    cities: [...new Set(cityRows.rows.map((r) => normalizeCity(r.city)).filter((c): c is string => !!c))].sort((a, b) => a.localeCompare(b, "fr")), metrics: new Map(defs.map((d) => [d.key, d])), settings, completeness,
     filter: { ...base, range: { start: period.start, end: period.end }, prev: period.prev, n1: period.n1 },
     prevFilter: { ...base, range: period.prev, prev: null, n1: null },
   };

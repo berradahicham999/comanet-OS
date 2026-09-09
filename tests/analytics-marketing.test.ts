@@ -265,10 +265,43 @@ describe("verdict par canal × marque", () => {
     const mid = diagnoseChannel({ cur: agg({ spend: spend(3180, 10), results: { SELLOUT_AMOUNT: 10000 }, sources: ["ANIMATION"] }), prev: null, portfolio: null, channel: anim, days: 30 }, settings, DEFAULT_AD_THRESHOLDS);
     assert.equal(mid.verdict, "OPTIMIZE");
   });
-  test("régie : passe par le moteur Digital Ads (aucune conversion → STOP)", () => {
+  test("régie : moteur Digital Ads quand il y a des conversions ; STOP sans aucun résultat", () => {
+    const meta = { key: "META_ADS", family: "DIGITAL_PAID", resultMetric: "PURCHASES" as const, fallbackResultMetric: "MESSAGES_STARTED" as const };
+    const none = diagnoseChannel({ cur: agg({ spend: spend(5000), results: { IMPRESSIONS: 100000, CLICKS: 900 }, sources: ["AD_METRIC"] }), prev: null, portfolio: null, channel: meta, days: 30 }, S, DEFAULT_AD_THRESHOLDS);
+    assert.equal(none.engine, "ADS"); assert.equal(none.verdict, "STOP");
+    const buys = diagnoseChannel({ cur: agg({ spend: spend(5000), results: { IMPRESSIONS: 100000, CLICKS: 900, PURCHASES: 20 }, attributed: { spend: 5000, revenue: 20000 }, sources: ["AD_METRIC"] }), prev: null, portfolio: null, channel: meta, days: 30 }, S, DEFAULT_AD_THRESHOLDS);
+    assert.equal(buys.engine, "ADS"); assert.notEqual(buys.verdict, "STOP");
+  });
+  test("régie « Messages » : sans achat ni lead mais avec des conversations, jugée au coût par conversation", () => {
     const meta = { key: "META_ADS", family: "DIGITAL_PAID", resultMetric: "PURCHASES" as const, fallbackResultMetric: "MESSAGES_STARTED" as const };
     const v = diagnoseChannel({ cur: agg({ spend: spend(5000), results: { IMPRESSIONS: 100000, CLICKS: 900, MESSAGES_STARTED: 40 }, sources: ["AD_METRIC"] }), prev: null, portfolio: null, channel: meta, days: 30 }, S, DEFAULT_AD_THRESHOLDS);
-    assert.equal(v.engine, "ADS"); assert.equal(v.verdict, "STOP");
-    assert.equal(v.costPerResult?.key, "MESSAGES_STARTED");
+    assert.equal(v.engine, "GENERIC"); assert.equal(v.verdict, "MAINTAIN");
+    assert.equal(v.costPerResult?.key, "MESSAGES_STARTED"); assert.equal(v.costPerResult?.value, 125);
+  });
+});
+
+/* ------------------------------ Produits : quatre cas et stock ------------------------------ */
+import { classifyProduct, stockAdvice } from "@/lib/analytics-marketing/analysis";
+import { isOverstock } from "@/lib/stock-math";
+
+describe("classification des produits en quatre cas", () => {
+  const t = S.productCases;
+  test("poussé (dépense ou expositions) × se vend (croissance ou au-dessus de la médiane)", () => {
+    assert.equal(classifyProduct({ spent: 800, exposures: 0, sellIn: 12000, sellInPrev: 10000, brandMedianSellIn: 5000 }, t).cls, "POUSSE_VEND");
+    assert.equal(classifyProduct({ spent: 0, exposures: 3, sellIn: 4000, sellInPrev: 5000, brandMedianSellIn: 6000 }, t).cls, "POUSSE_VEND_PAS");
+    assert.equal(classifyProduct({ spent: 0, exposures: 1, sellIn: 9000, sellInPrev: 6000, brandMedianSellIn: 5000 }, t).cls, "PAS_POUSSE_VEND");
+    assert.equal(classifyProduct({ spent: 100, exposures: 0, sellIn: 1000, sellInPrev: 1200, brandMedianSellIn: 5000 }, t).cls, "DORMANT");
+  });
+  test("sans comparaison ni médiane : ne se vend pas seulement à 0 vente", () => {
+    assert.equal(classifyProduct({ spent: 0, exposures: 0, sellIn: 500, sellInPrev: null, brandMedianSellIn: null }, t).selling, true);
+    assert.equal(classifyProduct({ spent: 0, exposures: 0, sellIn: 0, sellInPrev: null, brandMedianSellIn: null }, t).cls, "DORMANT");
+  });
+  test("stock : rupture et tension interdisent de pousser, surstock à écouler", () => {
+    assert.equal(stockAdvice({ stockKnown: false, stock: 0, coverageMonths: null, underTension: false, overstock: false }).level, "INCONNU");
+    assert.equal(stockAdvice({ stockKnown: true, stock: 0, coverageMonths: 0, underTension: true, overstock: false }).level, "RUPTURE");
+    assert.equal(stockAdvice({ stockKnown: true, stock: 20, coverageMonths: 0.6, underTension: false, overstock: false }).level, "TENSION");
+    assert.equal(stockAdvice({ stockKnown: true, stock: 500, coverageMonths: 9, underTension: false, overstock: true }).level, "SURSTOCK");
+    assert.equal(isOverstock({ coverageMonths: 9, stock: 500 }, { overstockMonths: 6, overstockMinUnits: 50 }), true);
+    assert.equal(isOverstock({ coverageMonths: 9, stock: 10 }, { overstockMonths: 6, overstockMinUnits: 50 }), false);
   });
 });

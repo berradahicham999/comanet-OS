@@ -1,3 +1,4 @@
+import { isOverstock } from "@/lib/stock-math";
 import { fmtMAD, fmtNum, fmtDate, months } from "@/lib/format";
 import type { Rule, Recommendation } from "./types";
 
@@ -66,7 +67,7 @@ export const overstockRule: Rule = {
   async run({ stocks, settings }) {
     const out: Recommendation[] = [];
     for (const p of stocks) {
-      if (p.coverageMonths === null || p.coverageMonths <= 6 || p.stock < 50) continue;
+      if (p.coverageMonths === null || !isOverstock(p, { overstockMonths: settings.analytics.productCases.overstockMonths, overstockMinUnits: settings.analytics.productCases.overstockMinUnits })) continue;
       const highMargin = (p.marginPct ?? settings.defaultMarginPct) >= 40;
       const lowSellOut = p.fieldSellOut30d === 0 || p.trendPct === null || p.trendPct < 0;
       const activation = highMargin && lowSellOut;

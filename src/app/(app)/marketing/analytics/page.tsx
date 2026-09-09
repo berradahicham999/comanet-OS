@@ -9,8 +9,7 @@ import { PageHeader, Card, Tabs, Section, Badge, BrandDot } from "@/components/u
 import { ANALYTICS_TABS, MeasuredValue, formatMetric } from "@/components/analytics";
 import { AnalyticsFilters } from "@/components/analytics-filters";
 import { Bars } from "@/components/analytics-charts";
-import { monthLabel } from "@/components/charts";
-import { fmtMAD, fmtNum } from "@/lib/format";
+import { fmtMAD, fmtNum, fmtMonth, fmtDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Analytics marketing" };
@@ -40,7 +39,7 @@ export default async function AnalyticsHomePage(props: { searchParams: Promise<S
 
   return (
     <>
-      <PageHeader eyebrow="Marketing" title="Analytics marketing" subtitle={`Où va l'argent, ce que ça rapporte, où le mettre le mois prochain. ${period.label} · comparé à ${period.prev.label}.`}
+      <PageHeader eyebrow="Marketing" title="Analytics marketing" subtitle={`Où va l'argent, ce que ça rapporte, où le mettre le mois prochain. ${period.label} · comparé à ${period.prev.label}.${ctx.staleDays > 0 ? ` Ventes Sage importées jusqu'au ${fmtDate(ctx.ref)} : les périodes sont calées sur cette date.` : ""}`}
         actions={ctx.completeness !== null && <Link href="/marketing/analytics/qualite" className="btn-ghost btn-sm">Complétude {Math.round(ctx.completeness * 100)} %</Link>} />
       <div className="mb-4"><Tabs tabs={ANALYTICS_TABS} current="/marketing/analytics" /></div>
       <AnalyticsFilters period={ctx.periodKey} brand={ctx.brandId} channel={ctx.channelKey} city={ctx.city} brands={ctx.brands} channels={ctx.channels.filter((c) => c.active)} cities={ctx.cities} />
@@ -100,7 +99,7 @@ export default async function AnalyticsHomePage(props: { searchParams: Promise<S
                   const partial = m.month >= period.end.slice(0, 7);
                   return (
                     <tr key={m.month} className="border-t border-line">
-                      <td className="px-4 py-1.5">{monthLabel(m.month)}{partial && <Badge tone="gray" className="ml-1">en cours</Badge>}</td>
+                      <td className="px-4 py-1.5">{fmtMonth(m.month + "-01")}{partial && <Badge tone="gray" className="ml-1">en cours</Badge>}</td>
                       <td className="px-2 py-1.5 text-right tabular-nums">{m.rows ? fmtMAD(m.spent, { compact: true }) : <span className="text-muted">—</span>}</td>
                       <td className="px-2 py-1.5 text-right tabular-nums text-muted">{m.rows ? `${Math.round((m.measurableRows / m.rows) * 100)} %` : "—"}</td>
                       <td className="px-2 py-1.5 text-right tabular-nums">{m.salesRows ? fmtMAD(m.sellIn, { compact: true }) : <span className="text-muted">pas d&apos;import</span>}</td>

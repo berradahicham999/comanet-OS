@@ -133,3 +133,14 @@ export type TensionInput = { coverageMonths: number | null; avgMonthly: number }
 export function isUnderTension(p: TensionInput, t: TensionThresholds): boolean {
   return p.coverageMonths !== null && p.coverageMonths < t.stockTightCoverageMonths && p.avgMonthly > t.stockTightMinMonthlyUnits;
 }
+
+export type OverstockThresholds = { overstockMonths: number; overstockMinUnits: number };
+export type OverstockInput = { coverageMonths: number | null; stock: number };
+
+/**
+ * Produit « en surstock » : couverture connue et longue, sur un volume qui compte.
+ * Définition unique, partagée par la règle stock et l'analyse marketing par produit.
+ */
+export function isOverstock(p: OverstockInput, t: OverstockThresholds): boolean {
+  return p.coverageMonths !== null && p.coverageMonths > t.overstockMonths && p.stock >= t.overstockMinUnits;
+}
