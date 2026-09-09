@@ -29,7 +29,9 @@ export type Filter = {
   budgetYear?: number;
 };
 
-export type Dimension = "brand" | "channel" | "product" | "city" | "month" | "family";
+export type Dimension = "brand" | "channel" | "product" | "city" | "month" | "family" | "brand_channel";
+/** Clé composite « marque|canal » de la dimension `brand_channel`. */
+export const pairKey = (brandId: string, channelKey: string) => `${brandId}|${channelKey}`;
 
 const cond = (parts: SQL[]) => (parts.length ? sql.join(parts, sql` and `) : sql`true`);
 
@@ -60,10 +62,11 @@ const dimKey = (d: Dimension, alias: string): SQL => {
     case "product": return sql`coalesce(${sql.raw(alias)}.product_id::text, '')`;
     case "city": return sql`coalesce(lower(${sql.raw(alias)}.city), '')`;
     case "month": return sql`to_char(${sql.raw(alias)}.day, 'YYYY-MM')`;
+    case "brand_channel": return sql`${sql.raw(alias)}.brand_id::text || '|' || ${sql.raw(alias)}.channel_key`;
   }
 };
 /** Dimensions qui existent aussi sur les ventes. */
-const salesDim = (d: Dimension): SQL | null => (d === "channel" || d === "family" ? null : dimKey(d, "v"));
+const salesDim = (d: Dimension): SQL | null => (d === "channel" || d === "family" || d === "brand_channel" ? null : dimKey(d, "v"));
 
 type SpendAgg = { k: string; planned: number; committed: number; spent: number; rows: number; measurable: number; attr_spend: number; attr_revenue: number; sources: string[] };
 type ResultAgg = { k: string; result_key: string; value: number };
@@ -214,4 +217,24 @@ export async function freshness(): Promise<Freshness[]> {
            (array_agg(l.triggered_by order by l.started_at desc))[1] as triggered_by
     from analytics_refresh_log l group by 1 order by 1`);
   return r.rows.map((x) => ({ sourceKind: x.source_kind, lastOk: x.last_ok, lastError: x.last_error, lastAttempt: x.last_attempt, spendRows: x.spend_rows ?? 0, resultRows: x.result_rows ?? 0, triggeredBy: x.triggered_by }));
+}
+
+/* ------------------------------ Séries mensuelles ------------------------------ */
+
+export type MonthPoint = { month: string; spent: number; measurableRows: number; rows: number; sellIn: number; sellOut: number; salesRows: number };
+
+/** Dépense et ventes par mois sur N mois glissants (jusqu'à `endExclusive`), pour les tendances. */
+export async function monthlySeries(f: Omit<Filter, "range" | "prev" | "n1">, endExclusive: string, months = 13): Promise<MonthPoint[]> {
+  const end = new Date(endExclusive + "T12:00:00Z");
+  const start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() - months + 1, 1));
+  const range = { start: start.toISOString().slice(0, 10), end: endExclusive };
+  const rows = await aggregateBy("month", { ...f, range });
+  const out: MonthPoint[] = [];
+  for (let i = 0; i < months; i++) {
+    const d = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + i, 1));
+    const month = d.toISOString().slice(0, 7);
+    const a = rows.find((r) => r.key === month)?.aggregate;
+    out.push({ month, spent: a?.spend.spent ?? 0, measurableRows: a?.spend.measurableRows ?? 0, rows: a?.spend.rows ?? 0, sellIn: a?.sales.sellIn ?? 0, sellOut: a?.sales.sellOut ?? 0, salesRows: a?.sales.rows ?? 0 });
+  }
+  return out;
 }

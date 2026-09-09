@@ -197,3 +197,78 @@ describe("formules du dictionnaire", () => {
     assert.ok(m.ok); if (m.ok) { assert.equal(m.value, Math.round(((30 * 1 + 15 * 0.5) / 45) * 100)); assert.match(m.note ?? "", /2 composantes/); }
   });
 });
+
+/* ------------------------------ Analyses et verdicts ------------------------------ */
+import { classifyInvestment, channelMix, rankPairs } from "@/lib/analytics-marketing/analysis";
+import { diagnoseChannel } from "@/lib/analytics-marketing/diagnosis";
+import { DEFAULT_AD_THRESHOLDS, animationDayCostOf, animationMinMultipleOf } from "@/lib/settings";
+
+const spend = (spent: number, rows = 1) => ({ planned: 0, committed: 0, spent, rows, measurableRows: rows, unmeasuredRows: 0 });
+
+describe("classification d'investissement", () => {
+  test("sur / sous / aligné selon le seuil en points", () => {
+    assert.equal(classifyInvestment(0.30, 0.20, 5).cls, "SUR_INVESTI");
+    assert.equal(classifyInvestment(0.10, 0.20, 5).cls, "SOUS_INVESTI");
+    assert.equal(classifyInvestment(0.22, 0.20, 5).cls, "ALIGNE");
+    assert.equal(classifyInvestment(null, 0.20, 5).cls, "NON_CLASSABLE");
+  });
+  test("mix de canaux : parts et écart au portefeuille en points", () => {
+    const m = channelMix([{ key: "A", spent: 300 }, { key: "B", spent: 100 }, { key: "C", spent: 0 }], [{ key: "A", spent: 500 }, { key: "B", spent: 500 }]);
+    assert.deepEqual(m.map((r) => [r.key, r.share, r.deltaPts]), [["A", 0.75, 25], ["B", 0.25, -25]]);
+  });
+  test("meilleur / pire couple : relatif à la médiane du canal, au moins deux marques par canal", () => {
+    const S2 = { ...S, channelDiagnosis: { ...S.channelDiagnosis, minSpend: 100 } };
+    const r = rankPairs([
+      { brandId: "b1", channelKey: "META_ADS", agg: agg({ spend: spend(1000), results: { MESSAGES_STARTED: 100 } }), resultMetric: "PURCHASES", fallback: "MESSAGES_STARTED" },
+      { brandId: "b2", channelKey: "META_ADS", agg: agg({ spend: spend(1000), results: { MESSAGES_STARTED: 25 } }), resultMetric: "PURCHASES", fallback: "MESSAGES_STARTED" },
+      { brandId: "b1", channelKey: "INFLUENCE", agg: agg({ spend: spend(2000), results: { REACH: 20000 } }), resultMetric: "REACH", fallback: null },
+    ], S2);
+    assert.equal(r.best?.brandId, "b1"); assert.equal(r.best?.channelKey, "META_ADS");
+    assert.equal(r.worst?.brandId, "b2");
+    assert.equal(r.all.find((x) => x.channelKey === "INFLUENCE")?.relative, null, "un seul couple sur le canal : pas de classement");
+  });
+});
+
+describe("verdict par canal × marque", () => {
+  const channel = { key: "INFLUENCE", family: "INFLUENCE", resultMetric: "REACH" as const, fallbackResultMetric: null };
+  test("sous le seuil de dépense : WATCH, jamais « stable »", () => {
+    const v = diagnoseChannel({ cur: agg({ spend: spend(100), results: { REACH: 1000 }, sources: ["COLLABORATION"] }), prev: null, portfolio: null, channel, days: 30 }, S, DEFAULT_AD_THRESHOLDS);
+    assert.equal(v.verdict, "WATCH");
+  });
+  test("dépense non mesurable : WATCH avec renvoi vers Paramètres", () => {
+    const v = diagnoseChannel({ cur: agg({ spend: { planned: 0, committed: 0, spent: 0, rows: 5, measurableRows: 0, unmeasuredRows: 5 }, results: { SELLOUT_AMOUNT: 5000 }, sources: ["ANIMATION"] }), prev: null, portfolio: null, channel: { ...channel, key: "ANIMATION_POS", family: "TERRAIN" }, days: 30 }, S, DEFAULT_AD_THRESHOLDS);
+    assert.equal(v.verdict, "WATCH"); assert.match(v.actions[0], /Paramètres/);
+  });
+  test("générique : hausse du coût par résultat → OPTIMIZE ; baisse → SCALE ; très au-dessus des autres marques → STOP", () => {
+    const cur = agg({ spend: spend(2000), results: { REACH: 10000 }, sources: ["COLLABORATION"] }); // 0,20 MAD / portée
+    const cheaper = agg({ spend: spend(2000), results: { REACH: 20000 }, sources: ["COLLABORATION"] }); // 0,10
+    assert.equal(diagnoseChannel({ cur, prev: cheaper, portfolio: null, channel, days: 30 }, S, DEFAULT_AD_THRESHOLDS).verdict, "OPTIMIZE");
+    assert.equal(diagnoseChannel({ cur: cheaper, prev: cur, portfolio: null, channel, days: 30 }, S, DEFAULT_AD_THRESHOLDS).verdict, "SCALE");
+    const portfolio = agg({ spend: spend(10000), results: { REACH: 200000 }, sources: ["COLLABORATION"] }); // 0,05
+    assert.equal(diagnoseChannel({ cur, prev: null, portfolio, channel, days: 30 }, S, DEFAULT_AD_THRESHOLDS).verdict, "STOP");
+  });
+  test("véto stock : un SCALE devient MAINTAIN si un produit poussé est en tension", () => {
+    const cur = agg({ spend: spend(2000), results: { REACH: 20000 }, sources: ["COLLABORATION"] });
+    const prev = agg({ spend: spend(2000), results: { REACH: 10000 }, sources: ["COLLABORATION"] });
+    const v = diagnoseChannel({ cur, prev, portfolio: null, channel, days: 30, stockTension: ["p1"] }, S, DEFAULT_AD_THRESHOLDS);
+    assert.equal(v.verdict, "MAINTAIN"); assert.match(v.why, /rupture|couverture/);
+  });
+  test("animation : rentable au-dessus de l'objectif journalier, STOP sous le plancher", () => {
+    const anim = { key: "ANIMATION_POS", family: "TERRAIN", resultMetric: "SELLOUT_AMOUNT" as const, fallbackResultMetric: null };
+    const settings = { ...S, animationMonthlyCost: 7000, animationDaysPerMonth: 22, animationTargetSelloutPerDay: 1700 };
+    assert.equal(animationDayCostOf(settings), 318);
+    assert.ok(Math.abs(animationMinMultipleOf(settings) - 1700 / 318) < 1e-9);
+    const good = diagnoseChannel({ cur: agg({ spend: spend(3180, 10), results: { SELLOUT_AMOUNT: 20000 }, sources: ["ANIMATION"] }), prev: null, portfolio: null, channel: anim, days: 30 }, settings, DEFAULT_AD_THRESHOLDS);
+    assert.equal(good.verdict, "SCALE"); assert.match(good.why, /1.700 MAD TTC par jour/);
+    const bad = diagnoseChannel({ cur: agg({ spend: spend(3180, 10), results: { SELLOUT_AMOUNT: 4000 }, sources: ["ANIMATION"] }), prev: null, portfolio: null, channel: anim, days: 30 }, settings, DEFAULT_AD_THRESHOLDS);
+    assert.equal(bad.verdict, "STOP");
+    const mid = diagnoseChannel({ cur: agg({ spend: spend(3180, 10), results: { SELLOUT_AMOUNT: 10000 }, sources: ["ANIMATION"] }), prev: null, portfolio: null, channel: anim, days: 30 }, settings, DEFAULT_AD_THRESHOLDS);
+    assert.equal(mid.verdict, "OPTIMIZE");
+  });
+  test("régie : passe par le moteur Digital Ads (aucune conversion → STOP)", () => {
+    const meta = { key: "META_ADS", family: "DIGITAL_PAID", resultMetric: "PURCHASES" as const, fallbackResultMetric: "MESSAGES_STARTED" as const };
+    const v = diagnoseChannel({ cur: agg({ spend: spend(5000), results: { IMPRESSIONS: 100000, CLICKS: 900, MESSAGES_STARTED: 40 }, sources: ["AD_METRIC"] }), prev: null, portfolio: null, channel: meta, days: 30 }, S, DEFAULT_AD_THRESHOLDS);
+    assert.equal(v.engine, "ADS"); assert.equal(v.verdict, "STOP");
+    assert.equal(v.costPerResult?.key, "MESSAGES_STARTED");
+  });
+});

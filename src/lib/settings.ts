@@ -95,6 +95,15 @@ export type AnalyticsSettings = {
    * sans dépense, jamais une dépense à 0.
    */
   animationDayCost: number | null;
+  /** Coût mensuel CHARGÉ d'une animatrice (MAD, salaire + charges) et jours d'animation attendus par mois : déduisent le tarif journalier quand il n'est pas saisi. */
+  animationMonthlyCost: number | null;
+  animationDaysPerMonth: number;
+  /** Sell-out TTC attendu par jour d'animation (MAD). S'il est renseigné, il prime sur le multiple ci-dessous. */
+  animationTargetSelloutPerDay: number | null;
+  /** Sell-out TTC attendu par jour d'animation, en multiple du coût journalier : ≥ ce multiple = rentable (SCALE). */
+  animationMinSelloutMultiple: number;
+  /** En dessous de ce multiple, l'animation ne couvre pas son coût : STOP. */
+  animationStopSelloutMultiple: number;
   /** Poids du score de santé marketing (0-100 chacun ; une composante non mesurable sort du dénominateur). */
   healthWeights: { objective: number; roi: number; intensity: number; stockCoverage: number; dataQuality: number };
   /** Écart de points (part budget − part CA) au-delà duquel une marque est sur- ou sous-investie. */
@@ -143,6 +152,11 @@ export const DEFAULT_ANALYTICS_SETTINGS: AnalyticsSettings = {
   productSplit: "PRORATA_SALES",
   productSplitLookbackDays: 90,
   animationDayCost: null,
+  animationMonthlyCost: null,
+  animationDaysPerMonth: 22,
+  animationTargetSelloutPerDay: null,
+  animationMinSelloutMultiple: 4,
+  animationStopSelloutMultiple: 2,
   healthWeights: { objective: 30, roi: 25, intensity: 15, stockCoverage: 15, dataQuality: 15 },
   investmentBalancePts: 5,
   productCases: { pushedMinSpend: 500, pushedMinExposures: 2, sellingGrowthPct: 10 },
@@ -293,6 +307,20 @@ export function mergeAnalytics(stored: Partial<AnalyticsSettings> | null | undef
     reallocation: { ...d.reallocation, ...(stored.reallocation ?? {}) },
     alerts: { ...d.alerts, ...(stored.alerts ?? {}) },
   };
+}
+
+/** Coût d'une journée d'animation : tarif saisi, sinon salaire net mensuel ÷ jours attendus, sinon non mesurable. */
+export function animationDayCostOf(a: AnalyticsSettings): number | null {
+  if (a.animationDayCost !== null && a.animationDayCost > 0) return a.animationDayCost;
+  if (a.animationMonthlyCost !== null && a.animationMonthlyCost > 0 && a.animationDaysPerMonth > 0) return Math.round(a.animationMonthlyCost / a.animationDaysPerMonth);
+  return null;
+}
+
+/** Multiple de rentabilité attendu d'une animation : objectif journalier ÷ coût journalier s'ils sont connus, sinon le multiple saisi. */
+export function animationMinMultipleOf(a: AnalyticsSettings): number {
+  const day = animationDayCostOf(a);
+  if (a.animationTargetSelloutPerDay !== null && a.animationTargetSelloutPerDay > 0 && day) return a.animationTargetSelloutPerDay / day;
+  return a.animationMinSelloutMultiple;
 }
 
 export async function getSettings(): Promise<ComanetSettings> {

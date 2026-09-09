@@ -9,7 +9,7 @@ import "server-only";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { iso, today, startOfMonth } from "@/lib/format";
-import { getSettings } from "@/lib/settings";
+import { getSettings, animationDayCostOf } from "@/lib/settings";
 
 export type QualityIssue = {
   key: string;
@@ -50,6 +50,7 @@ const samplesSql = (expr: ReturnType<typeof sql>) => sql`(array_agg(distinct ${e
 export async function qualityReport(): Promise<QualityReport> {
   const settings = await getSettings();
   const year = today().getUTCFullYear();
+  const dayCost = animationDayCostOf(settings.analytics);
   const thisMonth = iso(startOfMonth(today())).slice(0, 7);
 
   const [
@@ -63,7 +64,7 @@ export async function qualityReport(): Promise<QualityReport> {
              from ad_metrics m where m.campaign_id is null`),
     one(sql`select count(*)::int as n, null::int as total, ${samplesSql(sql`s.source_label`)} as samples from fact_marketing_spend s where s.source_ref = 'REGIE_PRIORITAIRE'`),
     one(sql`select count(distinct s.source_id)::int as n, (select count(*) from animations where status <> 'CANCELLED')::int as total, null::text[] as samples
-             from fact_marketing_spend s where s.source_kind = 'ANIMATION' and s.source_ref = 'COUT_NON_MESURE'`),
+             from fact_marketing_spend s where s.source_kind = 'ANIMATION' and s.source_ref in ('COUT_NON_MESURE', 'TARIF_JOURNALIER')`),
     one(sql`select count(*)::int as n, (select count(*) from animations where status <> 'CANCELLED')::int as total, ${samplesSql(sql`a.date::text || ' · ' || coalesce(a.city, '?')`)} as samples
              from animations a where a.status <> 'CANCELLED' and a.brand_id is null and not exists (select 1 from animation_lines l where l.animation_id = a.id)`),
     one(sql`select count(*)::int as n, (select count(*) from content_items where published_at is not null)::int as total, ${samplesSql(sql`c.title`)} as samples
@@ -96,7 +97,7 @@ export async function qualityReport(): Promise<QualityReport> {
   push({ key: "spend-no-product", label: "Dépenses sans produit", why: "Sans produit, la dépense compte au niveau marque mais n'entre pas dans l'analyse par produit (4 cas).", count: spendNoProduct.n, total: spendNoProduct.total, owner: OWNER_MARKETING, href: "/marketing/budgets", severity: "orange", row: spendNoProduct });
   push({ key: "ads-no-campaign", label: "Campagnes de régie non rattachées à une campagne COMANET", why: "Sans rattachement, une dépense Ads n'a ni produit ni objectif : coût par résultat seulement.", count: adsNoCampaign.n, total: adsNoCampaign.total, owner: OWNER_DIGITAL, href: "/marketing/ads", severity: "orange", row: adsNoCampaign });
   push({ key: "regie-overridden", label: "Dépenses média saisies écartées (régie prioritaire)", why: "La régie couvre le même mois : la saisie manuelle est conservée sans montant pour ne pas compter deux fois.", count: regieOverridden.n, total: null, owner: OWNER_MARKETING, href: "/marketing/budgets", severity: "yellow", row: regieOverridden, completeness: null });
-  push({ key: "anim-no-cost", label: settings.analytics.animationDayCost ? "Animations sans coût (tarif journalier appliqué)" : "Animations sans coût : dépense terrain non mesurable", why: settings.analytics.animationDayCost ? `Le tarif de ${settings.analytics.animationDayCost} MAD/jour est appliqué à ces animations.` : "Sans coût saisi ni tarif journalier en Paramètres, le canal Animation affiche des résultats sans dépense : ni ROI ni coût par résultat.", count: animNoCost.n, total: animNoCost.total, owner: settings.analytics.animationDayCost ? OWNER_TERRAIN : OWNER_ADMIN, href: settings.analytics.animationDayCost ? "/terrain" : "/parametres/analytics", severity: settings.analytics.animationDayCost ? "yellow" : "red", row: animNoCost });
+  push({ key: "anim-no-cost", label: dayCost ? "Animations sans coût (tarif journalier appliqué)" : "Animations sans coût : dépense terrain non mesurable", why: dayCost ? `Le tarif de ${dayCost} MAD/jour est appliqué à ces animations.` : "Sans coût saisi ni tarif journalier en Paramètres, le canal Animation affiche des résultats sans dépense : ni ROI ni coût par résultat.", count: animNoCost.n, total: animNoCost.total, owner: dayCost ? OWNER_TERRAIN : OWNER_ADMIN, href: dayCost ? "/terrain" : "/parametres/analytics", severity: dayCost ? "yellow" : "red", row: animNoCost, completeness: dayCost ? null : undefined });
   push({ key: "anim-no-lines", label: "Animations sans ligne produit ni marque", why: "La marque d'une animation se déduit de ses produits : sans ligne, elle n'entre dans aucune analyse.", count: animNoLines.n, total: animNoLines.total, owner: OWNER_TERRAIN, href: "/terrain", severity: "orange", row: animNoLines });
   push({ key: "content-no-perf", label: "Contenus publiés sans performance", why: "Portée et engagement saisis à la main sont les seuls résultats des canaux organiques.", count: contentNoPerf.n, total: contentNoPerf.total, owner: OWNER_MARKETING, href: "/marketing/planning", severity: "orange", row: contentNoPerf });
   push({ key: "activation-no-results", label: "Activations terminées sans résultats", why: "Sans participants, leads, échantillons ou commandes, l'activation a un coût et aucun retour.", count: activationsNoResults.n, total: activationsNoResults.total, owner: OWNER_MARKETING, href: "/marketing/activations?periode=tout", severity: "orange", row: activationsNoResults });
