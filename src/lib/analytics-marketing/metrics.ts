@@ -120,14 +120,14 @@ export const FORMULAS: Record<MetricKey, Formula> = {
   SALES_GROWTH_PREV: (a) => {
     if (!a.sales.rows) return insufficient("aucune vente Sage importée sur la période", OWNER_SALES, "/imports");
     if (a.compare.sellInPrev === null) return insufficient("période précédente non couverte par un import Sage", OWNER_SALES, "/imports");
-    const r = ratio(a.sales.sellIn - a.compare.sellInPrev, a.compare.sellInPrev);
-    return r === null ? insufficient("CA nul sur la période précédente", OWNER_SALES) : measured(r * 100);
+    if (a.compare.sellInPrev <= 0) return insufficient("CA nul ou négatif (avoirs) sur la période précédente : pas comparable", OWNER_SALES);
+    return measured(((a.sales.sellIn - a.compare.sellInPrev) / a.compare.sellInPrev) * 100);
   },
   SALES_GROWTH_N1: (a) => {
     if (!a.sales.rows) return insufficient("aucune vente Sage importée sur la période", OWNER_SALES, "/imports");
     if (a.compare.sellInN1 === null) return insufficient("même période N-1 non couverte par un import Sage", OWNER_SALES, "/imports");
-    const r = ratio(a.sales.sellIn - a.compare.sellInN1, a.compare.sellInN1);
-    return r === null ? insufficient("CA nul sur la période N-1", OWNER_SALES) : measured(r * 100);
+    if (a.compare.sellInN1 <= 0) return insufficient("CA nul ou négatif (avoirs) sur la période N-1 : pas comparable", OWNER_SALES);
+    return measured(((a.sales.sellIn - a.compare.sellInN1) / a.compare.sellInN1) * 100);
   },
 
   /* ---- Résultats ---- */

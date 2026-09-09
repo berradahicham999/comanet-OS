@@ -8,8 +8,7 @@ import { PageHeader, Card, Tabs, Section, Badge, BrandDot, Empty } from "@/compo
 import { ANALYTICS_TABS, MeasuredValue } from "@/components/analytics";
 import { AnalyticsFilters } from "@/components/analytics-filters";
 import { Matrix, Bars } from "@/components/analytics-charts";
-import { monthLabel } from "@/components/charts";
-import { fmtMAD, fmtPct } from "@/lib/format";
+import { fmtMAD, fmtPct, fmtMonth } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Analytics · Par marque" };
@@ -108,7 +107,7 @@ export default async function AnalyticsBrandsPage(props: { searchParams: Promise
             <table className="w-full text-sm">
               <thead><tr className="text-left text-xs text-muted"><th className="px-4 py-2">Mois</th><th className="px-2 py-2 text-right">Dépense</th><th className="px-2 py-2 text-right">Sell-in HT</th><th className="px-4 py-2 text-right">Sell-out TTC</th></tr></thead>
               <tbody>{series.map((m) => (
-                <tr key={m.month} className="border-t border-line"><td className="px-4 py-1.5">{monthLabel(m.month)}</td><td className="px-2 py-1.5 text-right tabular-nums">{m.rows ? fmtMAD(m.spent, { compact: true }) : "—"}</td><td className="px-2 py-1.5 text-right tabular-nums">{m.salesRows ? fmtMAD(m.sellIn, { compact: true }) : <span className="text-muted">pas d&apos;import</span>}</td><td className="px-4 py-1.5 text-right tabular-nums">{m.sellOut > 0 ? fmtMAD(m.sellOut, { compact: true }) : "—"}</td></tr>
+                <tr key={m.month} className="border-t border-line"><td className="px-4 py-1.5">{fmtMonth(m.month + "-01")}</td><td className="px-2 py-1.5 text-right tabular-nums">{m.rows ? fmtMAD(m.spent, { compact: true }) : "—"}</td><td className="px-2 py-1.5 text-right tabular-nums">{m.salesRows ? fmtMAD(m.sellIn, { compact: true }) : <span className="text-muted">pas d&apos;import</span>}</td><td className="px-4 py-1.5 text-right tabular-nums">{m.sellOut > 0 ? fmtMAD(m.sellOut, { compact: true }) : "—"}</td></tr>
               ))}</tbody>
             </table>
           </Card>

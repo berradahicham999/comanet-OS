@@ -64,3 +64,48 @@ export function rankPairs(pairs: { brandId: string; channelKey: string; agg: Agg
   const sorted = [...eligible].sort((a, b) => (a.relative as number) - (b.relative as number));
   return { best: sorted[0] ?? null, worst: sorted.length > 1 ? sorted[sorted.length - 1] : null, all: scored };
 }
+
+/* ------------------------------ Produits : quatre cas ------------------------------ */
+
+export type ProductCase = "POUSSE_VEND" | "POUSSE_VEND_PAS" | "PAS_POUSSE_VEND" | "DORMANT";
+export const PRODUCT_CASE_META: Record<ProductCase, { label: string; action: string; tone: "green" | "red" | "accent" | "gray" }> = {
+  POUSSE_VEND: { label: "Poussé et qui se vend", action: "Continuer, en surveillant la couverture de stock.", tone: "green" },
+  POUSSE_VEND_PAS: { label: "Poussé et qui ne se vend pas", action: "Arrêter ou changer d'angle : produit, message, canal ou cible.", tone: "red" },
+  PAS_POUSSE_VEND: { label: "Pas poussé et qui se vend", action: "Pépite : amplifier si le stock suit.", tone: "accent" },
+  DORMANT: { label: "Pas poussé et qui ne se vend pas", action: "Dormant : traiter avec le stock (déstockage, retrait, promotion ciblée).", tone: "gray" },
+};
+
+export type ProductSignal = {
+  /** Dépense allouée (MAD) et nombre d'actions distinctes (contenus + activations + animations + collaborations) qui l'ont mis en avant. */
+  spent: number; exposures: number;
+  /** Sell-in période et période précédente (null : non comparable). */
+  sellIn: number; sellInPrev: number | null;
+  /** Sell-in médian des produits de la marque sur la période (null : marque à un seul produit). */
+  brandMedianSellIn: number | null;
+};
+
+/**
+ * Classification d'un produit :
+ *  - poussé = dépense allouée ≥ seuil OU nombre d'actions ≥ seuil ;
+ *  - se vend = croissance vs période précédente ≥ seuil OU sell-in au-dessus de la médiane de sa marque.
+ * Un produit sans vente ni période précédente comparable est « ne se vend pas » seulement s'il a 0 vente.
+ */
+export function classifyProduct(s: ProductSignal, t: AnalyticsSettings["productCases"]): { cls: ProductCase; pushed: boolean; selling: boolean; growthPct: number | null } {
+  const pushed = s.spent >= t.pushedMinSpend || s.exposures >= t.pushedMinExposures;
+  const growthPct = s.sellInPrev !== null && s.sellInPrev > 0 ? ((s.sellIn - s.sellInPrev) / s.sellInPrev) * 100 : null;
+  const aboveMedian = s.brandMedianSellIn !== null && s.brandMedianSellIn > 0 && s.sellIn > s.brandMedianSellIn;
+  const selling = (growthPct !== null && growthPct >= t.sellingGrowthPct) || aboveMedian || (growthPct === null && s.brandMedianSellIn === null && s.sellIn > 0);
+  const cls: ProductCase = pushed ? (selling ? "POUSSE_VEND" : "POUSSE_VEND_PAS") : selling ? "PAS_POUSSE_VEND" : "DORMANT";
+  return { cls, pushed, selling, growthPct };
+}
+
+export type StockAdvice = { level: "RUPTURE" | "TENSION" | "SURSTOCK" | "OK" | "INCONNU"; label: string };
+
+/** Croisement avec le stock : jamais recommander de pousser un produit en rupture ou sous un mois ; signaler le surstock à écouler. */
+export function stockAdvice(p: { stockKnown: boolean; stock: number; coverageMonths: number | null; underTension: boolean; overstock: boolean }): StockAdvice {
+  if (!p.stockKnown) return { level: "INCONNU", label: "stock inconnu : importer un instantané avant de pousser" };
+  if (p.stock <= 0) return { level: "RUPTURE", label: "en rupture : ne pas pousser" };
+  if (p.underTension || (p.coverageMonths !== null && p.coverageMonths < 1)) return { level: "TENSION", label: `${p.coverageMonths === null ? "couverture courte" : `${p.coverageMonths.toFixed(1)} mois de couverture`} : ne pas pousser avant réassort` };
+  if (p.overstock) return { level: "SURSTOCK", label: `surstock (${p.coverageMonths?.toFixed(0)} mois) : le marketing peut l'écouler` };
+  return { level: "OK", label: p.coverageMonths === null ? "pas de vente récente" : `${p.coverageMonths.toFixed(1)} mois de couverture` };
+}

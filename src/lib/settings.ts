@@ -116,6 +116,9 @@ export type AnalyticsSettings = {
     pushedMinExposures: number;
     /** Croissance de sell-in (%) vs période précédente à partir de laquelle un produit « se vend ». */
     sellingGrowthPct: number;
+    /** Surstock : couverture supérieure à N mois sur au moins N unités (définition partagée avec la règle stock). */
+    overstockMonths: number;
+    overstockMinUnits: number;
   };
   /** Verdict par canal × marque hors Ads (les Ads gardent `settings.ads`). */
   channelDiagnosis: {
@@ -159,7 +162,7 @@ export const DEFAULT_ANALYTICS_SETTINGS: AnalyticsSettings = {
   animationStopSelloutMultiple: 2,
   healthWeights: { objective: 30, roi: 25, intensity: 15, stockCoverage: 15, dataQuality: 15 },
   investmentBalancePts: 5,
-  productCases: { pushedMinSpend: 500, pushedMinExposures: 2, sellingGrowthPct: 10 },
+  productCases: { pushedMinSpend: 500, pushedMinExposures: 2, sellingGrowthPct: 10, overstockMonths: 6, overstockMinUnits: 50 },
   channelDiagnosis: { minSpend: 300, costRisePct: 20, costDropPct: 15, costVsPortfolioFactor: 1.8, degradingWeeks: 3 },
   reallocation: { minShiftMad: 1000, maxShiftPct: 30 },
   alerts: { budgetDriftPct: 10, brandNoSpendObjectiveDropPct: 15 },
