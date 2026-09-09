@@ -74,11 +74,12 @@ export const budgetDriftRule: Rule = {
   async run({ settings, now }) {
     const year = now.getUTCFullYear();
     const rows = await db.execute<{ brand_id: string; brand: string; category: string; planned: number; committed: number }>(sql`
-      select b.id::text as brand_id, b.name as brand, bl.category::text as category, sum(bl.amount)::float8 as planned,
-             coalesce((select sum(s.committed) from fact_marketing_spend s where s.brand_id = b.id and s.budget_category = bl.category and s.is_partial = false and extract(year from s.day) = ${year}), 0)::float8 as committed
-      from budget_lines bl join brands b on b.id = bl.brand_id
-      where bl.year = ${year} and b.active and b.merged_into_id is null
-      group by 1, 2, 3, bl.category`);
+      with plan as (select brand_id, category, sum(amount)::float8 as planned from budget_lines where year = ${year} group by 1, 2),
+           com as (select brand_id, budget_category as category, sum(committed)::float8 as committed from fact_marketing_spend where is_partial = false and extract(year from day) = ${year} group by 1, 2)
+      select b.id::text as brand_id, b.name as brand, p.category::text as category, p.planned, coalesce(c.committed, 0)::float8 as committed
+      from plan p join brands b on b.id = p.brand_id
+      left join com c on c.brand_id = p.brand_id and c.category = p.category
+      where b.active and b.merged_into_id is null`);
     const tol = settings.analytics.alerts.budgetDriftPct;
     const out: Recommendation[] = [];
     for (const r of rows.rows) {
