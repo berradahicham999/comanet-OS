@@ -16,7 +16,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { factMarketingSpend, factMarketingResult, analyticsRefreshLog } from "@/db/schema";
-import { getSettings, type AnalyticsSettings } from "@/lib/settings";
+import { getSettings, animationDayCostOf, type AnalyticsSettings } from "@/lib/settings";
 import { AD_EXPENSE_CATEGORIES } from "@/lib/ad-spend";
 import { iso, today, addDays } from "@/lib/format";
 import { SOURCE_KINDS, type SourceKind, type ResultKey } from "./shared";
@@ -123,7 +123,7 @@ const loadAdMetrics: Loader = async (ctx, out) => {
       day: r.date, brandId: brandOf(ctx, r.brand_id), city: null, campaignId: r.campaign_id,
       channelKey: channelOf(ctx, "AD_PLATFORM", r.platform, "DIGITAL_OTHER"), subChannel: r.campaign_name,
       budgetCategory: (["META", "TIKTOK", "GOOGLE"].includes(r.platform) ? r.platform : "DIGITAL") as SpendRow["budgetCategory"],
-      sourceKind: "AD_METRIC", sourceId: r.id, sourceLabel: r.ad_name ?? r.campaign_name, sourceRef: null,
+      sourceKind: "AD_METRIC", sourceId: r.id, sourceLabel: r.campaign_name, sourceRef: null,
       isPartial: r.is_partial, attributionMode: revenue > 0 ? "MEASURED" : "NONE", attributedRevenue: revenue > 0 ? revenue : null,
     }, { planned: null, committed: null, spent: Number(r.spend) || 0 }, splits, [
       { key: "IMPRESSIONS", value: r.impressions }, { key: "REACH", value: r.reach }, { key: "CLICKS", value: r.clicks },
@@ -242,7 +242,7 @@ const loadAnimations: Loader = async (ctx, out) => {
             from animation_lines al join products p on p.id = al.product_id where al.animation_id = a.id) as lines
     from animations a left join users u on u.id = a.animatrice_id
     where a.status <> 'CANCELLED'`);
-  const dayCost = ctx.settings.animationDayCost;
+  const dayCost = animationDayCostOf(ctx.settings);
   for (const r of rows.rows) {
     const cost = animationCost(Number(r.cost) || 0, r.days, dayCost);
     const lines = (r.lines ?? []).filter((l) => l.brand_id || r.head_brand);
