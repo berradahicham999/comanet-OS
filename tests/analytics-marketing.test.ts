@@ -305,3 +305,40 @@ describe("classification des produits en quatre cas", () => {
     assert.equal(isOverstock({ coverageMonths: 9, stock: 10 }, { overstockMonths: 6, overstockMinUnits: 50 }), false);
   });
 });
+
+/* ------------------------------ Réallocation et dégradation ------------------------------ */
+import { proposeReallocations, reallocationSentence } from "@/lib/analytics-marketing/reallocation";
+import { isDegrading } from "@/lib/analytics-marketing/decision-shared";
+
+describe("réallocation mensuelle", () => {
+  const v = (verdict: "SCALE" | "STOP" | "OPTIMIZE" | "MAINTAIN" | "WATCH", cpr: number | null, key: "REACH" | "MESSAGES_STARTED" = "REACH") => ({ verdict, headline: `${verdict} test`, why: "raison", actions: [], costPerResult: cpr === null ? null : { value: cpr, key, prev: null, portfolio: null }, engine: "GENERIC" as const });
+  const labels = { brand: (id: string) => `Marque ${id}`, channel: (k: string) => `Canal ${k}`, result: (k: string) => k };
+  test("déplace une part d'un canal STOP vers le canal SCALE le moins cher, avec résultat attendu", () => {
+    const r = proposeReallocations([
+      { brandId: "b", channelKey: "A", spent: 10000, measurableRows: 5, rows: 5, hasPrev: true, verdict: v("STOP", 50) },
+      { brandId: "b", channelKey: "B", spent: 5000, measurableRows: 5, rows: 5, hasPrev: true, verdict: v("SCALE", 10) },
+      { brandId: "b", channelKey: "C", spent: 5000, measurableRows: 5, rows: 5, hasPrev: true, verdict: v("SCALE", 20) },
+    ], S, labels);
+    assert.equal(r.length, 1);
+    assert.equal(r[0].toChannel, "B"); assert.equal(r[0].amount, 6000); assert.equal(r[0].fromSharePct, 60);
+    assert.deepEqual(r[0].expected, { key: "REACH", value: 600, costPerResult: 10 });
+    assert.equal(r[0].confidence, "HAUTE");
+    assert.match(reallocationSentence(r[0], labels), /Déplacer 6.000 MAD .* de Canal A vers Canal B pour Marque b/);
+  });
+  test("OPTIMIZE : part limitée à maxShiftPct ; sous le montant minimal : rien ; sans cible SCALE : rien", () => {
+    const opt = proposeReallocations([
+      { brandId: "b", channelKey: "A", spent: 10000, measurableRows: 5, rows: 5, hasPrev: false, verdict: v("OPTIMIZE", 50) },
+      { brandId: "b", channelKey: "B", spent: 500, measurableRows: 5, rows: 5, hasPrev: false, verdict: v("SCALE", 10) },
+    ], S, labels);
+    assert.equal(opt[0].amount, 3000); assert.equal(opt[0].confidence, "FAIBLE");
+    assert.equal(proposeReallocations([{ brandId: "b", channelKey: "A", spent: 1500, measurableRows: 1, rows: 1, hasPrev: true, verdict: v("OPTIMIZE", 50) }, { brandId: "b", channelKey: "B", spent: 5000, measurableRows: 1, rows: 1, hasPrev: true, verdict: v("SCALE", 10) }], S, labels).length, 0);
+    assert.equal(proposeReallocations([{ brandId: "b", channelKey: "A", spent: 10000, measurableRows: 1, rows: 1, hasPrev: true, verdict: v("STOP", 50) }], S, labels).length, 0);
+  });
+  test("dégradation : coût strictement croissant sur n semaines closes", () => {
+    const pts = (xs: (number | null)[]) => xs.map((c, i) => ({ week: `2026-W3${i}`, costPerResult: c }));
+    assert.equal(isDegrading(pts([10, 11, 12, 13]), 3), true);
+    assert.equal(isDegrading(pts([10, 11, 11, 13]), 3), false);
+    assert.equal(isDegrading(pts([10, 11, null, 13]), 3), false);
+    assert.equal(isDegrading(pts([11, 12, 13]), 3), false, "il faut n + 1 points");
+  });
+});

@@ -30,7 +30,7 @@ export function AnalyticsFilters({ period, brand, channel, city, brands, channel
       {!hide.includes("city") && cities && cities.length > 0 && (
         <select name="city" defaultValue={city ?? ""} className={sel} aria-label="Ville">
           <option value="">Toutes les villes</option>
-          {cities.map((c) => <option key={c} value={c}>{c}</option>)}
+          {cities.map((c) => <option key={c} value={c}>{c.toLowerCase().replace(/(^|[\s-])\S/g, (m) => m.toUpperCase())}</option>)}
         </select>
       )}
       <button type="submit" className="btn-ghost btn-sm">Appliquer</button>

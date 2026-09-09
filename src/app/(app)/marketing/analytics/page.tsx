@@ -6,7 +6,7 @@ import { compute } from "@/lib/analytics-marketing/metrics";
 import { rankPairs } from "@/lib/analytics-marketing/analysis";
 import { getRecommendations } from "@/lib/rules";
 import { PageHeader, Card, Tabs, Section, Badge, BrandDot } from "@/components/ui";
-import { ANALYTICS_TABS, MeasuredValue, formatMetric } from "@/components/analytics";
+import { ANALYTICS_TABS, MeasuredValue, formatMetric, fmtCostPerResult } from "@/components/analytics";
 import { AnalyticsFilters } from "@/components/analytics-filters";
 import { Bars } from "@/components/analytics-charts";
 import { fmtMAD, fmtNum, fmtMonth, fmtDate } from "@/lib/format";
@@ -20,8 +20,8 @@ export default async function AnalyticsHomePage(props: { searchParams: Promise<S
   const { filter, prevFilter, settings, metrics, period } = ctx;
   const mctx = { settings: settings.analytics, health: { stockCoverageOk: null, dataQuality: ctx.completeness } };
 
-  const [total, prevTotal, byBrand, byChannel, pairs, series, recs] = await Promise.all([
-    aggregate(filter), aggregate(prevFilter), aggregateBy("brand", filter), aggregateBy("channel", filter), aggregateBy("brand_channel", filter),
+  const [total, prevTotal, byBrand, byChannel, pairs, byProduct, series, recs] = await Promise.all([
+    aggregate(filter), aggregate(prevFilter), aggregateBy("brand", filter), aggregateBy("channel", filter), aggregateBy("brand_channel", filter), aggregateBy("product", filter),
     monthlySeries(filter, period.end, 13), getRecommendations(),
   ]);
   const openActions = recs.filter((r) => (r.category === "MARKETING" || r.category === "BUDGET") && !r.existingTask).length;
@@ -61,10 +61,10 @@ export default async function AnalyticsHomePage(props: { searchParams: Promise<S
             <div className="mt-2 text-sm"><span className="text-muted">Retour observé : </span><MeasuredValue m={roiC} unit="MULTIPLE" attribution="CORRELATION" size="sm" /></div>
           </Card>
           <Card title="Meilleur couple marque × canal">
-            {ranking.best ? <><div className="font-semibold">{pairLabel(ranking.best)}</div><div className="text-xs text-muted mt-1">coût par {ranking.best.resultKey?.toLowerCase().replace(/_/g, " ")} {fmtMAD(ranking.best.costPerResult)} · {(ranking.best.relative as number).toFixed(2)}× la médiane du canal</div></> : <span className="text-xs text-muted">données insuffisantes : il faut au moins deux marques mesurées sur un même canal</span>}
+            {ranking.best ? <><div className="font-semibold">{pairLabel(ranking.best)}</div><div className="text-xs text-muted mt-1">coût par {(ctx.metrics.get(ranking.best.resultKey ?? "")?.label ?? ranking.best.resultKey ?? "").toLowerCase()} : {fmtCostPerResult(ranking.best.costPerResult ?? 0, ranking.best.resultKey)} · {(ranking.best.relative as number).toFixed(2)}× la médiane du canal</div></> : <span className="text-xs text-muted">données insuffisantes : il faut au moins deux marques mesurées sur un même canal</span>}
           </Card>
           <Card title="Pire couple marque × canal">
-            {ranking.worst ? <><div className="font-semibold">{pairLabel(ranking.worst)}</div><div className="text-xs text-muted mt-1">coût par {ranking.worst.resultKey?.toLowerCase().replace(/_/g, " ")} {fmtMAD(ranking.worst.costPerResult)} · {(ranking.worst.relative as number).toFixed(2)}× la médiane du canal</div></> : <span className="text-xs text-muted">données insuffisantes</span>}
+            {ranking.worst ? <><div className="font-semibold">{pairLabel(ranking.worst)}</div><div className="text-xs text-muted mt-1">coût par {(ctx.metrics.get(ranking.worst.resultKey ?? "")?.label ?? ranking.worst.resultKey ?? "").toLowerCase()} : {fmtCostPerResult(ranking.worst.costPerResult ?? 0, ranking.worst.resultKey)} · {(ranking.worst.relative as number).toFixed(2)}× la médiane du canal</div></> : <span className="text-xs text-muted">données insuffisantes</span>}
           </Card>
           <Card title="Actions ouvertes" href="/actions">
             <div className="text-2xl font-semibold tabular-nums">{openActions}</div>
@@ -79,12 +79,12 @@ export default async function AnalyticsHomePage(props: { searchParams: Promise<S
           {byBrand.length === 0 && <p className="text-xs text-muted">Aucune dépense ni vente sur la période.</p>}
         </Card>
         <Card title="Par canal" href={withFilters("/marketing/analytics/canaux", ctx)} action={<span className="text-xs text-accent">voir →</span>}>
-          <Bars rows={byChannel.slice(0, 6).map((r) => { const c = channelOf(r.key); const cpr = compute("COST_PER_RESULT", r.aggregate, { ...mctx, resultMetric: { key: c?.resultMetric ?? null, fallback: c?.fallbackResultMetric ?? null } }); return { label: c?.label ?? r.key, value: r.aggregate.spend.measurableRows ? r.aggregate.spend.spent : null, color: c?.color, sub: cpr.ok ? `${fmtMAD(cpr.value)} / résultat` : r.aggregate.spend.rows && !r.aggregate.spend.measurableRows ? "coût non mesuré" : "résultat non mesuré" }; })} />
+          <Bars rows={byChannel.slice(0, 6).map((r) => { const c = channelOf(r.key); const cpr = compute("COST_PER_RESULT", r.aggregate, { ...mctx, resultMetric: { key: c?.resultMetric ?? null, fallback: c?.fallbackResultMetric ?? null } }); return { label: c?.label ?? r.key, value: r.aggregate.spend.measurableRows ? r.aggregate.spend.spent : null, color: c?.color, sub: cpr.ok ? `${fmtCostPerResult(cpr.value, c?.resultMetric && (r.aggregate.results[c.resultMetric] ?? 0) > 0 ? c.resultMetric : c?.fallbackResultMetric ?? null)} / ${(ctx.metrics.get(c?.resultMetric && (r.aggregate.results[c.resultMetric] ?? 0) > 0 ? c.resultMetric : c?.fallbackResultMetric ?? "")?.label ?? "résultat").toLowerCase()}` : r.aggregate.spend.rows && !r.aggregate.spend.measurableRows ? "coût non mesuré" : "résultat non mesuré" }; })} />
           {byChannel.length === 0 && <p className="text-xs text-muted">Aucune dépense sur la période.</p>}
         </Card>
         <Card title="Par produit" href={withFilters("/marketing/analytics/produits", ctx)} action={<span className="text-xs text-accent">voir →</span>}>
           <p className="text-sm text-ink-2">Ce qu&apos;on pousse contre ce qui se vend : quatre cas (continuer, arrêter, amplifier, dormant), croisés avec la couverture de stock.</p>
-          <p className="text-xs text-muted mt-2">Page livrée à l&apos;étape 6.</p>
+          <p className="text-xs text-muted mt-2">{fmtNum(byProduct.filter((r) => r.key).length)} produit(s) avec dépense ou vente sur la période.</p>
         </Card>
       </div>
 

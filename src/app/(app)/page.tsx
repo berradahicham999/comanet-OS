@@ -129,6 +129,17 @@ export default async function CockpitPage() {
             </div>
           </Card>}
 
+          {perms.marketing.view && <Card href="/marketing/analytics?period=last30" title="Analytics marketing · 30 j">
+            <div className="kpi">{d.analytics.spend === null ? "—" : fmtMAD(d.analytics.spend, { compact: true })} <span className="text-[14px] font-medium text-muted">dépensés</span></div>
+            <div className="text-[12px] text-muted mt-1">{d.analytics.roi === null ? `ROI non mesurable (${d.analytics.roiReason})` : `ROI mesuré ${d.analytics.roi.toFixed(2)}× sur ${Math.round(d.analytics.roiCoverage * 100)} % des dépenses`}</div>
+            <div className="mt-3 space-y-1 text-[12px]">
+              <div className="flex justify-between gap-2"><span className="text-muted">Meilleur couple</span><span className="font-medium truncate">{d.analytics.best ?? "—"}</span></div>
+              <div className="flex justify-between gap-2"><span className="text-muted">Pire couple</span><span className="font-medium truncate">{d.analytics.worst ?? "—"}</span></div>
+              <div className="flex justify-between"><span className="text-muted">Réallocations proposées</span><span className="font-medium">{d.analytics.reallocations}</span></div>
+              <div className="flex justify-between"><span className="text-muted">Complétude des données</span><span className="font-medium">{d.analytics.completeness === null ? "—" : `${Math.round(d.analytics.completeness * 100)} %`}</span></div>
+            </div>
+          </Card>}
+
           {perms.marketing.view && <Card href="/marketing" title="Digital · 30 j">
             <div className="kpi">{d.digital.roas !== null ? `${d.digital.roas.toFixed(1)}×` : "—"} <span className="text-[14px] font-medium text-muted">ROAS</span></div>
             <div className="text-[12px] text-muted mt-1">{fmtMAD(d.digital.spend, { compact: true })} dépensés · {fmtMAD(d.digital.revenue, { compact: true })} attribués</div>

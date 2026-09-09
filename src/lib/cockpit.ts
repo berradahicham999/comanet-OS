@@ -6,6 +6,7 @@ import { getRecommendations } from "./rules";
 import { getRefDate } from "./ref-date";
 import { addDays, iso, today } from "./format";
 import { budgetConsumption } from "./budget";
+import { analyticsBlock } from "./analytics-marketing/cockpit";
 import { adSpend } from "./ad-spend";
 import { selloutSumSql } from "./sellout";
 
@@ -20,7 +21,7 @@ export async function cockpitData() {
   const now = today();
   const d30 = iso(addDays(now, -30)), tomorrow = iso(addDays(now, 1));
 
-  const [cmp, objective, annualObj, ytdT, ytdN1T, series, seriesN1, brandRows, brands, stocks, recs, marketing, terrain, digital, regulatory, prevMonthBrands] = await Promise.all([
+  const [cmp, objective, annualObj, ytdT, ytdN1T, series, seriesN1, brandRows, brands, stocks, recs, marketing, analytics, terrain, digital, regulatory, prevMonthBrands] = await Promise.all([
     compareMonth({}, ref),
     objectiveFor(year, month, null),
     annualObjective(year, null),
@@ -33,6 +34,7 @@ export async function cockpitData() {
     productStocks({}, ref),
     getRecommendations(),
     marketingBlock(year),
+    analyticsBlock(ref, year),
     terrainBlock(now, d30, tomorrow),
     digitalBlock(d30, tomorrow),
     regulatoryBlock(now),
@@ -55,7 +57,7 @@ export async function cockpitData() {
     refDate, year, month, monthRange, proj,
     commercial: { cmp, objective, annualObj, ytd: ytdT, ytdN1: ytdN1T, series, seriesN1 },
     brandTable,
-    marketing, terrain: { ...terrain, sales7: terrainSales7 }, digital, regulatory,
+    marketing, analytics, terrain: { ...terrain, sales7: terrainSales7 }, digital, regulatory,
     stock: { ...stockSum, list: stocks },
     recs,
   };
