@@ -85,6 +85,8 @@ export const taskStatusEnum = pgEnum("task_status", [
   "IN_PROGRESS",
   "DONE",
   "CANCELLED",
+  /** Proposée par le copilote IA : n'entre ni dans les compteurs ni dans les retards tant qu'elle n'est pas acceptée. */
+  "PROPOSED",
 ]);
 
 export const taskPriorityEnum = pgEnum("task_priority", [
@@ -103,6 +105,8 @@ export const taskSourceEnum = pgEnum("task_source", [
   "TERRAIN",
   "COMMERCIAL",
   "MEDICAL",
+  /** Copilote IA (outil `propose_task`). */
+  "AI",
 ]);
 
 export const regulatoryStatusEnum = pgEnum("regulatory_status", [
@@ -2381,6 +2385,121 @@ export const analyticsRefreshLog = pgTable(
     triggeredBy: text("triggered_by").notNull().default("MANUAL"),
   },
   (t) => [index("analytics_refresh_log_source_idx").on(t.sourceKind, t.startedAt)],
+);
+
+/* ------------------------------------------------------------------ */
+/* Copilote IA                                                         */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Le copilote lit la donnée métier par des outils typés et n'écrit QUE dans ces tables
+ * (plus une insertion dans `tasks` au statut PROPOSED et un brouillon dans `ai_reports`).
+ * `tests/ai/read-only.test.ts` interdit toute autre écriture depuis `src/lib/ai/`.
+ */
+
+export const aiConversations = pgTable(
+  "ai_conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    title: text("title"),
+    /** Module ou page d'où la conversation a été ouverte (ex. « terrain », « /marketing/budgets »). */
+    contextModule: text("context_module"),
+    contextPath: text("context_path"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ai_conversations_user_idx").on(t.userId, t.updatedAt)],
+);
+
+export const aiMessages = pgTable(
+  "ai_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id").notNull().references(() => aiConversations.id, { onDelete: "cascade" }),
+    /** user | assistant */
+    role: text("role").notNull(),
+    content: text("content").notNull(),
+    /** Appels d'outils de ce tour (nom, paramètres, résumé du résultat). */
+    toolCalls: jsonb("tool_calls"),
+    tokensIn: integer("tokens_in").notNull().default(0),
+    tokensOut: integer("tokens_out").notNull().default(0),
+    cacheReadTokens: integer("cache_read_tokens").notNull().default(0),
+    model: text("model"),
+    latencyMs: integer("latency_ms"),
+    /** chat | explain | brief | plan | report */
+    surface: text("surface").notNull().default("chat"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ai_messages_conversation_idx").on(t.conversationId, t.createdAt), index("ai_messages_created_idx").on(t.createdAt)],
+);
+
+/** Journal de chaque appel d'outil : qui, quel outil, quels paramètres, durée, nombre de lignes. */
+export const aiToolCalls = pgTable(
+  "ai_tool_calls",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    messageId: uuid("message_id").references(() => aiMessages.id, { onDelete: "set null" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    tool: text("tool").notNull(),
+    params: jsonb("params"),
+    durationMs: integer("duration_ms").notNull().default(0),
+    rowCount: integer("row_count").notNull().default(0),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ai_tool_calls_user_idx").on(t.userId, t.createdAt), index("ai_tool_calls_tool_idx").on(t.tool)],
+);
+
+/** Réponses mises en cache : « Expliquer » (1 h par combinaison de filtres), brief du matin (1 jour par personne). */
+export const aiCache = pgTable(
+  "ai_cache",
+  {
+    key: text("key").primaryKey(),
+    surface: text("surface").notNull(),
+    content: text("content").notNull(),
+    model: text("model"),
+    tokensIn: integer("tokens_in").notNull().default(0),
+    tokensOut: integer("tokens_out").notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ai_cache_expires_idx").on(t.expiresAt)],
+);
+
+/** Plan d'exécution « Détailler » d'une recommandation de l'Action Center, par clé stable. */
+export const aiActionPlans = pgTable("ai_action_plans", {
+  recKey: text("rec_key").primaryKey(),
+  contentMd: text("content_md").notNull(),
+  model: text("model"),
+  createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Brouillons de rapports (COMANET WEEKLY, MONTHLY BRAND REVIEW) validables par la direction. */
+export const aiReports = pgTable(
+  "ai_reports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** WEEKLY | MONTHLY_BRAND_REVIEW */
+    type: text("type").notNull(),
+    brandId: uuid("brand_id").references(() => brands.id, { onDelete: "set null" }),
+    periodStart: date("period_start").notNull(),
+    periodEnd: date("period_end").notNull(),
+    title: text("title").notNull(),
+    contentMd: text("content_md").notNull(),
+    /** Outils appelés et périodes citées : chaque section du rapport indique sa source. */
+    sources: jsonb("sources"),
+    /** DRAFT | VALIDATED | ARCHIVED */
+    status: text("status").notNull().default("DRAFT"),
+    model: text("model"),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    validatedById: uuid("validated_by_id").references(() => users.id, { onDelete: "set null" }),
+    validatedAt: timestamp("validated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ai_reports_type_idx").on(t.type, t.periodStart), index("ai_reports_brand_idx").on(t.brandId)],
 );
 
 /* ------------------------------------------------------------------ */

@@ -219,8 +219,8 @@ export function PriorityBadge({ priority }: { priority: "LOW" | "MEDIUM" | "HIGH
   return <Badge tone={tone}>{label}</Badge>;
 }
 
-export function StatusBadge({ status }: { status: "TODO" | "IN_PROGRESS" | "DONE" | "CANCELLED" }) {
-  const map = { TODO: ["gray", "À faire"], IN_PROGRESS: ["blue", "En cours"], DONE: ["green", "Terminée"], CANCELLED: ["gray", "Annulée"] } as const;
+export function StatusBadge({ status }: { status: "TODO" | "IN_PROGRESS" | "DONE" | "CANCELLED" | "PROPOSED" }) {
+  const map = { TODO: ["gray", "À faire"], IN_PROGRESS: ["blue", "En cours"], DONE: ["green", "Terminée"], CANCELLED: ["gray", "Annulée"], PROPOSED: ["purple", "Proposée par le copilote"] } as const;
   const [tone, label] = map[status];
   return <Badge tone={tone}>{label}</Badge>;
 }

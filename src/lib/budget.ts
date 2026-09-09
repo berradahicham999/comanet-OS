@@ -46,6 +46,7 @@
  */
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
+import { pgArray } from "@/lib/sql-array";
 import { AD_EXPENSE_CATEGORIES, AD_SPEND_SOURCE_LABEL, type AdSpendSource } from "./ad-spend";
 
 export type BudgetConsumption = {
@@ -213,3 +214,30 @@ export async function budgetConsumption(year: number, brandId?: string | null): 
 }
 
 export { AD_SPEND_SOURCE_LABEL };
+
+/* --------------------------- Répartition par catégorie --------------------------- */
+
+export type BudgetCategoryRow = { category: string; planned: number; committed: number; spent: number };
+
+/**
+ * Enveloppe (`budget_lines`) et dépenses (`marketing_expenses`) par catégorie sur l'année, dans un périmètre
+ * de marques. Même lecture des statuts que `foldConsumption` : engagé = COMMITTED + SPENT, dépensé = SPENT.
+ * Sert au copilote IA (`get_marketing_budget`) ; la dépense de régie n'est pas ventilée ici, elle reste
+ * portée par `budgetConsumption()` (règle de priorité régie / saisie par marque).
+ */
+export async function budgetByCategory(year: number, brandId?: string | null, brandIds?: string[] | null): Promise<BudgetCategoryRow[]> {
+  const scope = brandId ? sql`and brand_id = ${brandId}::uuid` : brandIds ? sql`and brand_id = any(${pgArray(brandIds)})` : sql``;
+  const r = await db.execute(sql`
+    with lines as (
+      select category::text as category, sum(amount)::float8 as planned from budget_lines where year = ${year} ${scope} group by 1
+    ), exp as (
+      select category::text as category,
+        coalesce(sum(amount) filter (where status in ('COMMITTED','SPENT')), 0)::float8 as committed,
+        coalesce(sum(amount) filter (where status = 'SPENT'), 0)::float8 as spent
+      from marketing_expenses where extract(year from date) = ${year} ${scope} group by 1
+    )
+    select coalesce(l.category, e.category) as category, coalesce(l.planned, 0) as planned, coalesce(e.committed, 0) as committed, coalesce(e.spent, 0) as spent
+    from lines l full outer join exp e on e.category = l.category
+    order by coalesce(l.planned, 0) desc, coalesce(e.committed, 0) desc`);
+  return (r.rows as Record<string, unknown>[]).map((x) => ({ category: String(x.category), planned: Number(x.planned), committed: Number(x.committed), spent: Number(x.spent) }));
+}
