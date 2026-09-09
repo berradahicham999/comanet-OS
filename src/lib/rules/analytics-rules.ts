@@ -186,7 +186,8 @@ export const pushedNoEffectRule: Rule = {
       const s = sales.find((r) => r.key === p.id)?.aggregate;
       if (!e || !s) continue;
       const c = classifyProduct({ spent: e.spend.spent, exposures: e.spend.rows, sellIn: s.sales.sellIn, sellInPrev: s.compare.sellInPrev, brandMedianSellIn: null }, settings.analytics.productCases);
-      if (!c.pushed || c.growthPct === null || c.growthPct >= 0) continue;
+      // Signal retenu : dépense réelle (pas seulement des expositions) ET baisse au-delà du seuil de croissance.
+      if (!c.pushed || e.spend.spent < settings.analytics.productCases.pushedMinSpend || c.growthPct === null || c.growthPct > -settings.analytics.productCases.sellingGrowthPct) continue;
       out.push({
         key: `analytics-pushed-no-effect:${p.id}:${after.start}`, rule: "analytics-pushed-no-effect", category: "MARKETING",
         priority: e.spend.spent > settings.analytics.productCases.pushedMinSpend * 4 ? "HIGH" : "MEDIUM",
@@ -199,7 +200,8 @@ export const pushedNoEffectRule: Rule = {
         brandId: p.brand_id, score: e.spend.spent,
       });
     }
-    return out;
+    // Les dix plus grosses dépenses seulement : l'Action Center n'est pas une liste de 30 produits.
+    return out.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 10);
   },
 };
 

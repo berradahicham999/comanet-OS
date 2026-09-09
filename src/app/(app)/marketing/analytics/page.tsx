@@ -9,14 +9,16 @@ import { PageHeader, Card, Tabs, Section, Badge, BrandDot } from "@/components/u
 import { ANALYTICS_TABS, MeasuredValue, formatMetric, fmtCostPerResult } from "@/components/analytics";
 import { AnalyticsFilters } from "@/components/analytics-filters";
 import { Bars } from "@/components/analytics-charts";
+import { AskBlock } from "@/components/analytics-ask";
 import { fmtMAD, fmtNum, fmtMonth, fmtDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Analytics marketing" };
 
-export default async function AnalyticsHomePage(props: { searchParams: Promise<SearchParams> }) {
+export default async function AnalyticsHomePage(props: { searchParams: Promise<SearchParams & { q?: string }> }) {
   await requireAccess("marketing");
-  const ctx = await pageContext(await props.searchParams);
+  const sp = await props.searchParams;
+  const ctx = await pageContext(sp);
   const { filter, prevFilter, settings, metrics, period } = ctx;
   const mctx = { settings: settings.analytics, health: { stockCoverageOk: null, dataQuality: ctx.completeness } };
 
@@ -44,6 +46,8 @@ export default async function AnalyticsHomePage(props: { searchParams: Promise<S
       <div className="mb-4"><Tabs tabs={ANALYTICS_TABS} current="/marketing/analytics" /></div>
       <AnalyticsFilters period={ctx.periodKey} brand={ctx.brandId} channel={ctx.channelKey} city={ctx.city} brands={ctx.brands} channels={ctx.channels.filter((c) => c.active)} cities={ctx.cities} />
       {ctx.channelKey && <p className="text-xs text-muted mb-3">Filtre canal actif : les ventes, l&apos;objectif et le budget restent ceux du périmètre marque (les ventes n&apos;ont pas de canal).</p>}
+
+      <div className="mb-6"><AskBlock ctx={ctx} q={sp.q?.trim() || null} /></div>
 
       <Section title="Les six chiffres du mois">
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
