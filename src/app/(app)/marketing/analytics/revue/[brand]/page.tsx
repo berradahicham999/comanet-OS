@@ -123,7 +123,7 @@ export default async function BrandReviewPage(props: { params: Promise<{ brand: 
       <div className="grid gap-4 lg:grid-cols-2 mt-6">
         <Section title="Décisions proposées" description="Réallocations et actions issues des verdicts. Chaque proposition existe aussi dans l'Action Center.">
           <Card>
-            {reallocations.length === 0 && verdicts.every((v) => v.verdict.verdict === "MAINTAIN" || v.verdict.verdict === "WATCH") ? <p className="text-sm text-muted">Rien à réallouer ce mois : aucun canal en échec avec un canal performant en face.</p> : (
+            {reallocations.length === 0 && !verdicts.some((v) => v.verdict.verdict === "STOP" || v.verdict.verdict === "OPTIMIZE") ? <p className="text-sm text-muted">{verdicts.some((v) => v.verdict.verdict === "SCALE") ? "Aucun canal en échec ce mois : les canaux rentables peuvent monter par paliers (voir les verdicts ci-dessus)." : "Rien à réallouer ce mois : aucun canal en échec avec un canal performant en face."}</p> : (
               <ul className="space-y-3 text-sm">
                 {reallocations.map((r) => <li key={r.key}><div className="font-medium">{reallocationSentence(r, labels)}</div><div className="text-xs text-muted">Confiance {r.confidence.toLowerCase()} — {r.confidenceWhy}.</div></li>)}
                 {verdicts.filter((v) => v.verdict.verdict === "STOP" || v.verdict.verdict === "OPTIMIZE").map((v) => <li key={v.channelKey}><div className="font-medium">{labels.channel(v.channelKey)} : {v.verdict.headline}</div><ul className="list-disc pl-5 text-xs text-ink-2">{v.verdict.actions.map((x) => <li key={x}>{x}</li>)}</ul></li>)}
