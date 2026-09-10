@@ -13,6 +13,7 @@ import { ExplainButton } from "@/components/ai/explain-button";
 import { MorningBrief } from "@/components/ai/morning-brief";
 import { isAiConfigured } from "@/lib/ai/client";
 import { getMorningBrief } from "@/lib/ai/brief";
+import { listPlans } from "@/lib/ai/plans";
 import { isAdmin } from "@/lib/permissions-shared";
 
 export const dynamic = "force-dynamic";
@@ -37,6 +38,7 @@ export default async function CockpitPage() {
   // Brief du matin (direction) : on ne lit ici que le cache du jour ; la génération, plus lente, se fait côté client à l'ouverture.
   const briefOn = isAdmin(perms) && isAiConfigured();
   const brief = briefOn ? await getMorningBrief({ generate: false }).catch(() => null) : null;
+  const plans = explainOn ? await listPlans(topRecs.map((r) => r.key)) : new Map();
 
   return (
     <>
@@ -196,7 +198,7 @@ export default async function CockpitPage() {
           <Card><div className="text-sm text-muted">Aucune action ouverte. Tout est sous contrôle.</div></Card>
         ) : (
           <div className="grid md:grid-cols-2 gap-3">
-            {topRecs.map((r) => <RecommendationCard key={r.key} rec={r} users={users} compact redirectTo="/" />)}
+            {topRecs.map((r) => <RecommendationCard key={r.key} rec={r} users={users} compact redirectTo="/" copilot={explainOn} plan={plans.get(r.key) ?? null} />)}
           </div>
         )}
       </Section>

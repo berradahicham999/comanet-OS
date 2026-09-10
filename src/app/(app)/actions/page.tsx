@@ -5,6 +5,9 @@ import { getRecommendations, RULES, CATEGORY_META, type RecCategory } from "@/li
 import { listUsers } from "@/lib/users";
 import { PageHeader, Tabs, Card, Empty, Badge } from "@/components/ui";
 import { RecommendationCard } from "@/components/recommendation-card";
+import { requireAccessContext } from "@/lib/permissions";
+import { copilotAllowed } from "@/lib/ai/service";
+import { listPlans } from "@/lib/ai/plans";
 import { getRefDate } from "@/lib/ref-date";
 import { fmtDate } from "@/lib/format";
 
@@ -15,7 +18,9 @@ export default async function ActionCenterPage(props: { searchParams: Promise<{ 
   await requireAnyModule();
   const perms = await getUserPermissions();
   const sp = await props.searchParams;
-  const [recs, users, refDate] = await Promise.all([getRecommendations(), listUsers(), getRefDate()]);
+  const [recs, users, refDate, access] = await Promise.all([getRecommendations(), listUsers(), getRefDate(), requireAccessContext()]);
+  const copilot = copilotAllowed(access);
+  const plans = copilot ? await listPlans(recs.map((r) => r.key)) : new Map();
   const showAll = sp.all === "1";
   const cat = (sp.cat ?? "") as RecCategory | "";
   const base = recs.filter((r) => showAll || !r.existingTask);
@@ -63,7 +68,7 @@ export default async function ActionCenterPage(props: { searchParams: Promise<{ 
           {list.length === 0 ? (
             <Empty title="Aucune action dans cette vue" hint="Tout est sous contrôle, ou les actions ont déjà été transformées en tâches." />
           ) : (
-            list.map((r) => <RecommendationCard key={r.key} rec={r} users={users} redirectTo={q({})} />)
+            list.map((r) => <RecommendationCard key={r.key} rec={r} users={users} redirectTo={q({})} copilot={copilot} plan={plans.get(r.key) ?? null} />)
           )}
         </div>
         <aside className="space-y-3">
