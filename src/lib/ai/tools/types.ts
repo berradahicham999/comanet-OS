@@ -22,6 +22,7 @@ import type { RecommendationWithState } from "@/lib/rules/types";
 import type { TaskRow } from "@/lib/tasks";
 import type { TaskPriority } from "@/db/schema";
 import type { SearchResult } from "@/lib/search";
+import type { ADS_AGENT_API } from "@/lib/ads-intel/agent";
 
 /** Droits de la personne connectée, tels que résolus par `permissions.ts`. `brandIds`/`clientIds` à `null` = tout. */
 export type ToolAccess = {
@@ -91,6 +92,8 @@ export type ToolDeps = {
   adKpis(r: AdRow): AdKpis;
   adDiagnose(cur: AdKpis, ref: AdKpis | null, brandAvg: { cpa: number | null; roas: number | null; ctr: number | null } | null, t: AdThresholds): Diagnosis;
   adBrandAverages(rows: AdKpis[]): { cpa: number | null; roas: number | null; ctr: number | null };
+  /** Ads Command Center : mêmes moteurs que l'écran (`lib/ads-intel/agent.ts`), aucune logique ici. */
+  adsIntel: typeof ADS_AGENT_API;
   // Réglementaire
   regulatoryFiles(): Promise<RegulatoryRow[]>;
   // Action Center, tâches, recherche

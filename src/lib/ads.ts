@@ -38,7 +38,61 @@ export type AdRow = {
   days: number;
   /** Objectif Meta de la campagne (OUTCOME_TRAFFIC, OUTCOME_AWARENESS…), relevé au dernier passage. */
   objective: string | null;
+  /** Vues vidéo et engagements : absents des exports fichier (0). */
+  videoViews?: number;
+  postEngagement?: number;
 };
+
+/**
+ * LE RÉSULTAT d'une ligne publicitaire selon son objectif — la seule définition.
+ *
+ * Les comptes COMANET ne suivent aucun achat : juger une campagne « Messages » ou « Trafic »
+ * au CPA d'achat la condamne à tort. Le résultat officiel est donc celui de l'objectif Meta ;
+ * sans objectif connu (import fichier), on retient ce qui est mesuré, du plus engageant au
+ * moins engageant : achat, lead, conversation, clic sur lien.
+ */
+export type ResultKind = "purchase" | "lead" | "message" | "landing" | "click" | "reach" | "video" | "engagement";
+export const RESULT_LABELS: Record<ResultKind, { one: string; many: string; cost: string }> = {
+  purchase: { one: "achat", many: "achats", cost: "CPA" },
+  lead: { one: "lead", many: "leads", cost: "coût / lead" },
+  message: { one: "conversation", many: "conversations", cost: "coût / conversation" },
+  landing: { one: "vue de page", many: "vues de page", cost: "coût / vue de page" },
+  click: { one: "clic", many: "clics", cost: "CPC" },
+  reach: { one: "personne touchée", many: "personnes touchées", cost: "coût / 1 000 personnes" },
+  video: { one: "vue vidéo", many: "vues vidéo", cost: "coût / vue" },
+  engagement: { one: "engagement", many: "engagements", cost: "coût / engagement" },
+};
+
+export function resultKindOf(objective: string | null, r: Pick<AdRow, "purchases" | "leads" | "messagingStarted" | "landingPageViews" | "linkClicks" | "clicks" | "reach" | "videoViews" | "postEngagement">): ResultKind {
+  const o = (objective ?? "").toUpperCase();
+  if (o.includes("SALES") || o.includes("PURCHASE") || o.includes("CONVERSIONS")) return "purchase";
+  if (o.includes("LEAD")) return "lead";
+  if (o.includes("MESSAGE")) return "message";
+  if (o.includes("AWARENESS") || o.includes("REACH")) return "reach";
+  if (o.includes("VIDEO")) return "video";
+  if (o.includes("ENGAGEMENT")) return r.messagingStarted > 0 ? "message" : (r.postEngagement ?? 0) > 0 ? "engagement" : "click";
+  if (o.includes("TRAFFIC") || o.includes("LINK_CLICKS")) return r.landingPageViews > 0 ? "landing" : "click";
+  // Objectif inconnu : ce qui est mesuré, du plus engageant au moins engageant.
+  if (r.purchases > 0) return "purchase";
+  if (r.leads > 0) return "lead";
+  if (r.messagingStarted > 0) return "message";
+  // Rien de mesuré et pas d'objectif : on reste sur l'achat, et le moteur dira « aucune conversion » plutôt
+  // que de juger des clics dont on ignore s'ils étaient le but.
+  return "purchase";
+}
+
+export function resultCount(kind: ResultKind, r: Pick<AdRow, "purchases" | "leads" | "messagingStarted" | "landingPageViews" | "linkClicks" | "clicks" | "reach" | "videoViews" | "postEngagement">): number {
+  switch (kind) {
+    case "purchase": return r.purchases;
+    case "lead": return r.leads;
+    case "message": return r.messagingStarted;
+    case "landing": return r.landingPageViews;
+    case "reach": return r.reach;
+    case "video": return r.videoViews ?? 0;
+    case "engagement": return r.postEngagement ?? 0;
+    default: return r.linkClicks || r.clicks;
+  }
+}
 
 export type AdKpis = AdRow & {
   cpm: number | null;
@@ -50,18 +104,32 @@ export type AdKpis = AdRow & {
   frequency: number | null;
   costPerLead: number | null;
   costPerMessage: number | null;
+  /** Résultat officiel de l'objectif (voir `resultKindOf`), son nombre, son coût et son taux par clic ou par mille. */
+  resultKind: ResultKind;
+  results: number;
+  costPerResult: number | null;
+  resultRate: number | null;
 };
 
 export function kpis(r: AdRow): AdKpis {
   const clicks = r.linkClicks || r.clicks;
+  const resultKind = resultKindOf(r.objective, r);
+  const results = resultCount(resultKind, r);
+  // Un résultat « couverture » se paie aux mille personnes, pas à l'unité.
+  const costPerResult = results > 0 ? (resultKind === "reach" ? (r.spend / results) * 1000 : r.spend / results) : null;
+  const resultRate = resultKind === "reach" || resultKind === "click" || resultKind === "video" || resultKind === "engagement"
+    ? (r.impressions > 0 ? (results / r.impressions) * 100 : null)
+    : (clicks > 0 ? (results / clicks) * 100 : null);
   return {
     ...r,
+    resultKind, results, costPerResult, resultRate,
     cpm: r.impressions > 0 ? (r.spend / r.impressions) * 1000 : null,
     ctr: r.impressions > 0 ? (clicks / r.impressions) * 100 : null,
     cpc: clicks > 0 ? r.spend / clicks : null,
     conversionRate: clicks > 0 ? (r.purchases / clicks) * 100 : null,
     cpa: r.purchases > 0 ? r.spend / r.purchases : null,
-    roas: r.spend > 0 ? r.revenue / r.spend : null,
+    // Sans valeur de conversion mesurée, le ROAS n'est pas « 0 » : il n'existe pas.
+    roas: r.spend > 0 && r.revenue > 0 ? r.revenue / r.spend : null,
     frequency: r.reach > 0 ? r.impressions / r.reach : null,
     costPerLead: r.leads > 0 ? r.spend / r.leads : null,
     costPerMessage: r.messagingStarted > 0 ? r.spend / r.messagingStarted : null,
@@ -180,20 +248,31 @@ const fmtDelta = (v: number | null) => (v === null ? "n/a" : `${v > 0 ? "+" : ""
  * longueur) et à la moyenne de la marque. Le verdict découle du coût par achat et du ROAS ;
  * le diagnostic isole le maillon responsable.
  */
-export function diagnose(cur: AdKpis, ref: AdKpis | null, brandAvg: { cpa: number | null; roas: number | null; ctr: number | null } | null, t: AdThresholds): Diagnosis {
-  const dCpa = pct(cur.cpa, ref?.cpa ?? null);
+export function diagnose(cur: AdKpis, ref: AdKpis | null, brandAvg: { cpa: number | null; roas: number | null; ctr: number | null; costPerResult?: number | null } | null, t: AdThresholds): Diagnosis {
+  // Le « CPA » du moteur est le coût du résultat de l'objectif : l'achat quand il est suivi,
+  // sinon la conversation, la vue de page, le lead… (`resultKindOf`). Même seuils, même logique.
+  const isPurchase = cur.resultKind === "purchase";
+  const cpaCur = isPurchase ? cur.cpa : cur.costPerResult;
+  const cpaRef = ref ? (isPurchase ? ref.cpa : ref.costPerResult) : null;
+  const cpaBrand = brandAvg ? (isPurchase ? brandAvg.cpa : (brandAvg.costPerResult ?? null)) : null;
+  const convCur = isPurchase ? cur.conversionRate : cur.resultRate;
+  const convRef = ref ? (isPurchase ? ref.conversionRate : ref.resultRate) : null;
+  const costLabel = isPurchase ? "CPA" : RESULT_LABELS[cur.resultKind].cost;
+  const resultsLabel = RESULT_LABELS[cur.resultKind].many;
+
+  const dCpa = pct(cpaCur, cpaRef);
   const dCtr = pct(cur.ctr, ref?.ctr ?? null);
   const dCpm = pct(cur.cpm, ref?.cpm ?? null);
-  const dConv = pct(cur.conversionRate, ref?.conversionRate ?? null);
+  const dConv = pct(convCur, convRef);
   const dRoas = pct(cur.roas, ref?.roas ?? null);
 
   const signals = [
     { label: "Dépense", value: `${Math.round(cur.spend).toLocaleString("fr-FR")} MAD`, delta: pct(cur.spend, ref?.spend ?? null), good: null },
-    { label: "CPA", value: cur.cpa === null ? "—" : `${Math.round(cur.cpa).toLocaleString("fr-FR")} MAD`, delta: dCpa, good: dCpa === null ? null : dCpa < 0 },
+    { label: costLabel, value: cpaCur === null ? "—" : `${(cpaCur >= 100 ? Math.round(cpaCur) : Number(cpaCur.toFixed(2))).toLocaleString("fr-FR")} MAD`, delta: dCpa, good: dCpa === null ? null : dCpa < 0 },
     { label: "ROAS", value: cur.roas === null ? "—" : `${cur.roas.toFixed(2)}×`, delta: dRoas, good: dRoas === null ? null : dRoas > 0 },
     { label: "CTR", value: cur.ctr === null ? "—" : `${cur.ctr.toFixed(2)} %`, delta: dCtr, good: dCtr === null ? null : dCtr > 0 },
     { label: "CPM", value: cur.cpm === null ? "—" : `${Math.round(cur.cpm)} MAD`, delta: dCpm, good: dCpm === null ? null : dCpm < 0 },
-    { label: "Taux de conversion", value: cur.conversionRate === null ? "—" : `${cur.conversionRate.toFixed(2)} %`, delta: dConv, good: dConv === null ? null : dConv > 0 },
+    { label: isPurchase ? "Taux de conversion" : `Taux de ${resultsLabel}`, value: convCur === null ? "—" : `${convCur.toFixed(2)} %`, delta: dConv, good: dConv === null ? null : dConv > 0 },
   ];
 
   // Données insuffisantes : on ne tranche pas, et on ne le déguise pas en « stable ».
@@ -218,24 +297,27 @@ export function diagnose(cur: AdKpis, ref: AdKpis | null, brandAvg: { cpa: numbe
   const actions: string[] = [];
   let diagnostic = "";
 
-  const noConversion = cur.purchases === 0 && cur.leads === 0;
+  const noConversion = isPurchase ? cur.purchases === 0 && cur.leads === 0 : cur.results === 0;
   const roasRef = brandAvg?.roas ?? null;
+  const fmtCost = (v: number) => `${(v >= 100 ? Math.round(v) : Number(v.toFixed(2))).toLocaleString("fr-FR")} MAD`;
 
   if (noConversion) {
     verdict = "STOP";
-    headline = "Aucune conversion sur la période";
-    diagnostic = `${Math.round(cur.spend).toLocaleString("fr-FR")} MAD dépensés sans un seul achat ni lead enregistré.`;
+    headline = isPurchase ? "Aucune conversion sur la période" : `Aucun résultat (${resultsLabel}) sur la période`;
+    diagnostic = isPurchase
+      ? `${Math.round(cur.spend).toLocaleString("fr-FR")} MAD dépensés sans un seul achat ni lead enregistré.`
+      : `${Math.round(cur.spend).toLocaleString("fr-FR")} MAD dépensés sans un seul résultat de type « ${resultsLabel} » remonté par la régie.`;
     actions.push("Vérifier d'abord le suivi des conversions (pixel, événements) avant de conclure à un échec.", "Si le suivi est bon : couper la campagne et réallouer le budget.");
-  } else if (cur.cpa !== null && brandAvg?.cpa && cur.cpa > brandAvg.cpa * t.cpaVsBrandFactor) {
+  } else if (cpaCur !== null && cpaBrand && cpaCur > cpaBrand * t.cpaVsBrandFactor) {
     verdict = "STOP";
-    headline = "Coût par achat très au-dessus de la marque";
-    diagnostic = `CPA de ${Math.round(cur.cpa)} MAD contre ${Math.round(brandAvg.cpa)} MAD en moyenne sur la marque (${fmtDelta(pct(cur.cpa, brandAvg.cpa))}).`;
+    headline = isPurchase ? "Coût par achat très au-dessus de la marque" : `${costLabel} très au-dessus de la marque`;
+    diagnostic = `${costLabel} de ${fmtCost(cpaCur)} contre ${fmtCost(cpaBrand)} en moyenne sur la marque (${fmtDelta(pct(cpaCur, cpaBrand))}).`;
     actions.push("Couper cette campagne et basculer le budget sur celle qui convertit le mieux.");
   } else if ((dCpa !== null && dCpa > t.cpaRisePct) || (dRoas !== null && dRoas < -t.roasDropPct)) {
     verdict = "OPTIMIZE";
-    headline = dCpa !== null && dCpa > t.cpaRisePct ? `CPA en hausse de ${Math.round(dCpa)} %` : `ROAS en baisse de ${Math.abs(Math.round(dRoas!))} %`;
+    headline = dCpa !== null && dCpa > t.cpaRisePct ? `${costLabel} en hausse de ${Math.round(dCpa)} %` : `ROAS en baisse de ${Math.abs(Math.round(dRoas!))} %`;
     if (postClickIssue && !hookIssue) {
-      diagnostic = `CTR ${dCtr === null ? "stable" : fmtDelta(dCtr)}, CPM ${fmtDelta(dCpm)}, taux de conversion ${fmtDelta(dConv)} : le problème est principalement post-clic — les gens cliquent mais n'achètent pas.`;
+      diagnostic = `CTR ${dCtr === null ? "stable" : fmtDelta(dCtr)}, CPM ${fmtDelta(dCpm)}, taux de ${isPurchase ? "conversion" : resultsLabel} ${fmtDelta(dConv)} : le problème est principalement post-clic — les gens cliquent mais ${isPurchase ? "n'achètent pas" : "ne vont pas jusqu'au résultat"}.`;
       actions.push("Analyser la page de destination : temps de chargement, prix affiché, disponibilité produit.", "Vérifier le stock du produit poussé.", "Tester une offre ou un argument de réassurance.");
     } else if (hookIssue) {
       diagnostic = `CTR ${fmtDelta(dCtr)} avec un CPM ${fmtDelta(dCpm)} : l'accroche ne capte plus.`;
@@ -244,7 +326,7 @@ export function diagnose(cur: AdKpis, ref: AdKpis | null, brandAvg: { cpa: numbe
       diagnostic = `CPM ${fmtDelta(dCpm)} à CTR ${dCtr === null ? "stable" : fmtDelta(dCtr)} : la diffusion coûte plus cher (enchères ou audience saturée).`;
       actions.push("Élargir ou changer l'audience.", "Vérifier la pression concurrentielle sur la période.");
     } else {
-      diagnostic = `CPA ${fmtDelta(dCpa)} sans dégradation nette du CTR ni du CPM : la dérive vient du volume de conversions.`;
+      diagnostic = `${costLabel} ${fmtDelta(dCpa)} sans dégradation nette du CTR ni du CPM : la dérive vient du volume de ${isPurchase ? "conversions" : resultsLabel}.`;
       actions.push("Comparer avec les autres campagnes de la marque avant d'arbitrer.");
     }
     if (fatigue) actions.push(`Fréquence à ${cur.frequency!.toFixed(1)} : renouveler les créatives pour éviter la lassitude.`);
@@ -254,8 +336,18 @@ export function diagnose(cur: AdKpis, ref: AdKpis | null, brandAvg: { cpa: numbe
     diagnostic = `ROAS de ${cur.roas?.toFixed(2)}× ${dRoas !== null ? `(${fmtDelta(dRoas)} vs période précédente)` : ""}${roasRef ? `, moyenne marque ${roasRef.toFixed(2)}×` : ""}.`;
     actions.push(`Augmenter le budget par paliers de ${t.scaleStepPct} % tous les ${t.scaleStepDays} jours.`, "Vérifier la couverture de stock du produit avant de scaler.");
     if (fatigue) actions.push(`Fréquence à ${cur.frequency!.toFixed(1)} : préparer des créatives de relève avant l'augmentation.`);
+  } else if ((cur.roas === null || cur.revenue === 0) && cpaCur !== null && (
+    (dCpa !== null && dCpa < -t.cpaRisePct) || (cpaBrand !== null && cpaCur < cpaBrand / t.roasVsBrandFactor)
+  )) {
+    // Sans CA mesuré, le ROAS n'existe pas : c'est le coût par résultat qui ouvre le SCALE,
+    // avec les mêmes seuils lus en miroir (baisse du coût = hausse du rendement).
+    verdict = "SCALE";
+    headline = `${costLabel} nettement sous la référence`;
+    diagnostic = `${costLabel} de ${fmtCost(cpaCur)}${dCpa !== null ? ` (${fmtDelta(dCpa)} vs période précédente)` : ""}${cpaBrand !== null ? `, moyenne marque ${fmtCost(cpaBrand)}` : ""}.`;
+    actions.push(`Augmenter le budget par paliers de ${t.scaleStepPct} % tous les ${t.scaleStepDays} jours.`, "Vérifier la couverture de stock du produit avant de scaler.");
+    if (fatigue) actions.push(`Fréquence à ${cur.frequency!.toFixed(1)} : préparer des créatives de relève avant l'augmentation.`);
   } else {
-    diagnostic = `CPA ${cur.cpa === null ? "—" : Math.round(cur.cpa) + " MAD"}${dCpa !== null ? ` (${fmtDelta(dCpa)})` : ""}, ROAS ${cur.roas === null ? "—" : cur.roas.toFixed(2) + "×"}${dRoas !== null ? ` (${fmtDelta(dRoas)})` : ""} : pas de dérive significative.`;
+    diagnostic = `${costLabel} ${cpaCur === null ? "—" : fmtCost(cpaCur)}${dCpa !== null ? ` (${fmtDelta(dCpa)})` : ""}, ROAS ${cur.roas === null ? "—" : cur.roas.toFixed(2) + "×"}${dRoas !== null ? ` (${fmtDelta(dRoas)})` : ""} : pas de dérive significative.`;
     actions.push("Ne rien changer cette semaine ; surveiller la fréquence et le CPA.");
   }
 
@@ -273,9 +365,18 @@ export function brandAverages(rows: AdKpis[]) {
   const revenue = rows.reduce((s, r) => s + r.revenue, 0);
   const impressions = rows.reduce((s, r) => s + r.impressions, 0);
   const clicks = rows.reduce((s, r) => s + (r.linkClicks || r.clicks), 0);
+  // Coût par résultat de référence : sur les lignes qui partagent le résultat majoritaire (en dépense).
+  const byKind = new Map<string, { spend: number; results: number }>();
+  for (const r of rows) {
+    const k = byKind.get(r.resultKind) ?? { spend: 0, results: 0 };
+    k.spend += r.spend; k.results += r.resultKind === "reach" ? r.results / 1000 : r.results;
+    byKind.set(r.resultKind, k);
+  }
+  const main = [...byKind.entries()].sort((a, b) => b[1].spend - a[1].spend)[0]?.[1];
   return {
     cpa: purchases > 0 ? spend / purchases : null,
     roas: spend > 0 ? revenue / spend : null,
     ctr: impressions > 0 ? (clicks / impressions) * 100 : null,
+    costPerResult: main && main.results > 0 ? main.spend / main.results : null,
   };
 }

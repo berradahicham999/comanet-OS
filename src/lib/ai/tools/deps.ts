@@ -15,6 +15,7 @@ import { animationObjectives, animationTotals, animationsByDim, objectiveForRang
 import { productStocks } from "@/lib/stock";
 import { budgetByCategory, budgetConsumption } from "@/lib/budget";
 import { adsByDim, brandAverages, diagnose, kpis } from "@/lib/ads";
+import { ADS_AGENT_API } from "@/lib/ads-intel/agent";
 import { getRecommendations } from "@/lib/rules";
 import { listTasks } from "@/lib/tasks";
 import { searchEntities } from "@/lib/search";
@@ -111,6 +112,7 @@ export const realDeps: ToolDeps = {
   budgetByCategory: (year, brandId, brandIds) => budgetByCategory(year, brandId, brandIds),
   adsByDim: (dim, range, filter) => adsByDim(dim, range, filter),
   adKpis: kpis, adDiagnose: diagnose, adBrandAverages: brandAverages,
+  adsIntel: ADS_AGENT_API,
   regulatoryFiles,
   recommendations: () => getRecommendations(),
   listTasks: (opts) => listTasks(opts),

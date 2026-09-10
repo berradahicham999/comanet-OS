@@ -17,6 +17,7 @@ import { getTerrainSummary } from "./terrain";
 import { getStockCoverage } from "./stock";
 import { getMarketingBudget } from "./budget";
 import { getAdsPerformance } from "./ads";
+import { getAdsIntelligence } from "./ads-intel";
 import { getRegulatoryAlerts } from "./regulatory";
 import { getActionCenter, getTasks } from "./actions";
 import { searchEntities } from "./search";
@@ -26,7 +27,7 @@ export type { AiTool, ToolAccess, ToolContext, ToolDeps, ToolResult, ToolCallLog
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const TOOLS: AiTool<any>[] = [
-  getActionCenter, getAdsPerformance, getClientIntelligence, getMarketingBudget, getRegulatoryAlerts, getSalesSummary,
+  getActionCenter, getAdsIntelligence, getAdsPerformance, getClientIntelligence, getMarketingBudget, getRegulatoryAlerts, getSalesSummary,
   getStockCoverage, getTasks, getTerrainSummary, proposeReport, proposeTask, searchEntities,
 ].sort((a, b) => a.name.localeCompare(b.name));
 

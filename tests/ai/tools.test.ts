@@ -68,9 +68,22 @@ function makeDeps(calls: Calls, over: Partial<ToolDeps> = {}): ToolDeps {
       : { brandId: brandId ?? null, hasBudget: true, annual: 500_000, planned: 20_000, committed: 300_000, spent: 250_000, adSpend: 80_000, adSource: "REGIE", manualAdIgnored: 5_000, samplesValue: 0, consumed: 300_000, remaining: 200_000, consumedPct: 60 }),
     budgetByCategory: async () => [{ category: "META", planned: 200_000, committed: 150_000, spent: 120_000 }, { category: "ANIMATION", planned: 100_000, committed: 90_000, spent: 90_000 }],
     adsByDim: async (_d, range) => (range.start >= "2026-09-01" ? [] : [{ key: "META|Été", platform: "META", campaignName: "Été Gamarde", campaignId: null, brandId: "b-gamarde", brandName: "Gamarde", brandColor: null, spend: 12_000, impressions: 400_000, reach: 200_000, clicks: 6_000, linkClicks: 5_000, landingPageViews: 3_000, leads: 0, purchases: 40, messagingStarted: 300, revenue: 30_000, days: 28, objective: "OUTCOME_SALES" }]),
-    adKpis: (r) => ({ ...r, cpm: 30, ctr: 1.25, cpc: 2.4, conversionRate: 0.8, cpa: 300, roas: 2.5, frequency: 2, costPerLead: null, costPerMessage: 40 }),
+    adKpis: (r) => ({ ...r, cpm: 30, ctr: 1.25, cpc: 2.4, conversionRate: 0.8, cpa: 300, roas: 2.5, frequency: 2, costPerLead: null, costPerMessage: 40, resultKind: "purchase", results: r.purchases, costPerResult: 300, resultRate: 0.8 }),
     adDiagnose: () => ({ verdict: "SCALE", headline: "ROAS 2,5", signals: [], diagnostic: "Achat rentable", actions: ["Augmenter de 20 %"] }),
     adBrandAverages: () => ({ cpa: 300, roas: 2.5, ctr: 1.25 }),
+    adsIntel: {
+      get_current_ads_performance: async () => ({ period: { key: "30d", start: "2026-08-12", end: "2026-09-11", label: "30 derniers jours", prevLabel: "30 j précédents", days: 30 }, snapshot: { spend: 6500, spendDelta: 10, results: 1200, resultsDelta: 5, resultKind: "landing", resultLabel: "vues de page", costPerResult: 5.4, costDelta: -8, costLabel: "coût / vue de page", messages: 374, landing: 1200, clicks: 3000, impressions: 900_000, reach: 600_000, revenue: 0, roas: null, activeCampaigns: 3 }, health: { score: 72, tone: "green", why: ["2 winners actifs"], components: [] }, allocation: [], budget: { monthSpend: 2000, monthlyBudget: null, consumedPct: null, projected: 6000, status: "UNDEFINED", daysElapsed: 10, daysInMonth: 30 }, impact: { spend: 6500, results: 1200, resultKind: "landing", costPerResult: 5.4, measuredRevenue: 0, roas: null, sellIn: 100_000, sellInPrev: 80_000, sellInDeltaPct: 25, spendToSalesPct: 6.5, estimatedValue: null, contribution: null, notes: [] }, data: { connected: true, verdict: "LIVE", lastSuccessfulSync: "2026-09-10T08:00:00Z", lastSyncError: null, accounts: [], historyFirstDay: "2023-08-01", historyLastDay: "2026-09-09", closedRows: 5000, backfill: [], unavailableMonths: [] } }),
+      get_historical_performance: async () => [],
+      get_top_winners: async () => ({ winners: { campaigns: [], creatives: [], products: [], offers: [] }, verdicts: {} }),
+      get_underperformers: async () => [],
+      detect_anomalies: async () => [],
+      detect_creative_fatigue: async () => [],
+      recommend_budget_allocation: async () => ({ allocation: [], actions: [], budget: { monthSpend: 0, monthlyBudget: null, consumedPct: null, projected: null, status: "UNDEFINED", daysElapsed: 1, daysInMonth: 30 } }),
+      recommend_products_to_push: async () => [{ productId: "p1", productName: "Crème A", brandId: "b-gamarde", brandName: "Gamarde", decision: "PUSH", score: 66, why: ["Coût par résultat -20 % vs moyenne Gamarde"], spend: 2000, results: 400, resultKind: "landing", costPerResult: 5, winners: 1, stockNote: null }],
+      recommend_content_to_create: async () => ({ opportunities: [], patterns: [], memory: [] }),
+      explain_campaign_performance: async () => null,
+      compare_with_historical_benchmark: async () => null,
+    },
     regulatoryFiles: async () => [
       { id: "r1", dossier: "D-1", reference: "REF1", variant_type: "MODELE_VENTE", size: "50 ml", status: "VALIDE", blocked: false, expiry_date: "2026-09-30", certificate_status: "CE_OBTENU", product_name: "Crème A", brand_name: "Gamarde", brand_id: "b-gamarde", responsible: "Nadia" },
       { id: "r2", dossier: "D-2", reference: "REF2", variant_type: "ECHANTILLON", size: null, status: "A_DEPOSER", blocked: false, expiry_date: null, certificate_status: null, product_name: "Sérum B", brand_name: "Alphascience", brand_id: "b-alpha", responsible: null },
@@ -110,10 +123,10 @@ type Ko = { available: false; reason: string; howToFix: string };
 /* ------------------------------ Registre ------------------------------ */
 
 describe("registre des outils", () => {
-  test("les douze outils du plan sont présents, triés par nom", () => {
+  test("les douze outils du plan (plus get_ads_intelligence) sont présents, triés par nom", () => {
     assert.deepEqual(TOOL_NAMES, [...TOOL_NAMES].sort());
     for (const n of ["get_sales_summary", "get_client_intelligence", "get_terrain_summary", "get_stock_coverage", "get_marketing_budget", "get_ads_performance", "get_regulatory_alerts", "get_action_center", "get_tasks", "search_entities", "propose_task", "propose_report"]) assert.ok(TOOL_NAMES.includes(n), n);
-    assert.equal(TOOLS.length, 12);
+    assert.equal(TOOLS.length, 13);
   });
   test("chaque schéma JSON est un objet fermé sans $schema, avec descriptions", () => {
     for (const d of toolDefinitions(TOOLS)) {

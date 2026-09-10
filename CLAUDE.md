@@ -80,6 +80,11 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Budget marketing consommé | `src/lib/budget.ts` | `budgetConsumption()`, `budgetConsumptionByBrand()` |
 | Dépense publicitaire (priorité régie → saisie) | `src/lib/ad-spend.ts` | `adSpend()` |
 | Verdict publicitaire | `src/lib/ads.ts` | `diagnose(cur, ref, brandAvg, settings.ads)` |
+| Résultat officiel d'une ligne publicitaire (selon l'objectif Meta) | `src/lib/ads.ts` | `resultKindOf()`, `resultCount()`, `kpis().costPerResult` |
+| Intelligence Ads (benchmark, tendance, anomalies, fatigue, winners, contenu, décisions, mémoire) | `src/lib/ads-intel/` | `buildCommandCenter()`, `entityDetail()`, `searchHistory()`, `ADS_AGENT_API` |
+| Catalogue Meta, produit et étiquettes d'une publicité | `src/lib/meta/entities.ts` | `syncEntities()`, `matchProductInText()`, `autoTags()` |
+| Historique Meta 2023 → (rattrapage reprenable) | `src/lib/meta/backfill.ts` | `backfillAccount()`, `backfillAll()` |
+| Diagnostic réel de la connexion Meta | `src/lib/meta/doctor.ts` | `runDoctor()`, `explainMetaError()` |
 | Score animatrice | `src/lib/animations.ts` | `animatriceScores()` — source unique |
 | Clé de commande, commercial, canal | `src/lib/analytics.ts` | `ORDER_KEY`, `SALES_REP`, `SALES_CHANNEL` |
 | Ville, clé d'animation | `src/lib/animations-shared.ts` | `normalizeCity()`, `cityKey()`, `animationKey()` |
@@ -108,6 +113,18 @@ pour son prévu (devis puis facture remplacent) : le reflet vit dans `marketing_
 ailleurs. Le matériel sorti est une dépense au coût du moment. L'impact ventes (sell-in HT avant / pendant / après sur les
 clients et produits rattachés) est une corrélation observée ; une fenêtre « après » incomplète affiche « pas encore
 comparable ». Les fichiers réutilisent `content_assets` (polymorphe : contenu, activation, article d'inventaire).
+
+**Ads Command Center** (`docs/ads-command-center.md`). `/marketing/ads` est UNE page : santé, snapshot, Action Center (3 à 5
+décisions avec WHY / DATA / ACTION / CONFIANCE, « ne rien faire » compris), où mettre l'argent, winners et problèmes,
+quoi pousser, quoi publier, santé des créatives, impact business, état des données ; tout le détail vit dans des drawers.
+Les comptes COMANET ne suivent aucun achat : le **résultat officiel** est celui de l'objectif Meta (`resultKindOf()` :
+conversation, vue de page, lead, achat, couverture) et `diagnose()` juge sur ce coût par résultat ; ROAS et CPA d'achat
+affichent « — » tant qu'aucune valeur de conversion n'est mesurée. Les moteurs (`src/lib/ads-intel/`) sont purs et
+réutilisables (`agent.ts` expose `get_current_ads_performance`, `recommend_content_to_create`…) ; l'interface ne calcule
+rien. Un winner exige volume, jours, coût sous la référence, stabilité et récence (seuils dans `settings.adsIntel`).
+Meta ne sert que 37 mois d'insights : un mois refusé est « historique indisponible », jamais estimé. `META_ACCESS_TOKEN`
+accepte plusieurs jetons (virgules) car les comptes sont répartis sur plusieurs Business Managers. Lecture + analyse +
+recommandation uniquement : aucune écriture vers Meta.
 
 **Permissions modulaires par utilisateur** (`docs/permissions-modulaires.md`). Chaque compte porte
 sa propre matrice `user_permissions` (14 modules × Voir / Créer / Modifier / Valider), une portée

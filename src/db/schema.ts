@@ -1207,6 +1207,17 @@ export const adAccounts = pgTable(
     syncStatus: text("sync_status").notNull().default("MANUAL"), // MANUAL | OK | ERROR
     lastError: text("last_error"),
     importedRows: integer("imported_rows").notNull().default(0),
+    /**
+     * Rattrapage historique (2023 →). `backfill_cursor` = premier jour du prochain mois à lire ;
+     * `null` tant que rien n'a été lancé. Le rattrapage est reprenable : chaque passage lit
+     * quelques mois puis avance le curseur, pour tenir dans la durée d'une fonction serveur.
+     */
+    backfillCursor: date("backfill_cursor"),
+    backfillStatus: text("backfill_status").notNull().default("IDLE"), // IDLE | RUNNING | DONE | ERROR
+    backfillError: text("backfill_error"),
+    backfillUpdatedAt: timestamp("backfill_updated_at", { withTimezone: true }),
+    /** Mois refusés par Meta (rétention 37 mois, permission…) : « Historique indisponible pour cette période ». */
+    backfillGaps: jsonb("backfill_gaps").$type<{ month: string; reason: string }[]>().notNull().default([]),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -1246,6 +1257,11 @@ export const adMetrics = pgTable(
     externalCampaignId: text("external_campaign_id"),
     externalAdsetId: text("external_adset_id"),
     externalAdId: text("external_ad_id"),
+    /** Créative Meta diffusée par la publicité ce jour-là (clé vers `ad_entities` niveau CREATIVE). */
+    externalCreativeId: text("external_creative_id"),
+    /** Vues vidéo (3 s) et engagements sur la publication : lus dans `actions`, 0 si absents. */
+    videoViews: integer("video_views").notNull().default(0),
+    postEngagement: integer("post_engagement").notNull().default(0),
     /** Devise d'origine du compte publicitaire (EUR, USD…). `spend` et `revenue` sont TOUJOURS en MAD. */
     currency: text("currency").notNull().default("MAD"),
     /** Montants tels que remontés par la régie, avant conversion — trace d'audit. */
@@ -2839,3 +2855,102 @@ export type DoctorPotential = (typeof doctorPotentialEnum.enumValues)[number];
 export type MedicalVisitStatus = (typeof medicalVisitStatusEnum.enumValues)[number];
 export type DoctorInterest = (typeof doctorInterestEnum.enumValues)[number];
 export type SampleMovementType = (typeof sampleMovementTypeEnum.enumValues)[number];
+
+/* ------------------------------------------------------------------ */
+/* Ads Command Center : catalogue des objets de régie, mémoire, journal */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Catalogue des objets publicitaires (campagne, ensemble, publicité, créative), y compris
+ * archivés. `ad_metrics` ne porte que des noms ; c'est ici que vivent l'objectif, les dates,
+ * le texte et le format de la créative, le produit rattaché et les étiquettes de contenu.
+ * Une ligne par (plateforme, niveau, identifiant de régie), remplacée à chaque catalogage.
+ */
+export const adEntities = pgTable(
+  "ad_entities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    platform: text("platform").notNull(),
+    level: text("level").notNull(), // CAMPAIGN | ADSET | AD | CREATIVE
+    externalId: text("external_id").notNull(),
+    accountId: uuid("account_id").references(() => adAccounts.id, { onDelete: "cascade" }),
+    /** Parent direct (ensemble → campagne, publicité → ensemble, créative → publicité). */
+    parentExternalId: text("parent_external_id"),
+    externalCampaignId: text("external_campaign_id"),
+    externalAdsetId: text("external_adset_id"),
+    externalCreativeId: text("external_creative_id"),
+    name: text("name").notNull(),
+    status: text("status"),
+    effectiveStatus: text("effective_status"),
+    objective: text("objective"),
+    createdTime: timestamp("created_time", { withTimezone: true }),
+    startTime: timestamp("start_time", { withTimezone: true }),
+    stopTime: timestamp("stop_time", { withTimezone: true }),
+    /** Créative : texte principal, titre, visuel. Vides pour les autres niveaux. */
+    title: text("title"),
+    body: text("body"),
+    thumbnailUrl: text("thumbnail_url"),
+    imageUrl: text("image_url"),
+    videoId: text("video_id"),
+    objectType: text("object_type"), // VIDEO | PHOTO | SHARE | CAROUSEL…
+    callToAction: text("call_to_action"),
+    linkUrl: text("link_url"),
+    /** Marque et produit du référentiel existant. AUTO = déduit du texte ; MANUAL = corrigé à la main (jamais écrasé). */
+    brandId: uuid("brand_id").references(() => brands.id, { onDelete: "set null" }),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
+    productSource: text("product_source"), // AUTO | MANUAL
+    /** Étiquettes de contenu : { format, angle, hook, offer, contentType }. `tags_source` MANUAL protège une correction. */
+    tags: jsonb("tags").$type<Record<string, string>>().notNull().default({}),
+    tagsSource: text("tags_source").notNull().default("AUTO"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("ad_entities_uq").on(t.platform, t.level, t.externalId),
+    index("ad_entities_account_idx").on(t.accountId, t.level),
+    index("ad_entities_campaign_idx").on(t.externalCampaignId),
+    index("ad_entities_product_idx").on(t.productId),
+    index("ad_entities_brand_idx").on(t.brandId),
+  ],
+);
+
+/**
+ * Journal des passages de synchronisation et de rattrapage : ce que l'écran affiche comme
+ * « dernière synchronisation réussie », et ce que le diagnostic relit pour expliquer une panne.
+ */
+export const adSyncLog = pgTable(
+  "ad_sync_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    accountId: uuid("account_id").references(() => adAccounts.id, { onDelete: "cascade" }),
+    mode: text("mode").notNull(), // full | intraday | backfill | entities
+    since: date("since"),
+    until: date("until"),
+    rows: integer("rows").notNull().default(0),
+    ok: boolean("ok").notNull(),
+    error: text("error"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ad_sync_log_account_idx").on(t.accountId, t.finishedAt)],
+);
+
+/**
+ * Mémoire marketing : phrases apprises des données publicitaires (« les créatives témoignage
+ * fonctionnent pour Auracos »), avec leurs preuves et leur confiance. Recalculée par le moteur ;
+ * jamais saisie à la main, jamais inventée sans preuve. Lisible par le copilote.
+ */
+export const adMemory = pgTable(
+  "ad_memory",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    key: text("key").notNull().unique(),
+    scope: text("scope").notNull(), // BRAND | PRODUCT | CROSS_BRAND | SEASON | FORMAT | ANGLE
+    brandId: uuid("brand_id").references(() => brands.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "cascade" }),
+    statement: text("statement").notNull(),
+    evidence: jsonb("evidence").$type<Record<string, unknown>>().notNull().default({}),
+    confidence: integer("confidence").notNull().default(0),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ad_memory_brand_idx").on(t.brandId), index("ad_memory_scope_idx").on(t.scope)],
+);

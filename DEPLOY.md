@@ -174,6 +174,6 @@ plusieurs marques cohabitent dans un même compte.
 | `SETUP_KEY` | recommandé | accès à `/installation` sans compte |
 | `DATABASE_POOL_MAX` | non | connexions par instance (défaut : 5 sur Vercel) |
 | `BUSINESS_TZ` | non | fuseau métier (défaut : `Africa/Casablanca`) |
-| `META_ACCESS_TOKEN` | pour la synchro Meta | jeton d'utilisateur système, permission `ads_read` seule. Jamais stocké en base. |
+| `META_ACCESS_TOKEN` | pour la synchro Meta | jeton(s) d'utilisateur système, permission `ads_read` seule ; plusieurs jetons séparés par des virgules si les comptes sont répartis sur plusieurs Business Managers. Jamais stocké en base. Vérifier avec `/marketing/ads/diagnostic`. |
 | `CRON_SECRET` | pour la synchro Meta | protège `/api/cron/meta`, route publique sur Internet |
 | `META_API_VERSION` | non | version d'API épinglée (défaut : `v23.0`) |
