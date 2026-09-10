@@ -7,6 +7,14 @@ import { PageHeader, Card, Kpi, Delta, Badge, BrandDot, Progress, Section } from
 import { MonthlyRevenueChart } from "@/components/charts";
 import { RecommendationCard } from "@/components/recommendation-card";
 import { fmtMAD, fmtNum, fmtPct, fmtDate, fmtDateLong, fmtMonth, delta, months } from "@/lib/format";
+import { requireAccessContext } from "@/lib/permissions";
+import { copilotAllowed } from "@/lib/ai/service";
+import { ExplainButton } from "@/components/ai/explain-button";
+import { MorningBrief } from "@/components/ai/morning-brief";
+import { isAiConfigured } from "@/lib/ai/client";
+import { getMorningBrief } from "@/lib/ai/brief";
+import { listPlans } from "@/lib/ai/plans";
+import { isAdmin } from "@/lib/permissions-shared";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +29,16 @@ export default async function CockpitPage() {
   const topRecs = d.recs.filter((r) => !r.existingTask).slice(0, 4);
   const critical = d.recs.filter((r) => r.priority === "CRITICAL" && !r.existingTask).length;
   const monthLabel = fmtMonth(d.refDate.ref);
+  const access = await requireAccessContext();
+  const explainOn = copilotAllowed(access);
+  /** Bouton ✦ « Expliquer » : la carte transmet exactement ce qu'elle affiche (valeurs, période), le copilote relit par les outils. */
+  const explain = (card: string, title: string, values: { label: string; value: string }[], period: string, tools: string[]) =>
+    explainOn ? <ExplainButton context={{ surface: "cockpit", card, title, values, period: { label: period, start: d.monthRange.start, end: d.monthRange.end }, tools }} /> : undefined;
+  const toDate = `${monthLabel} — à date (${d.proj.day}/${d.proj.daysInMonth} jours)`;
+  // Brief du matin (direction) : on ne lit ici que le cache du jour ; la génération, plus lente, se fait côté client à l'ouverture.
+  const briefOn = isAdmin(perms) && isAiConfigured();
+  const brief = briefOn ? await getMorningBrief({ generate: false }).catch(() => null) : null;
+  const plans = explainOn ? await listPlans(topRecs.map((r) => r.key)) : new Map();
 
   return (
     <>
@@ -40,9 +58,11 @@ export default async function CockpitPage() {
       )}
 
       {/* ---------------- Commercial ---------------- */}
+      {briefOn && <MorningBrief initial={brief} configured />}
+
       {perms.ventes.view && <Section title="Commercial" description={`${monthLabel} — à date (${d.proj.day}/${d.proj.daysInMonth} jours)`}>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <Card href="/ventes">
+          <Card href="/ventes" explain={explain("ca-mois", "CA du mois (sell-in)", [{ label: "CA du mois", value: fmtMAD(mtd) }, { label: "vs M-1", value: fmtPct(delta(mtd, cmp.m1.amount), 0, true) }, { label: "vs N-1", value: fmtPct(delta(mtd, cmp.n1.amount), 0, true) }], toDate, ["get_sales_summary"])}>
             <div className="label">CA du mois</div>
             <div className="kpi mt-2">{fmtMAD(mtd, { compact: true })}</div>
             <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-muted">
@@ -50,7 +70,7 @@ export default async function CockpitPage() {
               <span className="flex items-center gap-1"><Delta value={delta(mtd, cmp.n1.amount)} /> vs N-1</span>
             </div>
           </Card>
-          <Card>
+          <Card explain={explain("objectif-mois", "Objectif du mois", [{ label: "Objectif", value: objective ? fmtMAD(objective) : "non défini" }, { label: "Réalisé", value: fmtPct(realisation) }, { label: "Rythme projeté", value: fmtMAD(d.proj.runRate) }], toDate, ["get_sales_summary"])}>
             <div className="label">Objectif du mois</div>
             <div className="kpi mt-2">{objective ? fmtMAD(objective, { compact: true }) : "—"}</div>
             {objective ? (
@@ -63,7 +83,7 @@ export default async function CockpitPage() {
               </>
             ) : <div className="text-[12px] text-faint mt-2">Définir dans Paramètres</div>}
           </Card>
-          <Card href="/ventes?period=ytd">
+          <Card href="/ventes?period=ytd" explain={explain("ca-ytd", "CA année en cours (sell-in)", [{ label: "CA année", value: fmtMAD(ytd.amount) }, { label: "vs N-1 à date", value: fmtPct(delta(ytd.amount, ytdN1.amount), 0, true) }, { label: "Objectif annuel", value: annualObj ? fmtMAD(annualObj) : "non défini" }], `Année ${d.year} à date`, ["get_sales_summary"])}>
             <div className="label">CA année en cours</div>
             <div className="kpi mt-2">{fmtMAD(ytd.amount, { compact: true })}</div>
             <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-muted">
@@ -71,7 +91,7 @@ export default async function CockpitPage() {
               {annualObj && <span>{fmtPct((ytd.amount / annualObj) * 100)} de l&apos;objectif annuel</span>}
             </div>
           </Card>
-          <Card href="/clients">
+          <Card href="/clients" explain={explain("activite-mois", "Activité du mois (clients actifs)", [{ label: "Clients actifs", value: fmtNum(cmp.current.clients) }, { label: "Commandes", value: fmtNum(cmp.current.orders) }, { label: "Unités", value: fmtNum(cmp.current.quantity) }], toDate, ["get_sales_summary", "get_client_intelligence"])}>
             <div className="label">Activité du mois</div>
             <div className="kpi mt-2">{fmtNum(cmp.current.clients)} <span className="text-[14px] font-medium text-muted">clients</span></div>
             <div className="mt-2 text-[12px] text-muted">{fmtNum(cmp.current.orders)} commandes · {fmtNum(cmp.current.quantity)} unités · panier {fmtMAD(cmp.current.orders ? mtd / cmp.current.orders : 0, { compact: true })}</div>
@@ -79,10 +99,10 @@ export default async function CockpitPage() {
         </div>
 
         <div className="grid lg:grid-cols-5 gap-3 mt-3">
-          <Card className="lg:col-span-3" title="CA mensuel — 13 mois vs N-1" action={<Link href="/ventes" className="text-[12px] text-accent font-medium">Analyser →</Link>}>
+          <Card className="lg:col-span-3" title="CA mensuel — 13 mois vs N-1" action={<Link href="/ventes" className="text-[12px] text-accent font-medium mr-7">Analyser →</Link>} explain={explain("ca-mensuel", "CA mensuel — 13 mois vs N-1 (sell-in)", chart.slice(-4).map((c) => ({ label: fmtMonth(c.month), value: `${fmtMAD(c.amount)} (N-1 : ${fmtMAD(c.prev)})` })), "13 derniers mois", ["get_sales_summary"])}>
             <MonthlyRevenueChart data={chart} />
           </Card>
-          <Card className="lg:col-span-2" title={`Par marque — ${monthLabel}`} pad={false}>
+          <Card className="lg:col-span-2" title={`Par marque — ${monthLabel}`} pad={false} explain={explain("par-marque", `CA par marque — ${monthLabel} (sell-in)`, d.brandTable.slice(0, 8).map((b) => ({ label: b.name, value: `${fmtMAD(b.amount)} · vs M-1 ${fmtPct(delta(b.amount, b.prev), 0, true)}` })), toDate, ["get_sales_summary"])}>
             <div className="overflow-x-auto">
               <table className="tbl">
                 <thead><tr><th>Marque</th><th className="num">CA</th><th className="num">vs M-1</th><th className="num">Obj.</th></tr></thead>
@@ -109,7 +129,7 @@ export default async function CockpitPage() {
       {/* ---------------- Blocs opérationnels : chaque carte suit le module correspondant ---------------- */}
       {(perms.budgets.view || perms.terrain.view || perms.marketing.view || perms.reglementaire.view || perms.stock.view) && <Section title="Pilotage" description="Marketing · Terrain · Digital · Réglementaire · Stock">
         <div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-3">
-          {perms.budgets.view && <Card href="/marketing" title="Marketing">
+          {perms.budgets.view && <Card href="/marketing" title="Marketing" explain={explain("marketing", "Budget marketing", [{ label: "Disponible", value: fmtMAD(d.marketing.available) }, { label: "Enveloppe", value: fmtMAD(d.marketing.budget) }, { label: "Engagé", value: fmtMAD(d.marketing.engaged) }, { label: "Dépensé", value: fmtMAD(d.marketing.spent) }], `Année ${d.year}`, ["get_marketing_budget"])}>
             <div className="kpi">{fmtMAD(d.marketing.available, { compact: true })}</div>
             <div className="text-[12px] text-muted mt-1">disponible sur {fmtMAD(d.marketing.budget, { compact: true })}</div>
             <Progress value={d.marketing.budget ? (d.marketing.engaged / d.marketing.budget) * 100 : 0} tone={d.marketing.budget && d.marketing.engaged / d.marketing.budget > 0.9 ? "orange" : "accent"} className="mt-3" />
@@ -119,7 +139,7 @@ export default async function CockpitPage() {
             </div>
           </Card>}
 
-          {perms.terrain.view && <Card href="/terrain" title="Terrain">
+          {perms.terrain.view && <Card href="/terrain" title="Terrain" explain={explain("terrain", "Terrain (sell-out animatrices)", [{ label: "Animations aujourd'hui", value: String(d.terrain.today.length) }, { label: "Unités 7 j", value: fmtNum(d.terrain.sales7.units) }, { label: "Sell-out TTC 7 j", value: fmtMAD(d.terrain.sales7.revenue) }, { label: "Top animatrice", value: d.terrain.topAnimatrice?.name ?? "—" }], "7 derniers jours", ["get_terrain_summary"])}>
             <div className="kpi">{d.terrain.today.length} <span className="text-[14px] font-medium text-muted">animation{d.terrain.today.length > 1 ? "s" : ""} aujourd&apos;hui</span></div>
             <div className="text-[12px] text-muted mt-1">{fmtNum(d.terrain.sales7.units)} u. · {fmtMAD(d.terrain.sales7.revenue, { compact: true })} sur 7 j ({d.terrain.sales7.animations} animations)</div>
             <div className="mt-3 space-y-1 text-[12px]">
@@ -129,7 +149,7 @@ export default async function CockpitPage() {
             </div>
           </Card>}
 
-          {perms.marketing.view && <Card href="/marketing/analytics?period=last30" title="Analytics marketing · 30 j">
+          {perms.marketing.view && <Card href="/marketing/analytics?period=last30" title="Analytics marketing · 30 j" explain={explain("analytics", "Analytics marketing · 30 j", [{ label: "Dépensé", value: d.analytics.spend === null ? "—" : fmtMAD(d.analytics.spend) }, { label: "ROI mesuré", value: d.analytics.roi === null ? `non mesurable (${d.analytics.roiReason})` : `${d.analytics.roi.toFixed(2)}×` }, { label: "Meilleur couple", value: d.analytics.best ?? "—" }, { label: "Pire couple", value: d.analytics.worst ?? "—" }], "30 derniers jours", ["get_marketing_budget", "get_ads_performance"])}>
             <div className="kpi">{d.analytics.spend === null ? "—" : fmtMAD(d.analytics.spend, { compact: true })} <span className="text-[14px] font-medium text-muted">dépensés</span></div>
             <div className="text-[12px] text-muted mt-1">{d.analytics.roi === null ? `ROI non mesurable (${d.analytics.roiReason})` : `ROI mesuré ${d.analytics.roi.toFixed(2)}× sur ${Math.round(d.analytics.roiCoverage * 100)} % des dépenses`}</div>
             <div className="mt-3 space-y-1 text-[12px]">
@@ -140,7 +160,7 @@ export default async function CockpitPage() {
             </div>
           </Card>}
 
-          {perms.marketing.view && <Card href="/marketing" title="Digital · 30 j">
+          {perms.marketing.view && <Card href="/marketing" title="Digital · 30 j" explain={explain("digital", "Digital Ads · 30 j", [{ label: "ROAS", value: d.digital.roas !== null ? `${d.digital.roas.toFixed(1)}×` : "—" }, { label: "Dépensé", value: fmtMAD(d.digital.spend) }, { label: "CA attribué (régie)", value: fmtMAD(d.digital.revenue) }, { label: "CPA", value: d.digital.cpa !== null ? fmtMAD(d.digital.cpa) : "—" }], "30 derniers jours", ["get_ads_performance"])}>
             <div className="kpi">{d.digital.roas !== null ? `${d.digital.roas.toFixed(1)}×` : "—"} <span className="text-[14px] font-medium text-muted">ROAS</span></div>
             <div className="text-[12px] text-muted mt-1">{fmtMAD(d.digital.spend, { compact: true })} dépensés · {fmtMAD(d.digital.revenue, { compact: true })} attribués</div>
             <div className="mt-3 space-y-1 text-[12px]">
@@ -149,7 +169,7 @@ export default async function CockpitPage() {
             </div>
           </Card>}
 
-          {perms.reglementaire.view && <Card href="/reglementaire" title="Réglementaire">
+          {perms.reglementaire.view && <Card href="/reglementaire" title="Réglementaire" explain={explain("reglementaire", "Réglementaire", [{ label: "Critiques", value: String(d.regulatory.critical) }, { label: "À redéposer ≤ 90 j", value: String(d.regulatory.soon) }, { label: "Certificats CE à obtenir", value: String(d.regulatory.certificates) }, { label: "Non déposés / bloqués", value: String(d.regulatory.blocked) }], "Aujourd'hui", ["get_regulatory_alerts"])}>
             <div className="kpi text-red">{d.regulatory.critical} <span className="text-[14px] font-medium text-muted">critique{d.regulatory.critical > 1 ? "s" : ""}</span></div>
             <div className="text-[12px] text-muted mt-1">expirés ou ≤ 30 jours</div>
             <div className="mt-3 space-y-1 text-[12px]">
@@ -160,7 +180,7 @@ export default async function CockpitPage() {
             </div>
           </Card>}
 
-          {perms.stock.view && <Card href="/stock" title="Stock">
+          {perms.stock.view && <Card href="/stock" title="Stock" explain={explain("stock", "Stock", [{ label: "Sous seuil", value: String(d.stock.red + d.stock.orange) }, { label: "Critiques", value: String(d.stock.red) }, { label: "Ruptures", value: String(d.stock.stockout) }, { label: "Surstock > 6 mois", value: String(d.stock.overstock) }, { label: "À commander", value: String(d.stock.toOrder.length) }], "Dernière photo de stock", ["get_stock_coverage"])}>
             <div className="kpi text-orange">{d.stock.red + d.stock.orange} <span className="text-[14px] font-medium text-muted">sous seuil</span></div>
             <div className="text-[12px] text-muted mt-1">{d.stock.red} critiques · {d.stock.orange} tendus</div>
             <div className="mt-3 space-y-1 text-[12px]">
@@ -178,7 +198,7 @@ export default async function CockpitPage() {
           <Card><div className="text-sm text-muted">Aucune action ouverte. Tout est sous contrôle.</div></Card>
         ) : (
           <div className="grid md:grid-cols-2 gap-3">
-            {topRecs.map((r) => <RecommendationCard key={r.key} rec={r} users={users} compact redirectTo="/" />)}
+            {topRecs.map((r) => <RecommendationCard key={r.key} rec={r} users={users} compact redirectTo="/" copilot={explainOn} plan={plans.get(r.key) ?? null} />)}
           </div>
         )}
       </Section>

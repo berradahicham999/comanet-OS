@@ -164,6 +164,20 @@ plusieurs marques cohabitent dans un même compte.
 | « Fichier trop volumineux » | Maximum 25 Mo par fichier ; exporter une période plus courte depuis Sage. |
 | Vérifier l'état du service | `https://<votre-url>/api/health` renvoie `{"ok":true,"db":"up"}`. |
 
+## 8. Activer le copilote IA (Anthropic)
+
+Le copilote lit les données de COMANET OS par des outils typés, filtrés par les droits de chaque personne, et
+n'écrit jamais dans les données métier (voir `docs/guide-copilote-ia.md`).
+
+1. Créer une clé d'API sur <https://platform.claude.com> (Console → API keys). Prévoir un plafond de dépense
+   côté Anthropic en plus du plafond d'alerte de l'application.
+2. Vercel → *Settings* → *Environment Variables* → `ANTHROPIC_API_KEY` = la clé. Redéployer.
+3. Appliquer la migration `0018_ai_copilot` depuis `/installation` (tables `ai_*`, statut de tâche « proposée »).
+4. Vérifier dans `/parametres/ia` : état « Configuré », modèles actifs, puis ajuster les limites (questions par heure,
+   budget quotidien de tokens, plafond mensuel).
+
+Sans clé, rien ne casse : le bouton Copilote explique quoi renseigner, le brief et les explications de cartes restent masqués.
+
 ## Variables d'environnement (récapitulatif)
 
 | Variable | Obligatoire | Rôle |
@@ -174,6 +188,9 @@ plusieurs marques cohabitent dans un même compte.
 | `SETUP_KEY` | recommandé | accès à `/installation` sans compte |
 | `DATABASE_POOL_MAX` | non | connexions par instance (défaut : 5 sur Vercel) |
 | `BUSINESS_TZ` | non | fuseau métier (défaut : `Africa/Casablanca`) |
-| `META_ACCESS_TOKEN` | pour la synchro Meta | jeton d'utilisateur système, permission `ads_read` seule. Jamais stocké en base. |
+| `META_ACCESS_TOKEN` | pour la synchro Meta | jeton(s) d'utilisateur système, permission `ads_read` seule ; plusieurs jetons séparés par des virgules si les comptes sont répartis sur plusieurs Business Managers. Jamais stocké en base. Vérifier avec `/marketing/ads/diagnostic`. |
 | `CRON_SECRET` | pour la synchro Meta | protège `/api/cron/meta`, route publique sur Internet |
 | `META_API_VERSION` | non | version d'API épinglée (défaut : `v23.0`) |
+| `ANTHROPIC_API_KEY` | pour le copilote IA | clé d'accès à l'API Anthropic. Absente : l'application fonctionne normalement, le copilote affiche « non configuré ». Jamais stockée en base. |
+| `AI_MODEL_FAST` | non | modèle rapide (explications de cartes, brief du matin ; défaut : `claude-sonnet-5`) |
+| `AI_MODEL_ADVANCED` | non | modèle avancé (questions libres, plans, rapports ; défaut : `claude-opus-5`) |

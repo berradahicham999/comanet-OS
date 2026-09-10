@@ -52,13 +52,15 @@ export function Section({ title, description, action, children, className }: {
 
 /* ---------------------------------- Card --------------------------------- */
 
-export function Card({ children, className, title, action, href, pad = true }: {
+export function Card({ children, className, title, action, href, pad = true, explain }: {
   children: React.ReactNode;
   className?: string;
   title?: React.ReactNode;
   action?: React.ReactNode;
   href?: string;
   pad?: boolean;
+  /** Bouton « Expliquer » du copilote (voir `components/ai/explain-button.tsx`) : posé hors du lien pour rester cliquable. */
+  explain?: React.ReactNode;
 }) {
   const inner = (
     <>
@@ -71,6 +73,18 @@ export function Card({ children, className, title, action, href, pad = true }: {
       {children}
     </>
   );
+  if (explain) {
+    return (
+      <div className={clsx("relative", className)}>
+        {href ? (
+          <Link href={href} className={clsx("card block h-full hover:border-line-2 transition-colors", pad && "card-pad")}>{inner}</Link>
+        ) : (
+          <div className={clsx("card h-full", pad && "card-pad")}>{inner}</div>
+        )}
+        <div className="absolute top-2 right-2">{explain}</div>
+      </div>
+    );
+  }
   if (href) {
     return (
       <Link href={href} className={clsx("card block hover:border-line-2 transition-colors", pad && "card-pad", className)}>
@@ -219,8 +233,8 @@ export function PriorityBadge({ priority }: { priority: "LOW" | "MEDIUM" | "HIGH
   return <Badge tone={tone}>{label}</Badge>;
 }
 
-export function StatusBadge({ status }: { status: "TODO" | "IN_PROGRESS" | "DONE" | "CANCELLED" }) {
-  const map = { TODO: ["gray", "À faire"], IN_PROGRESS: ["blue", "En cours"], DONE: ["green", "Terminée"], CANCELLED: ["gray", "Annulée"] } as const;
+export function StatusBadge({ status }: { status: "TODO" | "IN_PROGRESS" | "DONE" | "CANCELLED" | "PROPOSED" }) {
+  const map = { TODO: ["gray", "À faire"], IN_PROGRESS: ["blue", "En cours"], DONE: ["green", "Terminée"], CANCELLED: ["gray", "Annulée"], PROPOSED: ["purple", "Proposée par le copilote"] } as const;
   const [tone, label] = map[status];
   return <Badge tone={tone}>{label}</Badge>;
 }

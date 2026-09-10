@@ -5,7 +5,8 @@ import { requireAccess, isOwnOnly, brandFilter } from "@/lib/access";
 import { listTasks, SOURCE_LABEL, type TaskRow } from "@/lib/tasks";
 import { listUsers, listBrands } from "@/lib/users";
 import { PageHeader, Badge, PriorityBadge, BrandDot, Tabs, Card } from "@/components/ui";
-import { setTaskStatus } from "./actions";
+import { setTaskStatus, decideProposedTask } from "./actions";
+import { Sparkles } from "lucide-react";
 import { fmtDateShort, today, iso, initials } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -40,14 +41,39 @@ function TaskCard({ t, me }: { t: TaskRow; me: string }) {
   );
 }
 
+function ProposedCard({ t, users, me }: { t: TaskRow; users: { id: string; name: string }[]; me: string }) {
+  return (
+    <div className="card p-4">
+      <div className="flex flex-wrap items-center gap-2 mb-1">
+        <Badge tone="purple"><Sparkles size={12} /> Proposée par le copilote</Badge>
+        <PriorityBadge priority={t.priority} />
+        {t.brand && <span className="flex items-center gap-1 text-[12px] text-muted"><BrandDot color={t.brandColor ?? "#999"} />{t.brand}</span>}
+        <span className="text-[12px] text-muted ml-auto">échéance {fmtDateShort(t.dueDate)} · proposée le {fmtDateShort(t.createdAt)}</span>
+      </div>
+      <Link href={`/taches/${t.id}`} className="font-medium text-[14px] hover:underline">{t.title}</Link>
+      <form action={decideProposedTask} className="mt-3 flex flex-wrap items-center gap-2">
+        <input type="hidden" name="id" value={t.id} />
+        <select name="assigneeId" defaultValue={t.assigneeId ?? me} className="select h-8 text-[12px] w-auto" aria-label="Assigner à">
+          {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+        </select>
+        <button type="submit" name="decision" value="accept" className="btn-primary btn-sm"><Check size={14} /> Accepter</button>
+        <button type="submit" name="decision" value="refuse" className="btn-ghost btn-sm">Refuser</button>
+        <Link href={`/taches/${t.id}`} className="text-[12px] text-accent ml-auto">Voir le détail →</Link>
+      </form>
+    </div>
+  );
+}
+
 export default async function TachesPage(props: { searchParams: Promise<{ assignee?: string; brand?: string; overdue?: string; view?: string; source?: string }> }) {
   const user = await requireAccess("taches");
   const [ownOnly, scopeBrands] = await Promise.all([isOwnOnly(), brandFilter()]);
   const sp = await props.searchParams;
   const mine = sp.view === "mine" || ownOnly;
-  const [tasks, users, brands] = await Promise.all([
+  const proposedView = sp.view === "proposed" && !ownOnly;
+  const [tasks, users, brands, proposed] = await Promise.all([
     listTasks({ assigneeId: mine ? user.id : sp.assignee || undefined, brandId: sp.brand || undefined, brandIds: scopeBrands, overdue: !!sp.overdue, source: sp.source || undefined }),
     listUsers(), listBrands(),
+    ownOnly ? Promise.resolve([] as TaskRow[]) : listTasks({ brandIds: scopeBrands, proposed: true }),
   ]);
   const cols: { key: TaskRow["status"]; label: string }[] = [{ key: "TODO", label: "À faire" }, { key: "IN_PROGRESS", label: "En cours" }, { key: "DONE", label: "Terminées (14 j)" }];
   const overdueCount = tasks.filter((t) => t.dueDate && t.dueDate < iso(today()) && (t.status === "TODO" || t.status === "IN_PROGRESS")).length;
@@ -58,7 +84,7 @@ export default async function TachesPage(props: { searchParams: Promise<{ assign
       <PageHeader eyebrow="Exécution" title={mine ? "Mes tâches" : "Tâches"} subtitle={`${tasks.filter((t) => t.status !== "DONE" && t.status !== "CANCELLED").length} ouvertes · ${overdueCount} en retard`}
         actions={<Link href="/taches/nouvelle" className="btn-primary btn-sm">+ Tâche</Link>}>
         <div className="flex flex-wrap items-center gap-2">
-          {!ownOnly && <Tabs current={qs({ view: sp.view })} tabs={[{ href: qs({ view: "" }), label: "Toutes" }, { href: qs({ view: "mine" }), label: "Mes tâches" }]} />}
+          {!ownOnly && <Tabs current={qs({ view: sp.view })} tabs={[{ href: qs({ view: "" }), label: "Toutes" }, { href: qs({ view: "mine" }), label: "Mes tâches" }, { href: qs({ view: "proposed" }), label: "Proposées par le copilote", count: proposed.length }]} />}
           {!ownOnly && (
             <form action="/taches" method="get" className="flex flex-wrap gap-2 ml-auto">
               {sp.view && <input type="hidden" name="view" value={sp.view} />}
@@ -71,6 +97,13 @@ export default async function TachesPage(props: { searchParams: Promise<{ assign
           )}
         </div>
       </PageHeader>
+      {proposedView ? (
+        <div className="space-y-2 max-w-3xl">
+          <div className="text-[13px] text-muted">Tâches proposées par le copilote IA. Aucune n&apos;est active tant qu&apos;une personne ne l&apos;a pas acceptée ; refuser l&apos;annule sans la supprimer.</div>
+          {proposed.length === 0 && <Card><div className="text-sm text-muted">Aucune proposition en attente.</div></Card>}
+          {proposed.map((t) => <ProposedCard key={t.id} t={t} users={users} me={user.id} />)}
+        </div>
+      ) : (
       <div className="grid md:grid-cols-3 gap-3 items-start">
         {cols.map((c) => {
           const list = tasks.filter((t) => t.status === c.key || (c.key === "DONE" && t.status === "CANCELLED"));
@@ -82,7 +115,8 @@ export default async function TachesPage(props: { searchParams: Promise<{ assign
           );
         })}
       </div>
-      {tasks.length === 0 && <Card className="mt-4"><div className="text-sm text-muted flex items-center gap-2">Aucune tâche. Les recommandations de l&apos;<Link href="/actions" className="text-accent font-medium">Action Center</Link> se transforment en tâches en un clic <ArrowRight size={14} /></div></Card>}
+      )}
+      {!proposedView && tasks.length === 0 && <Card className="mt-4"><div className="text-sm text-muted flex items-center gap-2">Aucune tâche. Les recommandations de l&apos;<Link href="/actions" className="text-accent font-medium">Action Center</Link> se transforment en tâches en un clic <ArrowRight size={14} /></div></Card>}
     </>
   );
 }

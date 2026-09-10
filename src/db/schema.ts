@@ -85,6 +85,8 @@ export const taskStatusEnum = pgEnum("task_status", [
   "IN_PROGRESS",
   "DONE",
   "CANCELLED",
+  /** Proposée par le copilote IA : n'entre ni dans les compteurs ni dans les retards tant qu'elle n'est pas acceptée. */
+  "PROPOSED",
 ]);
 
 export const taskPriorityEnum = pgEnum("task_priority", [
@@ -103,6 +105,8 @@ export const taskSourceEnum = pgEnum("task_source", [
   "TERRAIN",
   "COMMERCIAL",
   "MEDICAL",
+  /** Copilote IA (outil `propose_task`). */
+  "AI",
 ]);
 
 export const regulatoryStatusEnum = pgEnum("regulatory_status", [
@@ -1203,6 +1207,17 @@ export const adAccounts = pgTable(
     syncStatus: text("sync_status").notNull().default("MANUAL"), // MANUAL | OK | ERROR
     lastError: text("last_error"),
     importedRows: integer("imported_rows").notNull().default(0),
+    /**
+     * Rattrapage historique (2023 →). `backfill_cursor` = premier jour du prochain mois à lire ;
+     * `null` tant que rien n'a été lancé. Le rattrapage est reprenable : chaque passage lit
+     * quelques mois puis avance le curseur, pour tenir dans la durée d'une fonction serveur.
+     */
+    backfillCursor: date("backfill_cursor"),
+    backfillStatus: text("backfill_status").notNull().default("IDLE"), // IDLE | RUNNING | DONE | ERROR
+    backfillError: text("backfill_error"),
+    backfillUpdatedAt: timestamp("backfill_updated_at", { withTimezone: true }),
+    /** Mois refusés par Meta (rétention 37 mois, permission…) : « Historique indisponible pour cette période ». */
+    backfillGaps: jsonb("backfill_gaps").$type<{ month: string; reason: string }[]>().notNull().default([]),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -1242,6 +1257,11 @@ export const adMetrics = pgTable(
     externalCampaignId: text("external_campaign_id"),
     externalAdsetId: text("external_adset_id"),
     externalAdId: text("external_ad_id"),
+    /** Créative Meta diffusée par la publicité ce jour-là (clé vers `ad_entities` niveau CREATIVE). */
+    externalCreativeId: text("external_creative_id"),
+    /** Vues vidéo (3 s) et engagements sur la publication : lus dans `actions`, 0 si absents. */
+    videoViews: integer("video_views").notNull().default(0),
+    postEngagement: integer("post_engagement").notNull().default(0),
     /** Devise d'origine du compte publicitaire (EUR, USD…). `spend` et `revenue` sont TOUJOURS en MAD. */
     currency: text("currency").notNull().default("MAD"),
     /** Montants tels que remontés par la régie, avant conversion — trace d'audit. */
@@ -2384,6 +2404,121 @@ export const analyticsRefreshLog = pgTable(
 );
 
 /* ------------------------------------------------------------------ */
+/* Copilote IA                                                         */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Le copilote lit la donnée métier par des outils typés et n'écrit QUE dans ces tables
+ * (plus une insertion dans `tasks` au statut PROPOSED et un brouillon dans `ai_reports`).
+ * `tests/ai/read-only.test.ts` interdit toute autre écriture depuis `src/lib/ai/`.
+ */
+
+export const aiConversations = pgTable(
+  "ai_conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    title: text("title"),
+    /** Module ou page d'où la conversation a été ouverte (ex. « terrain », « /marketing/budgets »). */
+    contextModule: text("context_module"),
+    contextPath: text("context_path"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ai_conversations_user_idx").on(t.userId, t.updatedAt)],
+);
+
+export const aiMessages = pgTable(
+  "ai_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id").notNull().references(() => aiConversations.id, { onDelete: "cascade" }),
+    /** user | assistant */
+    role: text("role").notNull(),
+    content: text("content").notNull(),
+    /** Appels d'outils de ce tour (nom, paramètres, résumé du résultat). */
+    toolCalls: jsonb("tool_calls"),
+    tokensIn: integer("tokens_in").notNull().default(0),
+    tokensOut: integer("tokens_out").notNull().default(0),
+    cacheReadTokens: integer("cache_read_tokens").notNull().default(0),
+    model: text("model"),
+    latencyMs: integer("latency_ms"),
+    /** chat | explain | brief | plan | report */
+    surface: text("surface").notNull().default("chat"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ai_messages_conversation_idx").on(t.conversationId, t.createdAt), index("ai_messages_created_idx").on(t.createdAt)],
+);
+
+/** Journal de chaque appel d'outil : qui, quel outil, quels paramètres, durée, nombre de lignes. */
+export const aiToolCalls = pgTable(
+  "ai_tool_calls",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    messageId: uuid("message_id").references(() => aiMessages.id, { onDelete: "set null" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    tool: text("tool").notNull(),
+    params: jsonb("params"),
+    durationMs: integer("duration_ms").notNull().default(0),
+    rowCount: integer("row_count").notNull().default(0),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ai_tool_calls_user_idx").on(t.userId, t.createdAt), index("ai_tool_calls_tool_idx").on(t.tool)],
+);
+
+/** Réponses mises en cache : « Expliquer » (1 h par combinaison de filtres), brief du matin (1 jour par personne). */
+export const aiCache = pgTable(
+  "ai_cache",
+  {
+    key: text("key").primaryKey(),
+    surface: text("surface").notNull(),
+    content: text("content").notNull(),
+    model: text("model"),
+    tokensIn: integer("tokens_in").notNull().default(0),
+    tokensOut: integer("tokens_out").notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ai_cache_expires_idx").on(t.expiresAt)],
+);
+
+/** Plan d'exécution « Détailler » d'une recommandation de l'Action Center, par clé stable. */
+export const aiActionPlans = pgTable("ai_action_plans", {
+  recKey: text("rec_key").primaryKey(),
+  contentMd: text("content_md").notNull(),
+  model: text("model"),
+  createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Brouillons de rapports (COMANET WEEKLY, MONTHLY BRAND REVIEW) validables par la direction. */
+export const aiReports = pgTable(
+  "ai_reports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** WEEKLY | MONTHLY_BRAND_REVIEW */
+    type: text("type").notNull(),
+    brandId: uuid("brand_id").references(() => brands.id, { onDelete: "set null" }),
+    periodStart: date("period_start").notNull(),
+    periodEnd: date("period_end").notNull(),
+    title: text("title").notNull(),
+    contentMd: text("content_md").notNull(),
+    /** Outils appelés et périodes citées : chaque section du rapport indique sa source. */
+    sources: jsonb("sources"),
+    /** DRAFT | VALIDATED | ARCHIVED */
+    status: text("status").notNull().default("DRAFT"),
+    model: text("model"),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    validatedById: uuid("validated_by_id").references(() => users.id, { onDelete: "set null" }),
+    validatedAt: timestamp("validated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ai_reports_type_idx").on(t.type, t.periodStart), index("ai_reports_brand_idx").on(t.brandId)],
+);
+
+/* ------------------------------------------------------------------ */
 /* Relations (pour les requêtes relationnelles drizzle)                */
 /* ------------------------------------------------------------------ */
 
@@ -2720,3 +2855,102 @@ export type DoctorPotential = (typeof doctorPotentialEnum.enumValues)[number];
 export type MedicalVisitStatus = (typeof medicalVisitStatusEnum.enumValues)[number];
 export type DoctorInterest = (typeof doctorInterestEnum.enumValues)[number];
 export type SampleMovementType = (typeof sampleMovementTypeEnum.enumValues)[number];
+
+/* ------------------------------------------------------------------ */
+/* Ads Command Center : catalogue des objets de régie, mémoire, journal */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Catalogue des objets publicitaires (campagne, ensemble, publicité, créative), y compris
+ * archivés. `ad_metrics` ne porte que des noms ; c'est ici que vivent l'objectif, les dates,
+ * le texte et le format de la créative, le produit rattaché et les étiquettes de contenu.
+ * Une ligne par (plateforme, niveau, identifiant de régie), remplacée à chaque catalogage.
+ */
+export const adEntities = pgTable(
+  "ad_entities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    platform: text("platform").notNull(),
+    level: text("level").notNull(), // CAMPAIGN | ADSET | AD | CREATIVE
+    externalId: text("external_id").notNull(),
+    accountId: uuid("account_id").references(() => adAccounts.id, { onDelete: "cascade" }),
+    /** Parent direct (ensemble → campagne, publicité → ensemble, créative → publicité). */
+    parentExternalId: text("parent_external_id"),
+    externalCampaignId: text("external_campaign_id"),
+    externalAdsetId: text("external_adset_id"),
+    externalCreativeId: text("external_creative_id"),
+    name: text("name").notNull(),
+    status: text("status"),
+    effectiveStatus: text("effective_status"),
+    objective: text("objective"),
+    createdTime: timestamp("created_time", { withTimezone: true }),
+    startTime: timestamp("start_time", { withTimezone: true }),
+    stopTime: timestamp("stop_time", { withTimezone: true }),
+    /** Créative : texte principal, titre, visuel. Vides pour les autres niveaux. */
+    title: text("title"),
+    body: text("body"),
+    thumbnailUrl: text("thumbnail_url"),
+    imageUrl: text("image_url"),
+    videoId: text("video_id"),
+    objectType: text("object_type"), // VIDEO | PHOTO | SHARE | CAROUSEL…
+    callToAction: text("call_to_action"),
+    linkUrl: text("link_url"),
+    /** Marque et produit du référentiel existant. AUTO = déduit du texte ; MANUAL = corrigé à la main (jamais écrasé). */
+    brandId: uuid("brand_id").references(() => brands.id, { onDelete: "set null" }),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
+    productSource: text("product_source"), // AUTO | MANUAL
+    /** Étiquettes de contenu : { format, angle, hook, offer, contentType }. `tags_source` MANUAL protège une correction. */
+    tags: jsonb("tags").$type<Record<string, string>>().notNull().default({}),
+    tagsSource: text("tags_source").notNull().default("AUTO"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("ad_entities_uq").on(t.platform, t.level, t.externalId),
+    index("ad_entities_account_idx").on(t.accountId, t.level),
+    index("ad_entities_campaign_idx").on(t.externalCampaignId),
+    index("ad_entities_product_idx").on(t.productId),
+    index("ad_entities_brand_idx").on(t.brandId),
+  ],
+);
+
+/**
+ * Journal des passages de synchronisation et de rattrapage : ce que l'écran affiche comme
+ * « dernière synchronisation réussie », et ce que le diagnostic relit pour expliquer une panne.
+ */
+export const adSyncLog = pgTable(
+  "ad_sync_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    accountId: uuid("account_id").references(() => adAccounts.id, { onDelete: "cascade" }),
+    mode: text("mode").notNull(), // full | intraday | backfill | entities
+    since: date("since"),
+    until: date("until"),
+    rows: integer("rows").notNull().default(0),
+    ok: boolean("ok").notNull(),
+    error: text("error"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ad_sync_log_account_idx").on(t.accountId, t.finishedAt)],
+);
+
+/**
+ * Mémoire marketing : phrases apprises des données publicitaires (« les créatives témoignage
+ * fonctionnent pour Auracos »), avec leurs preuves et leur confiance. Recalculée par le moteur ;
+ * jamais saisie à la main, jamais inventée sans preuve. Lisible par le copilote.
+ */
+export const adMemory = pgTable(
+  "ad_memory",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    key: text("key").notNull().unique(),
+    scope: text("scope").notNull(), // BRAND | PRODUCT | CROSS_BRAND | SEASON | FORMAT | ANGLE
+    brandId: uuid("brand_id").references(() => brands.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "cascade" }),
+    statement: text("statement").notNull(),
+    evidence: jsonb("evidence").$type<Record<string, unknown>>().notNull().default({}),
+    confidence: integer("confidence").notNull().default(0),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ad_memory_brand_idx").on(t.brandId), index("ad_memory_scope_idx").on(t.scope)],
+);

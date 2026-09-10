@@ -64,6 +64,10 @@ export type ComanetSettings = {
   metaAttributionWindow: string;
   /** Nombre de jours re-synchronisés à chaque passage : Meta révise ses conversions a posteriori. */
   metaSyncWindowDays: number;
+  /** Premier jour du rattrapage historique Meta (AAAA-MM-JJ). Meta ne sert que 37 mois glissants : au-delà, « indisponible ». */
+  metaHistoryStart: string;
+  /** Seuils de la couche d'intelligence publicitaire (fatigue, anomalies, winners, contenu, budget). */
+  adsIntel: AdsIntelSettings;
   /**
    * Seuils du moteur de décision publicitaire (SCALE / MAINTAIN / OPTIMIZE / STOP / WATCH).
    * Aucun de ces nombres n'est écrit dans `diagnose()` : sous `minSpend` ou `minDays`,
@@ -74,6 +78,32 @@ export type ComanetSettings = {
   activations: ActivationSettings;
   /** Couche d'analyse marketing transverse : fenêtres, répartition, coûts, seuils de verdict. */
   analytics: AnalyticsSettings;
+  /** Copilote IA : limites d'usage et plafond de coût (les modèles et la clé restent en variables d'environnement). */
+  ai: AiSettings;
+};
+
+export type AiSettings = {
+  /** Requêtes au copilote par personne et par heure glissante. */
+  requestsPerHour: number;
+  /** Tokens (entrée + sortie) autorisés par jour, toutes personnes et surfaces confondues. */
+  dailyTokenBudget: number;
+  /** Coût mensuel estimé (USD) au-delà duquel les surfaces automatiques (brief, explications) sont suspendues. Les questions manuelles d'un administrateur restent possibles. */
+  monthlyCostAlertUsd: number;
+  /** Nombre maximal d'appels d'outils par question. */
+  maxToolCalls: number;
+  /** Délai maximal d'une réponse, en secondes. */
+  timeoutSeconds: number;
+  /** Durée de cache d'une explication de carte, en minutes. */
+  explainCacheMinutes: number;
+};
+
+export const DEFAULT_AI_SETTINGS: AiSettings = {
+  requestsPerHour: 60,
+  dailyTokenBudget: 2_000_000,
+  monthlyCostAlertUsd: 100,
+  maxToolCalls: 8,
+  timeoutSeconds: 60,
+  explainCacheMinutes: 60,
 };
 
 /**
@@ -200,6 +230,41 @@ export const DEFAULT_ACTIVATION_SETTINGS: ActivationSettings = {
 };
 
 /** Seuils du moteur publicitaire, tels que passés à `diagnose()`. */
+export type AdsIntelSettings = {
+  /** Fréquence au-delà de laquelle une créative est suspectée de fatigue (avec CTR en baisse ou coût en hausse). */
+  fatigueFrequency: number;
+  /** Baisse du CTR (%) sur les 7 derniers jours vs les 7 précédents qui signe la fatigue. */
+  fatigueCtrDropPct: number;
+  /** Hausse du coût par résultat (%) qui signe la fatigue. */
+  fatigueCostRisePct: number;
+  /** Écart-type au-delà duquel une journée est une anomalie (z-score sur 28 jours). */
+  anomalyZ: number;
+  /** Dépense minimale (MAD) et jours minimaux pour qu'un élément puisse être WINNER. */
+  winnerMinSpend: number;
+  winnerMinDays: number;
+  /** Coût par résultat sous N × la référence de la marque : WINNER (0,75 = 25 % moins cher). */
+  winnerCostFactor: number;
+  /** Coût par résultat au-dessus de N × la référence : UNDERPERFORMING. */
+  underperformCostFactor: number;
+  /** Budget mensuel Digital Ads (MAD) pour le bloc Budget ; 0 = non défini → « non défini ». */
+  monthlyBudgetMad: number;
+  /** Valeur (MAD) attribuée à un résultat par type (message, lead, vue de page…) pour la contribution après publicité ; vide = non mesurable. */
+  valuePerResult: Record<string, number>;
+};
+
+export const DEFAULT_ADS_INTEL: AdsIntelSettings = {
+  fatigueFrequency: 3,
+  fatigueCtrDropPct: 20,
+  fatigueCostRisePct: 25,
+  anomalyZ: 2.5,
+  winnerMinSpend: 300,
+  winnerMinDays: 5,
+  winnerCostFactor: 0.75,
+  underperformCostFactor: 1.5,
+  monthlyBudgetMad: 0,
+  valuePerResult: {},
+};
+
 export type AdThresholds = {
   /** Dépense minimale (MAD) sur la fenêtre d'analyse pour qu'un verdict ait un sens. */
   minSpend: number;
@@ -271,9 +336,12 @@ export const DEFAULT_SETTINGS: ComanetSettings = {
   fxRates: {},
   metaAttributionWindow: "7d_click,1d_view",
   metaSyncWindowDays: 28,
+  metaHistoryStart: "2023-01-01",
+  adsIntel: DEFAULT_ADS_INTEL,
   ads: DEFAULT_AD_THRESHOLDS,
   activations: DEFAULT_ACTIVATION_SETTINGS,
   analytics: DEFAULT_ANALYTICS_SETTINGS,
+  ai: DEFAULT_AI_SETTINGS,
 };
 
 export const SETTINGS_KEY = "comanet.rules";
@@ -292,8 +360,10 @@ export function mergeSettings(stored: Partial<ComanetSettings> | null | undefine
     ...stored,
     coverage: { ...DEFAULT_SETTINGS.coverage, ...(stored.coverage ?? {}) },
     ads: { ...DEFAULT_AD_THRESHOLDS, ...(stored.ads ?? {}) },
+    adsIntel: { ...DEFAULT_ADS_INTEL, ...(stored.adsIntel ?? {}), valuePerResult: { ...(stored.adsIntel?.valuePerResult ?? {}) } },
     activations: { ...DEFAULT_ACTIVATION_SETTINGS, ...(stored.activations ?? {}) },
     analytics: mergeAnalytics(stored.analytics),
+    ai: { ...DEFAULT_AI_SETTINGS, ...(stored.ai ?? {}) },
   };
 }
 

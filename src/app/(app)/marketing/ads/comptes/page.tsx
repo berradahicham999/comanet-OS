@@ -8,6 +8,8 @@ import { hasMetaToken, META_API_VERSION } from "@/lib/meta/client";
 import { PageHeader, Card, Section, Badge, Empty, Facts } from "@/components/ui";
 import { fmtNum, fmtDate } from "@/lib/format";
 import { discoverAdAccounts, setAdAccountSync, syncAdAccountNow, saveAdAccount, saveFxRates } from "../../actions";
+import { runBackfillNow, runCatalogNow, rematchNow, restartBackfill } from "../actions";
+import { backfillStates } from "@/lib/meta/backfill";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Comptes publicitaires" };
@@ -27,7 +29,7 @@ export default async function ComptesPublicitairesPage(props: { searchParams: Pr
   const sp = await props.searchParams;
   const erreur = sp.erreur?.trim() || null;
   const decouverts = sp.decouverts !== undefined ? Number(sp.decouverts) : null;
-  const [accountsRes, brands, settings] = await Promise.all([
+  const [accountsRes, brands, settings, backfill] = await Promise.all([
     db.execute(sql`
       select a.id, a.name, a.platform, a.external_id, a.currency, a.timezone, a.business_name,
              a.brand_id, b.name as brand, a.sync_enabled, a.sync_status, a.last_error,
@@ -38,6 +40,7 @@ export default async function ComptesPublicitairesPage(props: { searchParams: Pr
       order by a.sync_enabled desc, a.name`),
     listBrands(),
     getSettings(),
+    backfillStates(),
   ]);
   const accounts = accountsRes.rows as Account[];
   const tokenOk = hasMetaToken();
@@ -52,7 +55,7 @@ export default async function ComptesPublicitairesPage(props: { searchParams: Pr
         eyebrow="Marketing Command Center"
         title="Comptes publicitaires"
         subtitle="Connexion en lecture seule à la régie Meta. COMANET OS lit les dépenses et les conversions ; il ne modifie jamais une campagne — mettre en pause ou rebudgéter reste un geste dans Ads Manager."
-        actions={<Link href="/marketing/ads" className="btn-secondary btn-sm">Digital Ads</Link>}
+        actions={<><Link href="/marketing/ads/diagnostic" className="btn-primary btn-sm">Diagnostic de connexion</Link><Link href="/marketing/ads" className="btn-secondary btn-sm">Command Center</Link></>}
       />
 
       {erreur && (
@@ -228,6 +231,40 @@ export default async function ComptesPublicitairesPage(props: { searchParams: Pr
         )}
       </Section>
 
+      <Section
+        title="Historique Meta depuis 2023"
+        description={`Le rattrapage relit mois par mois, au niveau publicité, depuis ${settings.metaHistoryStart} jusqu'au début de la fenêtre glissante. Il est reprenable (quelques mois par passage, cron quotidien à 3 h) ; un mois refusé par Meta (rétention de 37 mois) est marqué « historique indisponible », jamais inventé.`}
+        action={
+          <span className="flex gap-1.5">
+            <form action={runCatalogNow}><button className="btn-ghost btn-sm" type="submit" disabled={!tokenOk}>Cataloguer (campagnes, pubs, créatives)</button></form>
+            <form action={rematchNow}><button className="btn-ghost btn-sm" type="submit">Recalculer produits et étiquettes</button></form>
+            <form action={runBackfillNow}><input type="hidden" name="months" value="6" /><button className="btn-secondary btn-sm" type="submit" disabled={!tokenOk}>Charger 6 mois d&apos;historique</button></form>
+          </span>
+        }
+      >
+        <Card pad={false}>
+          <div className="overflow-x-auto">
+            <table className="tbl text-[12.5px]">
+              <thead><tr><th>Compte</th><th>Rattrapage</th><th>Prochain mois</th><th>Historique en base</th><th className="num">Lignes</th><th>Mois indisponibles</th><th></th></tr></thead>
+              <tbody>
+                {backfill.map((b) => (
+                  <tr key={b.accountId}>
+                    <td className="font-medium">{b.name}</td>
+                    <td><Badge tone={b.status === "DONE" ? "green" : b.status === "RUNNING" ? "blue" : b.status === "ERROR" ? "red" : "gray"}>{b.status === "DONE" ? "terminé" : b.status === "RUNNING" ? "en cours" : b.status === "ERROR" ? "erreur" : "non lancé"}</Badge>{b.error && <span className="block text-[11px] text-red">{b.error}</span>}</td>
+                    <td>{b.cursor ?? "—"}</td>
+                    <td>{b.firstDay ? `${fmtDate(b.firstDay)} → ${fmtDate(b.lastDay)}` : "—"}</td>
+                    <td className="num">{fmtNum(b.rows)}</td>
+                    <td className="text-[11.5px]">{b.gaps.length ? b.gaps.map((g) => <span key={g.month} title={g.reason} className="inline-block mr-1">{g.month}</span>) : <span className="text-faint">aucun</span>}</td>
+                    <td><form action={restartBackfill}><input type="hidden" name="id" value={b.accountId} /><button className="btn-ghost btn-sm" type="submit">Repartir de {settings.metaHistoryStart.slice(0, 4)}</button></form></td>
+                  </tr>
+                ))}
+                {!backfill.length && <tr><td colSpan={7} className="text-muted">Aucun compte activé.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      </Section>
+
       <Section title="Déclarer un compte à la main" description="Utile si le jeton ne couvre pas encore le business propriétaire du compte.">
         <Card>
           <form action={saveAdAccount} className="flex flex-wrap items-end gap-2 text-[13px]">
@@ -266,6 +303,7 @@ export default async function ComptesPublicitairesPage(props: { searchParams: Pr
             <li><b>Le CA remonté par Meta est du CA mesuré</b> (valeur de conversion de la régie), pas une estimation. Il reste distinct du CA facturé qui vient de Sage.</li>
             <li><b>Les journées couvertes par l&apos;API remplacent</b> les lignes du même compte issues d&apos;un import de fichier : elles décriraient les mêmes jours en double.</li>
             <li><b>Lecture seule</b> — version d&apos;API {META_API_VERSION}, permission <code className="text-[12px]">ads_read</code>.</li>
+            <li><b>Plusieurs Business Managers</b> : <code className="text-[12px]">META_ACCESS_TOKEN</code> accepte plusieurs jetons séparés par des virgules ; chaque compte est lu avec le premier jeton qui y a accès. Le <Link href="/marketing/ads/diagnostic" className="underline">diagnostic</Link> teste chaque jeton et chaque compte avec de vrais appels.</li>
           </ul>
         </Card>
       </Section>

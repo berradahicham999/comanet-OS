@@ -20,12 +20,12 @@
  */
 import { sql, and, eq, notInArray } from "drizzle-orm";
 import { db } from "@/db";
-import { adMetrics, adCampaignStates, brands } from "@/db/schema";
+import { adMetrics, adCampaignStates, adSyncLog, brands } from "@/db/schema";
 import { getSettings } from "@/lib/settings";
 import { matchBrandInText } from "@/lib/import/match";
 import { nameKey } from "./links";
 import { refreshMarketingFacts } from "@/lib/analytics-marketing/refresh";
-import { fetchInsights, getAccount, listCampaigns, minorToMajor, MetaError } from "./client";
+import { fetchInsights, getAccount, listCampaigns, minorToMajor, MetaError, type MetaInsightRow } from "./client";
 
 export type SyncAccount = {
   id: string;
@@ -237,10 +237,12 @@ export async function syncAccount(
     currency: account.currency, fxRate: null, error: null,
   };
 
+  const startedAt = new Date();
   const fail = async (message: string): Promise<SyncResult> => {
     await db.execute(sql`
       update ad_accounts set sync_status = 'ERROR', last_error = ${message}, last_sync_at = now()
       where id = ${account.id}::uuid`);
+    await logSync({ accountId: account.id, mode, since: opts?.since ?? null, until: opts?.until ?? null, rows: 0, ok: false, error: message, startedAt });
     return { ...base, error: message };
   };
 
@@ -289,82 +291,8 @@ export async function syncAccount(
       return { ...base, ok: true, currency, fxRate, campaignStates };
     }
 
-    const [{ byExternalId, byName }, brandList] = await Promise.all([loadLinks(), loadBrands()]);
-
-    type Row = typeof adMetrics.$inferInsert;
-    const batch: Row[] = [];
-    const seen = new Set<string>();
-    const days = new Set<string>();
-    const syncedAt = new Date();
-    let linkedRows = 0;
-    let unbrandedRows = 0;
-
-    const flush = async () => {
-      if (!batch.length) return;
-      await db.insert(adMetrics).values(batch).onConflictDoUpdate({
-        target: adMetrics.dedupeKey,
-        set: {
-          spend: sql`excluded.spend`, impressions: sql`excluded.impressions`, reach: sql`excluded.reach`,
-          clicks: sql`excluded.clicks`, linkClicks: sql`excluded.link_clicks`,
-          landingPageViews: sql`excluded.landing_page_views`, leads: sql`excluded.leads`,
-          purchases: sql`excluded.purchases`, revenue: sql`excluded.revenue`,
-          messagingStarted: sql`excluded.messaging_started`,
-          spendOriginal: sql`excluded.spend_original`, revenueOriginal: sql`excluded.revenue_original`,
-          currency: sql`excluded.currency`, fxRate: sql`excluded.fx_rate`,
-          attributionWindow: sql`excluded.attribution_window`,
-          // La veille relue le lendemain est une journée close : le drapeau doit retomber.
-          isPartial: sql`excluded.is_partial`,
-          syncedAt: sql`excluded.synced_at`,
-          // Le rattachement peut avoir été fait à la main : ne jamais l'effacer avec du vide.
-          campaignId: sql`coalesce(excluded.campaign_id, ad_metrics.campaign_id)`,
-          brandId: sql`coalesce(excluded.brand_id, ad_metrics.brand_id)`,
-          campaignName: sql`excluded.campaign_name`,
-          adsetName: sql`coalesce(excluded.adset_name, ad_metrics.adset_name)`,
-          adName: sql`coalesce(excluded.ad_name, ad_metrics.ad_name)`,
-          externalCampaignId: sql`excluded.external_campaign_id`,
-          externalAdsetId: sql`coalesce(excluded.external_adset_id, ad_metrics.external_adset_id)`,
-          externalAdId: sql`coalesce(excluded.external_ad_id, ad_metrics.external_ad_id)`,
-          source: sql`excluded.source`,
-        },
-      });
-      batch.length = 0;
-    };
-
-    for (const r of insights) {
-      // Une même publicité ne peut apparaître qu'une fois par jour ; l'API peut répéter une
-      // ligne entre deux pages si un objet bouge pendant la pagination.
-      const dedupeKey = ["META", r.date, r.campaignId, r.adsetId ?? "", r.adId ?? ""].join("|");
-      if (seen.has(dedupeKey)) continue;
-      seen.add(dedupeKey);
-      days.add(r.date);
-
-      const link = byExternalId.get(r.campaignId) ?? byName.get(nameKey(r.campaignName)) ?? null;
-      // Marque : le rattachement fait foi, sinon la marque citée dans le nom de campagne,
-      // sinon celle du compte. Les posts boostés (« Post: "…" ») restent souvent sans marque.
-      const brandId = link?.brand_id ?? matchBrandInText(r.campaignName, brandList) ?? account.brandId ?? null;
-      if (link) linkedRows++;
-      if (!brandId) unbrandedRows++;
-
-      batch.push({
-        date: r.date, platform: "META", accountId: account.id, brandId,
-        campaignId: link?.campaign_id ?? null,
-        campaignName: r.campaignName, adsetName: r.adsetName, adName: r.adName,
-        externalCampaignId: r.campaignId, externalAdsetId: r.adsetId, externalAdId: r.adId,
-        spend: (r.spend * fxRate).toFixed(2),
-        impressions: r.impressions, reach: r.reach, clicks: r.clicks, linkClicks: r.linkClicks,
-        landingPageViews: r.landingPageViews, leads: r.leads, purchases: r.purchases,
-        messagingStarted: r.messagingStarted,
-        revenue: (r.revenue * fxRate).toFixed(2),
-        spendOriginal: r.spend.toFixed(2), revenueOriginal: r.revenue.toFixed(2),
-        currency, fxRate: fxRate.toFixed(6),
-        attributionWindow: attribution, source: "API",
-        isPartial: r.date === today,
-        syncedAt,
-        dedupeKey,
-      });
-      if (batch.length >= BATCH) await flush();
-    }
-    await flush();
+    const up = await upsertInsights(insights, { account, currency, fxRate, attribution, today, syncedAt: new Date() });
+    const { seen, days, linkedRows, unbrandedRows } = up;
 
     // Filet : une journée marquée partielle mais jamais relue (serveur arrêté, fenêtre
     // déplacée) resterait exclue des analyses. Elle est close par le calendrier du compte.
@@ -387,6 +315,7 @@ export async function syncAccount(
       where id = ${account.id}::uuid`);
 
     await refreshMarketingFacts(["AD_METRIC"], "SYNC");
+    await logSync({ accountId: account.id, mode, since, until, rows: seen.size, ok: true, error: null, startedAt });
 
     return {
       ...base, ok: true, currency, fxRate, campaignStates,
@@ -405,6 +334,132 @@ export async function syncAccount(
     // Le verrou tombe même en cas d'erreur : sinon le compte resterait bloqué 10 minutes.
     await releaseLock(account.id);
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Upsert partagé (synchro glissante et rattrapage historique)         */
+/* ------------------------------------------------------------------ */
+
+export type UpsertContext = {
+  account: SyncAccount;
+  currency: string;
+  fxRate: number;
+  attribution: string;
+  /** Journée en cours dans le fuseau du compte : ses lignes sont marquées partielles. */
+  today: string;
+  syncedAt: Date;
+};
+
+export type UpsertOutcome = { seen: Set<string>; days: Set<string>; linkedRows: number; unbrandedRows: number };
+
+/**
+ * Écrit des lignes d'insights dans `ad_metrics` : même clé de dédoublonnage, même conversion,
+ * même protection des rattachements manuels, que l'on relise 28 jours ou un mois de 2024.
+ * La créative de chaque publicité vient du catalogue (`ad_entities`), les insights ne la donnant pas.
+ */
+export async function upsertInsights(insights: MetaInsightRow[], ctx: UpsertContext): Promise<UpsertOutcome> {
+  const { account, currency, fxRate, attribution, today, syncedAt } = ctx;
+  const [{ byExternalId, byName }, brandList, creativeRows] = await Promise.all([
+    loadLinks(), loadBrands(),
+    db.execute(sql`select external_id, external_creative_id, brand_id from ad_entities where platform = 'META' and level = 'AD' and account_id = ${account.id}::uuid`),
+  ]);
+  const creativeOf = new Map<string, { creative: string | null; brand: string | null }>();
+  for (const r of creativeRows.rows as { external_id: string; external_creative_id: string | null; brand_id: string | null }[]) {
+    creativeOf.set(r.external_id, { creative: r.external_creative_id, brand: r.brand_id });
+  }
+
+  type Row = typeof adMetrics.$inferInsert;
+  const batch: Row[] = [];
+  const seen = new Set<string>();
+  const days = new Set<string>();
+  let linkedRows = 0;
+  let unbrandedRows = 0;
+
+  const flush = async () => {
+    if (!batch.length) return;
+    await db.insert(adMetrics).values(batch).onConflictDoUpdate({
+      target: adMetrics.dedupeKey,
+      set: {
+        spend: sql`excluded.spend`, impressions: sql`excluded.impressions`, reach: sql`excluded.reach`,
+        clicks: sql`excluded.clicks`, linkClicks: sql`excluded.link_clicks`,
+        landingPageViews: sql`excluded.landing_page_views`, leads: sql`excluded.leads`,
+        purchases: sql`excluded.purchases`, revenue: sql`excluded.revenue`,
+        messagingStarted: sql`excluded.messaging_started`,
+        videoViews: sql`excluded.video_views`, postEngagement: sql`excluded.post_engagement`,
+        spendOriginal: sql`excluded.spend_original`, revenueOriginal: sql`excluded.revenue_original`,
+        currency: sql`excluded.currency`, fxRate: sql`excluded.fx_rate`,
+        attributionWindow: sql`excluded.attribution_window`,
+        // La veille relue le lendemain est une journée close : le drapeau doit retomber.
+        isPartial: sql`excluded.is_partial`,
+        syncedAt: sql`excluded.synced_at`,
+        // Le rattachement peut avoir été fait à la main : ne jamais l'effacer avec du vide.
+        campaignId: sql`coalesce(excluded.campaign_id, ad_metrics.campaign_id)`,
+        brandId: sql`coalesce(excluded.brand_id, ad_metrics.brand_id)`,
+        campaignName: sql`excluded.campaign_name`,
+        adsetName: sql`coalesce(excluded.adset_name, ad_metrics.adset_name)`,
+        adName: sql`coalesce(excluded.ad_name, ad_metrics.ad_name)`,
+        externalCampaignId: sql`excluded.external_campaign_id`,
+        externalAdsetId: sql`coalesce(excluded.external_adset_id, ad_metrics.external_adset_id)`,
+        externalAdId: sql`coalesce(excluded.external_ad_id, ad_metrics.external_ad_id)`,
+        externalCreativeId: sql`coalesce(excluded.external_creative_id, ad_metrics.external_creative_id)`,
+        source: sql`excluded.source`,
+      },
+    });
+    batch.length = 0;
+  };
+
+  for (const r of insights) {
+    // Une même publicité ne peut apparaître qu'une fois par jour ; l'API peut répéter une
+    // ligne entre deux pages si un objet bouge pendant la pagination.
+    const dedupeKey = ["META", r.date, r.campaignId, r.adsetId ?? "", r.adId ?? ""].join("|");
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    days.add(r.date);
+
+    const link = byExternalId.get(r.campaignId) ?? byName.get(nameKey(r.campaignName)) ?? null;
+    const cat = r.adId ? creativeOf.get(r.adId) : undefined;
+    // Marque : le rattachement fait foi, sinon la marque citée dans le nom de campagne, sinon
+    // celle déduite de la créative au catalogage, sinon celle du compte.
+    const brandId = link?.brand_id ?? matchBrandInText(r.campaignName, brandList) ?? cat?.brand ?? account.brandId ?? null;
+    if (link) linkedRows++;
+    if (!brandId) unbrandedRows++;
+
+    batch.push({
+      date: r.date, platform: "META", accountId: account.id, brandId,
+      campaignId: link?.campaign_id ?? null,
+      campaignName: r.campaignName, adsetName: r.adsetName, adName: r.adName,
+      externalCampaignId: r.campaignId, externalAdsetId: r.adsetId, externalAdId: r.adId,
+      externalCreativeId: cat?.creative ?? null,
+      spend: (r.spend * fxRate).toFixed(2),
+      impressions: r.impressions, reach: r.reach, clicks: r.clicks, linkClicks: r.linkClicks,
+      landingPageViews: r.landingPageViews, leads: r.leads, purchases: r.purchases,
+      messagingStarted: r.messagingStarted, videoViews: r.videoViews, postEngagement: r.postEngagement,
+      revenue: (r.revenue * fxRate).toFixed(2),
+      spendOriginal: r.spend.toFixed(2), revenueOriginal: r.revenue.toFixed(2),
+      currency, fxRate: fxRate.toFixed(6),
+      attributionWindow: attribution, source: "API",
+      isPartial: r.date === today,
+      syncedAt,
+      dedupeKey,
+    });
+    if (batch.length >= BATCH) await flush();
+  }
+  await flush();
+  return { seen, days, linkedRows, unbrandedRows };
+}
+
+/** Journal des passages, lu par l'écran (dernière synchro réussie) et par le diagnostic. */
+export async function logSync(e: { accountId: string; mode: string; since: string | null; until: string | null; rows: number; ok: boolean; error: string | null; startedAt: Date }) {
+  try {
+    await db.insert(adSyncLog).values({ accountId: e.accountId, mode: e.mode, since: e.since, until: e.until, rows: e.rows, ok: e.ok, error: e.error, startedAt: e.startedAt, finishedAt: new Date() });
+  } catch {
+    // Le journal ne doit jamais faire échouer une synchronisation (table absente avant migration, par exemple).
+  }
+}
+
+/** Taux vers le MAD, exposé pour le rattrapage historique. */
+export function fxRateOf(currency: string, rates: Record<string, number>): number | null {
+  return fxRateFor(currency, rates);
 }
 
 /** Comptes déclarés pour la synchronisation automatique. */

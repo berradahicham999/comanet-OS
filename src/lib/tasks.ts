@@ -8,7 +8,7 @@ export type TaskRow = {
   assigneeId: string | null; assignee: string | null; brand: string | null; brandColor: string | null; entityType: string | null; entityId: string | null; comments: number; createdAt: string;
 };
 
-export const SOURCE_LABEL: Record<string, string> = { MANUAL: "Manuelle", ACTION_CENTER: "Action Center", REGLEMENTAIRE: "Réglementaire", STOCK: "Stock", MARKETING: "Marketing", TERRAIN: "Terrain", COMMERCIAL: "Commercial" };
+export const SOURCE_LABEL: Record<string, string> = { MANUAL: "Manuelle", ACTION_CENTER: "Action Center", REGLEMENTAIRE: "Réglementaire", STOCK: "Stock", MARKETING: "Marketing", TERRAIN: "Terrain", COMMERCIAL: "Commercial", MEDICAL: "Médical", AI: "Copilote IA" };
 
 export function entityHref(type: string | null, id: string | null) {
   if (!type || !id) return null;
@@ -16,7 +16,7 @@ export function entityHref(type: string | null, id: string | null) {
   return map[type] ? map[type] + id : null;
 }
 
-export async function listTasks(opts: { assigneeId?: string; brandId?: string; brandIds?: string[] | null; overdue?: boolean; includeDone?: boolean; source?: string } = {}): Promise<TaskRow[]> {
+export async function listTasks(opts: { assigneeId?: string; brandId?: string; brandIds?: string[] | null; overdue?: boolean; includeDone?: boolean; source?: string; proposed?: boolean } = {}): Promise<TaskRow[]> {
   const r = await db.execute(sql`
     select t.id, t.title, t.status::text as status, t.priority::text as priority, t.due_date::text as due_date, t.source::text as source,
       t.assignee_id, u.name as assignee, b.name as brand, b.color as brand_color, t.entity_type, t.entity_id::text as entity_id, t.created_at::text as created_at,
@@ -28,7 +28,7 @@ export async function listTasks(opts: { assigneeId?: string; brandId?: string; b
       ${opts.brandIds ? sql`and (t.brand_id is null or t.brand_id = any(${pgArray(opts.brandIds)}) or t.assignee_id = ${opts.assigneeId ?? "00000000-0000-0000-0000-000000000000"}::uuid)` : sql``}
       ${opts.source ? sql`and t.source = ${opts.source}::task_source` : sql``}
       ${opts.overdue ? sql`and t.due_date < current_date and t.status in ('TODO','IN_PROGRESS')` : sql``}
-      ${opts.includeDone ? sql`` : sql`and (t.status in ('TODO','IN_PROGRESS') or t.completed_at > now() - interval '14 days')`}
+      ${opts.proposed ? sql`and t.status = 'PROPOSED'` : opts.includeDone ? sql`and t.status <> 'PROPOSED'` : sql`and (t.status in ('TODO','IN_PROGRESS') or t.completed_at > now() - interval '14 days')`}
     order by case t.status when 'IN_PROGRESS' then 0 when 'TODO' then 1 else 2 end, case t.priority when 'CRITICAL' then 0 when 'HIGH' then 1 when 'MEDIUM' then 2 else 3 end, t.due_date nulls last`);
   return (r.rows as Record<string, unknown>[]).map((x) => ({
     id: String(x.id), title: String(x.title), status: x.status as TaskStatus, priority: x.priority as TaskPriority, dueDate: x.due_date ? String(x.due_date) : null, source: String(x.source),

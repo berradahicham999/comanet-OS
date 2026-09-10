@@ -9,6 +9,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { syncAll, syncAccount, type SyncMode } from "@/lib/meta/sync";
 import { hasMetaToken } from "@/lib/meta/client";
+import { backfillAll, catalogAll } from "@/lib/meta/backfill";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -40,7 +41,18 @@ export async function GET(request: Request) {
   // `?mode=intraday` (passage horaire) ne relit que la veille et le jour même ; `full`
   // (passage de nuit) relit toute la fenêtre d'attribution. Relire 28 jours toutes les
   // heures brûlerait le quota de l'API pour deux journées qui bougent.
-  const mode: SyncMode = params.get("mode") === "intraday" ? "intraday" : "full";
+  const rawMode = params.get("mode");
+  // `?mode=backfill` : rattrapage historique (quelques mois par appel, reprenable) ;
+  // `?mode=entities` : catalogue des objets publicitaires seul.
+  if (rawMode === "backfill") {
+    const results = await backfillAll({ monthsPerRun: Number(params.get("months")) || 6 });
+    return NextResponse.json({ ok: results.every((r) => r.ok), mode: "backfill", durationMs: Date.now() - started, accounts: results });
+  }
+  if (rawMode === "entities") {
+    const results = await catalogAll();
+    return NextResponse.json({ ok: results.every((r) => r.ok), mode: "entities", durationMs: Date.now() - started, accounts: results });
+  }
+  const mode: SyncMode = rawMode === "intraday" ? "intraday" : "full";
   // `?account=<uuid>` synchronise un seul compte : de quoi étaler la charge sur plusieurs
   // passages si l'ensemble des comptes dépasse la durée maximale d'une fonction.
   const only = params.get("account");

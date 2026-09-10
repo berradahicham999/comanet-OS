@@ -2,10 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { tasks, taskComments, type TaskPriority, type TaskStatus } from "@/db/schema";
-import { requireAccess, isOwnOnly, canDo } from "@/lib/access";
+import { requireAccess, isOwnOnly, canDo, requirePermission } from "@/lib/access";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim() || null;
 
@@ -69,4 +69,19 @@ export async function deleteTask(formData: FormData) {
   await db.delete(tasks).where(eq(tasks.id, id));
   revalidatePath("/taches");
   redirect("/taches");
+}
+
+/** Tâche proposée par le copilote : accepter (→ À faire) ou refuser (→ annulée). Une personne, jamais l'IA, décide. */
+export async function decideProposedTask(formData: FormData) {
+  const user = await requirePermission("taches", "edit");
+  const id = str(formData, "id");
+  const decision = str(formData, "decision");
+  if (!id || (decision !== "accept" && decision !== "refuse")) return;
+  const assigneeId = str(formData, "assigneeId") || null;
+  await db.update(tasks)
+    .set(decision === "accept" ? { status: "TODO", assigneeId: assigneeId ?? user.id } : { status: "CANCELLED", completedAt: new Date() })
+    .where(and(eq(tasks.id, id), eq(tasks.status, "PROPOSED")));
+  revalidatePath("/taches");
+  revalidatePath("/");
+  redirect("/taches?view=proposed");
 }

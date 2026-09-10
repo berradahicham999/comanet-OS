@@ -12,6 +12,9 @@ const nextConfig: NextConfig = {
   // Les migrations SQL (drizzle/) doivent être embarquées dans les fonctions serverless pour /installation.
   outputFileTracingIncludes: {
     "/installation": ["./drizzle/**/*"],
+    // Le system prompt du copilote est un fichier Markdown versionné, lu à l'exécution.
+    "/api/ai/**": ["./src/lib/ai/prompts/*.md"],
+    "/**": ["./src/lib/ai/prompts/*.md"],
   },
 };
 

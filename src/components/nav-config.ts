@@ -76,6 +76,7 @@ export const NAV: NavGroup[] = [
     items: [
       { href: "/reglementaire", label: "Réglementaire", icon: "ShieldCheck", module: "reglementaire" },
       { href: "/taches", label: "Tâches", icon: "SquareCheck", module: "taches" },
+      { href: "/rapports", label: "Rapports", icon: "FileBarChart", module: "rapports" },
     ],
   },
   {

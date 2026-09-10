@@ -14,6 +14,10 @@
       "schedule": "0 6 * * *"
     },
     {
+      "path": "/api/cron/meta?mode=backfill",
+      "schedule": "0 3 * * *"
+    },
+    {
       "path": "/api/cron/analytics",
       "schedule": "30 6 * * *"
     }

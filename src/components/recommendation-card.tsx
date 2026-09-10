@@ -6,12 +6,20 @@ import { CATEGORY_META, type RecommendationWithState } from "@/lib/rules/types";
 import { createTaskFromRecommendation } from "@/app/(app)/actions/actions";
 import { addDays, iso, today } from "@/lib/format";
 import type { UserRole } from "@/db/schema";
+import { DetailPlanButton } from "@/components/ai/detail-plan-button";
+import { recSummary, type StoredPlan } from "@/lib/ai/plans-shared";
 
 export type UserOption = { id: string; name: string; role: UserRole };
 
 const BAR: Record<string, string> = { CRITICAL: "bg-red", HIGH: "bg-orange", MEDIUM: "bg-yellow", LOW: "bg-faint" };
 
-export function RecommendationCard({ rec, users, compact = false, redirectTo }: { rec: RecommendationWithState; users: UserOption[]; compact?: boolean; redirectTo?: string }) {
+export function RecommendationCard({ rec, users, compact = false, redirectTo, copilot = false, plan = null }: {
+  rec: RecommendationWithState; users: UserOption[]; compact?: boolean; redirectTo?: string;
+  /** Copilote ouvert à la personne : affiche « Détailler » (plan d'exécution). */
+  copilot?: boolean;
+  /** Plan déjà enregistré pour cette recommandation. */
+  plan?: StoredPlan | null;
+}) {
   const cat = CATEGORY_META[rec.category];
   const defaultAssignee = users.find((u) => u.role === rec.task.role) ?? users.find((u) => u.role === "ADMIN");
   const due = iso(addDays(today(), rec.task.dueInDays));
@@ -99,6 +107,7 @@ export function RecommendationCard({ rec, users, compact = false, redirectTo }: 
               </form>
             </details>
           )}
+          {copilot && <DetailPlanButton rec={recSummary(rec)} initial={plan} />}
         </div>
       </div>
     </article>
