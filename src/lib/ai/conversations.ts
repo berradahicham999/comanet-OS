@@ -1,16 +1,19 @@
 /** Persistance des conversations et messages du copilote (`ai_conversations`, `ai_messages`). */
 import "server-only";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, notInArray } from "drizzle-orm";
 import type Anthropic from "@anthropic-ai/sdk";
 import { db } from "@/db";
 import { aiConversations, aiMessages } from "@/db/schema";
 
 export type ConversationSummary = { id: string; title: string | null; contextPath: string | null; updatedAt: string };
+
+/** Surfaces automatiques : leurs conversations servent au suivi des coûts, pas à l'historique du panneau. */
+export const HIDDEN_CONTEXT_MODULES = ["explain", "brief", "plan", "report"];
 export type StoredMessage = { id: string; role: "user" | "assistant"; content: string; toolCalls: unknown; createdAt: string; model: string | null; latencyMs: number | null };
 
 export async function listConversations(userId: string, limit = 20): Promise<ConversationSummary[]> {
   const rows = await db.select({ id: aiConversations.id, title: aiConversations.title, contextPath: aiConversations.contextPath, updatedAt: aiConversations.updatedAt })
-    .from(aiConversations).where(eq(aiConversations.userId, userId)).orderBy(desc(aiConversations.updatedAt)).limit(limit);
+    .from(aiConversations).where(and(eq(aiConversations.userId, userId), notInArray(aiConversations.contextModule, HIDDEN_CONTEXT_MODULES))).orderBy(desc(aiConversations.updatedAt)).limit(limit);
   return rows.map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString() }));
 }
 

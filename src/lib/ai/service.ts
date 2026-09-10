@@ -46,6 +46,12 @@ export type AskInput = {
   surface?: string;
   surfaceInstructions?: string | null;
   allowWrites?: boolean;
+  /** Surface automatique (explication de carte, brief) : soumise au plafond mensuel de coût. */
+  automatic?: boolean;
+  /** Plafond d'appels d'outils propre à la surface (≤ settings.ai.maxToolCalls). */
+  maxToolCalls?: number;
+  /** Module de contexte de la conversation (« explain », « brief »… sont masqués de l'historique du panneau). */
+  contextModule?: string | null;
   onEvent?: (e: RunEvent) => void;
 };
 
@@ -56,7 +62,7 @@ export async function askCopilot(input: AskInput): Promise<AskOutput> {
   const access = await requireAccessContext();
   if (!copilotAllowed(access)) throw new CopilotError("Le copilote n'est pas ouvert à ce profil.", 403);
   const settings = await getSettings();
-  const limit = await checkLimits(access.user.id, settings.ai, { isAdmin: isAdmin(access.perms) });
+  const limit = await checkLimits(access.user.id, settings.ai, { isAdmin: isAdmin(access.perms), automatic: input.automatic });
   if (!limit.ok) throw new CopilotError(limit.reason, 429);
 
   const question = input.question.trim().slice(0, 4000);
@@ -71,14 +77,15 @@ export async function askCopilot(input: AskInput): Promise<AskOutput> {
     if (!c) throw new CopilotError("Conversation introuvable.", 404);
     history = historyFromStored(c.messages);
   } else {
-    conversationId = await createConversation(access.user.id, { title: question, contextModule: moduleForPath(input.contextPath), contextPath: input.contextPath ?? null });
+    conversationId = await createConversation(access.user.id, { title: question, contextModule: input.contextModule ?? moduleForPath(input.contextPath), contextPath: input.contextPath ?? null });
   }
   await appendMessage(conversationId, { role: "user", content: question, surface: input.surface ?? "chat" });
 
-  const system = systemBlocks({ access: toolCtx.access, now: toolCtx.now, refDate: toolCtx.refDate, contextPath: input.contextPath, surfaceInstructions: input.surfaceInstructions, maxToolCalls: settings.ai.maxToolCalls });
+  const maxToolCalls = Math.max(1, Math.min(settings.ai.maxToolCalls, input.maxToolCalls ?? settings.ai.maxToolCalls));
+  const system = systemBlocks({ access: toolCtx.access, now: toolCtx.now, refDate: toolCtx.refDate, contextPath: input.contextPath, surfaceInstructions: input.surfaceInstructions, maxToolCalls });
   const result = await runCopilot({
     model, system, history, question, toolCtx,
-    maxToolCalls: settings.ai.maxToolCalls, timeoutMs: settings.ai.timeoutSeconds * 1000,
+    maxToolCalls, timeoutMs: settings.ai.timeoutSeconds * 1000,
     allowWrites: input.allowWrites ?? true, effort: input.tier === "fast" ? "low" : "medium",
     callModel: callAnthropic, onEvent: input.onEvent,
   });
