@@ -49,7 +49,11 @@ function parse(md: string): Node[] {
       continue;
     }
     const buf: string[] = [];
-    while (i < lines.length && lines[i].trim() && !/^(#{1,4})\s|^\s*\||^\s*[-*•]\s+|^\s*\d+[.)]\s+/.test(lines[i])) { buf.push(lines[i].trim()); i++; }
+    const standalone = (t: string) => /^_[^_]+_$/.test(t.trim()); // ligne « _Source : … · Période : …_ » : son propre paragraphe
+    while (i < lines.length && lines[i].trim() && !/^(#{1,4})\s|^\s*\||^\s*[-*•]\s+|^\s*\d+[.)]\s+/.test(lines[i])) {
+      if (buf.length && (standalone(lines[i]) || standalone(buf[buf.length - 1]))) break;
+      buf.push(lines[i].trim()); i++;
+    }
     out.push({ kind: "p", text: buf.join(" ") });
   }
   return out;
@@ -57,11 +61,12 @@ function parse(md: string): Node[] {
 
 /** Gras, italique, code et liens internes ; tout le reste est du texte. */
 export function Inline({ text }: { text: string }) {
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g).filter(Boolean);
+  const parts = text.split(/(\*\*[^*]+\*\*|(?<![\w])_[^_\n]+_(?![\w])|`[^`]+`|\[[^\]]+\]\([^)]+\))/g).filter(Boolean);
   return (
     <>
       {parts.map((p, i) => {
         if (p.startsWith("**") && p.endsWith("**")) return <strong key={i}>{p.slice(2, -2)}</strong>;
+        if (p.length > 2 && p.startsWith("_") && p.endsWith("_")) return <em key={i} className="text-muted">{p.slice(1, -1)}</em>;
         if (p.startsWith("`") && p.endsWith("`")) return <code key={i} className="px-1 rounded bg-black/5 text-[12px]">{p.slice(1, -1)}</code>;
         const link = p.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
         if (link) {
@@ -75,11 +80,14 @@ export function Inline({ text }: { text: string }) {
   );
 }
 
-function Body({ nodes }: { nodes: Node[] }) {
+function Body({ nodes, headings = false }: { nodes: Node[]; headings?: boolean }) {
   return (
     <>
       {nodes.map((n, i) => {
-        if (n.kind === "h") return <div key={i} className="font-semibold mt-2 mb-1"><Inline text={n.text} /></div>;
+        if (n.kind === "h") {
+          if (headings && n.level <= 2) return <h2 key={i} className="text-[16px] font-semibold mt-5 mb-1.5 pb-1 border-b border-line"><Inline text={n.text} /></h2>;
+          return <div key={i} className="font-semibold mt-2 mb-1"><Inline text={n.text} /></div>;
+        }
         if (n.kind === "p") return <p key={i} className="my-1 leading-relaxed"><Inline text={n.text} /></p>;
         if (n.kind === "ul") return <ul key={i} className="list-disc pl-5 my-1 space-y-0.5">{n.items.map((it, j) => <li key={j}><Inline text={it} /></li>)}</ul>;
         if (n.kind === "ol") return <ol key={i} className="list-decimal pl-5 my-1 space-y-0.5">{n.items.map((it, j) => <li key={j}><Inline text={it} /></li>)}</ol>;
@@ -95,6 +103,11 @@ function Body({ nodes }: { nodes: Node[] }) {
       })}
     </>
   );
+}
+
+/** Rendu Markdown réduit complet (rapports) : titres, paragraphes, listes, tableaux, gras, liens. */
+export function MarkdownLite({ text }: { text: string }) {
+  return <div className="text-[13.5px] text-ink leading-relaxed"><Body nodes={parse(text)} headings /></div>;
 }
 
 const BLOCK_RE = /^(donnée|données|analyse|hypothèse|hypothèses|recommandation|recommandations)\s*:?\s*$/i;

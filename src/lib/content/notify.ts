@@ -8,7 +8,9 @@ export type NotificationType =
   | "CORRECTIONS_REQUESTED" | "CONTENT_VALIDATED" | "DEADLINE_PASSED" | "COMMENT"
   // Activations
   | "ACTIVATION_ASSIGNED" | "ACTIVATION_VALIDATED" | "ACTIVATION_REFUSED" | "ACTIVATION_CANCELLED"
-  | "ACTIVATION_RESULTS_DUE" | "ACTIVATION_CHECKLIST_LATE" | "ACTIVATION_BUDGET_OVERRUN" | "INVENTORY_LOW";
+  | "ACTIVATION_RESULTS_DUE" | "ACTIVATION_CHECKLIST_LATE" | "ACTIVATION_BUDGET_OVERRUN" | "INVENTORY_LOW"
+  // Copilote IA
+  | "REPORT_DRAFT";
 
 export type NotifyInput = { type: NotificationType; title: string; body?: string | null; href?: string | null; entityType?: string; entityId?: string | null };
 
