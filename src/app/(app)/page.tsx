@@ -10,6 +10,10 @@ import { fmtMAD, fmtNum, fmtPct, fmtDate, fmtDateLong, fmtMonth, delta, months }
 import { requireAccessContext } from "@/lib/permissions";
 import { copilotAllowed } from "@/lib/ai/service";
 import { ExplainButton } from "@/components/ai/explain-button";
+import { MorningBrief } from "@/components/ai/morning-brief";
+import { isAiConfigured } from "@/lib/ai/client";
+import { getMorningBrief } from "@/lib/ai/brief";
+import { isAdmin } from "@/lib/permissions-shared";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +34,9 @@ export default async function CockpitPage() {
   const explain = (card: string, title: string, values: { label: string; value: string }[], period: string, tools: string[]) =>
     explainOn ? <ExplainButton context={{ surface: "cockpit", card, title, values, period: { label: period, start: d.monthRange.start, end: d.monthRange.end }, tools }} /> : undefined;
   const toDate = `${monthLabel} — à date (${d.proj.day}/${d.proj.daysInMonth} jours)`;
+  // Brief du matin (direction) : on ne lit ici que le cache du jour ; la génération, plus lente, se fait côté client à l'ouverture.
+  const briefOn = isAdmin(perms) && isAiConfigured();
+  const brief = briefOn ? await getMorningBrief({ generate: false }).catch(() => null) : null;
 
   return (
     <>
@@ -49,6 +56,8 @@ export default async function CockpitPage() {
       )}
 
       {/* ---------------- Commercial ---------------- */}
+      {briefOn && <MorningBrief initial={brief} configured />}
+
       {perms.ventes.view && <Section title="Commercial" description={`${monthLabel} — à date (${d.proj.day}/${d.proj.daysInMonth} jours)`}>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <Card href="/ventes" explain={explain("ca-mois", "CA du mois (sell-in)", [{ label: "CA du mois", value: fmtMAD(mtd) }, { label: "vs M-1", value: fmtPct(delta(mtd, cmp.m1.amount), 0, true) }, { label: "vs N-1", value: fmtPct(delta(mtd, cmp.n1.amount), 0, true) }], toDate, ["get_sales_summary"])}>

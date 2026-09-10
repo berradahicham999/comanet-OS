@@ -8,7 +8,7 @@ export type TaskRow = {
   assigneeId: string | null; assignee: string | null; brand: string | null; brandColor: string | null; entityType: string | null; entityId: string | null; comments: number; createdAt: string;
 };
 
-export const SOURCE_LABEL: Record<string, string> = { MANUAL: "Manuelle", ACTION_CENTER: "Action Center", REGLEMENTAIRE: "Réglementaire", STOCK: "Stock", MARKETING: "Marketing", TERRAIN: "Terrain", COMMERCIAL: "Commercial" };
+export const SOURCE_LABEL: Record<string, string> = { MANUAL: "Manuelle", ACTION_CENTER: "Action Center", REGLEMENTAIRE: "Réglementaire", STOCK: "Stock", MARKETING: "Marketing", TERRAIN: "Terrain", COMMERCIAL: "Commercial", MEDICAL: "Médical", AI: "Copilote IA" };
 
 export function entityHref(type: string | null, id: string | null) {
   if (!type || !id) return null;
