@@ -7,7 +7,7 @@
  * résultats d'outils passés comme données (`tool_result`), jamais comme texte libre.
  */
 import type Anthropic from "@anthropic-ai/sdk";
-import { executeTool, toolDefinitions, toolsFor } from "./tools";
+import { executeTool, toolDefinitions, toolsFor, TOOLS } from "./tools";
 import type { ToolContext, ToolResult } from "./tools/types";
 
 export type RunEvent =
@@ -107,6 +107,8 @@ export async function runCopilot(o: RunOptions): Promise<RunResult> {
         let r: ToolResult;
         if (toolBudget <= 0) r = { available: false, reason: `Nombre maximal d'appels d'outils atteint (${o.maxToolCalls}).`, howToFix: "Répondre avec les données déjà obtenues et dire ce qui manque." };
         else if (controller.signal.aborted) r = { available: false, reason: "Délai dépassé.", howToFix: "Répondre avec les données déjà obtenues." };
+        // Un outil d'écriture sur une surface en lecture seule (explication, brief, plan, rapport) est refusé même si le modèle le nomme.
+        else if (!o.allowWrites && TOOLS.find((t) => t.name === u.name)?.writes) r = { available: false, reason: `L'outil « ${u.name} » n'est pas disponible sur cette surface (lecture seule).`, howToFix: "Répondre sans écrire ; la personne créera la tâche ou le rapport elle-même." };
         else { toolBudget--; r = await executeTool(u.name, u.input, o.toolCtx); }
         toolResults.push(r);
         toolCalls.push({ id: u.id, name: u.name, input: u.input, ok: r.available, summary: summarize(r), rowCount: r.available ? r.rowCount : 0 });

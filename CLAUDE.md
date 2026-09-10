@@ -126,6 +126,17 @@ Meta ne sert que 37 mois d'insights : un mois refusé est « historique indispon
 accepte plusieurs jetons (virgules) car les comptes sont répartis sur plusieurs Business Managers. Lecture + analyse +
 recommandation uniquement : aucune écriture vers Meta.
 
+**Copilote IA** (`docs/guide-copilote-ia.md`, plan dans `docs/plan-ai-copilot.md`). Le modèle ne lit la donnée que par
+les outils typés de `src/lib/ai/tools/` (Zod, dépendances injectables, filtrés par la matrice et la portée côté serveur,
+journalisés dans `ai_tool_calls`) ; chaque outil appelle une fonction officielle du tableau ci-dessus, jamais une formule
+maison. Écritures autorisées : tables `ai_*` et une tâche au statut `PROPOSED` (`tests/ai/read-only.test.ts` l'impose).
+Réponses en quatre blocs Donnée / Analyse / Hypothèse / Recommandation ; zéro chiffre hors `tool_result` ; sell-in et
+sell-out toujours nommés, jamais additionnés. System prompt versionné dans `src/lib/ai/prompts/copilot.md` (bloc mis en
+cache), clé et modèles en variables d'environnement, limites dans `settings.ai` (`/parametres/ia`). Surfaces : panneau
+⌘K (`/api/ai/chat`, SSE), « Expliquer » sur les cartes (`explain.ts`, cache 1 h), brief du matin (`brief.ts`, cache
+quotidien, administrateurs), « Détailler » sur l'Action Center (`plans.ts`), rapports (`reports.ts`, module `rapports`).
+Ouvert aux profils hors portée OWN (`copilotAllowed()`).
+
 **Permissions modulaires par utilisateur** (`docs/permissions-modulaires.md`). Chaque compte porte
 sa propre matrice `user_permissions` (14 modules × Voir / Créer / Modifier / Valider), une portée
 `user_scope` (OWN / ASSIGNED / ALL), des assignations de marques et de clients, et six interrupteurs
