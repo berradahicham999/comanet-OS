@@ -462,12 +462,30 @@ async function upsertObjective(v: { brandId: string | null; productId: string | 
 
 /* ------------------------------- Budgets ------------------------------ */
 
+/**
+ * Bornes des colonnes numeric() de `budgets` / `budget_lines` : une valeur qui déborde
+ * fait échouer l'insert Postgres. On les vérifie avant écriture plutôt que de laisser
+ * la base le faire, pour ignorer la seule ligne fautive (avec un avertissement) au lieu
+ * d'annuler tout l'import — un mapping de colonne erroné ne doit pas coûter 60 lignes valides.
+ */
+const BUDGET_PCT_MAX = 9999.99; // pct_of_revenue numeric(6,2)
+const BUDGET_AMOUNT_MAX = 999_999_999_999.99; // amount / reference_revenue numeric(14,2)
+
+function explainDbError(e: unknown): string {
+  const msg = String((e as Error)?.message ?? e);
+  if (/numeric field overflow/i.test(msg)) return "montant hors limites pour cette colonne";
+  if (/violates foreign key/i.test(msg)) return "référence invalide (marque supprimée entre-temps)";
+  if (/violates unique constraint/i.test(msg)) return "doublon en base";
+  return msg.split("\n")[0];
+}
+
 async function importBudgets(rows: Record<string, unknown>[], mapping: Mapping, options: ImportOptions, R: Resolver, out: ImportSummary) {
   const year = options.year ?? new Date().getUTCFullYear();
   let lastBrand: string | null = null;
   const lineTotals = new Map<string, number>();
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
+    const rowNo = i + 2;
     let brandValue: string | null = txt(r, mapping, "brand");
     if (brandValue && normKey(brandValue).startsWith("TOTAL")) continue;
     if (!brandValue) brandValue = lastBrand; else lastBrand = brandValue;
@@ -478,24 +496,49 @@ async function importBudgets(rows: Record<string, unknown>[], mapping: Mapping, 
     if (!brandId) continue;
     const rowYear = Math.round(num(r, mapping, "year") ?? year);
     const label = txt(r, mapping, "label");
-    if (label) {
-      await db.delete(s.budgetLines).where(sql`brand_id = ${brandId}::uuid and year = ${rowYear} and label = ${label}`);
-      await db.insert(s.budgetLines).values({ brandId, year: rowYear, label, category: categoryFromLabel(label), amount: amount.toFixed(2) });
-      lineTotals.set(`${brandId}|${rowYear}`, (lineTotals.get(`${brandId}|${rowYear}`) ?? 0) + amount);
-      out.inserted++;
-    } else {
-      const ref = num(r, mapping, "referenceRevenue");
-      let pct = num(r, mapping, "pct");
-      if (pct !== null && pct <= 1) pct = pct * 100;
-      await db.insert(s.budgets).values({ brandId, year: rowYear, amount: amount.toFixed(2), referenceRevenue: ref !== null ? ref.toFixed(2) : null, pctOfRevenue: pct !== null ? pct.toFixed(2) : null })
-        .onConflictDoUpdate({ target: [s.budgets.brandId, s.budgets.year], set: { amount: amount.toFixed(2), ...(ref !== null ? { referenceRevenue: ref.toFixed(2) } : {}), ...(pct !== null ? { pctOfRevenue: pct.toFixed(2) } : {}) } });
-      out.inserted++;
+    try {
+      if (Math.abs(amount) > BUDGET_AMOUNT_MAX) {
+        out.errors.push({ row: rowNo, message: `${brandValue} : montant hors limites (${amount})` });
+        continue;
+      }
+      if (label) {
+        await db.delete(s.budgetLines).where(sql`brand_id = ${brandId}::uuid and year = ${rowYear} and label = ${label}`);
+        await db.insert(s.budgetLines).values({ brandId, year: rowYear, label, category: categoryFromLabel(label), amount: amount.toFixed(2) });
+        lineTotals.set(`${brandId}|${rowYear}`, (lineTotals.get(`${brandId}|${rowYear}`) ?? 0) + amount);
+        out.inserted++;
+      } else {
+        const ref = num(r, mapping, "referenceRevenue");
+        let pct = num(r, mapping, "pct");
+        if (pct !== null && pct <= 1) pct = pct * 100;
+        if (pct !== null && Math.abs(pct) > BUDGET_PCT_MAX) {
+          // Colonne « % » manifestement mappée sur un montant plutôt qu'un pourcentage :
+          // on garde la ligne (marque, budget, CA de référence) et on abandonne juste le %.
+          out.warnings.push(`Ligne ${rowNo} (${brandValue}) : pourcentage budget hors limites (${pct.toLocaleString("fr-FR")}) — colonne ignorée, vérifiez le mapping « % budget marketing prévu ».`);
+          pct = null;
+        }
+        if (ref !== null && Math.abs(ref) > BUDGET_AMOUNT_MAX) {
+          out.warnings.push(`Ligne ${rowNo} (${brandValue}) : CA de référence hors limites, colonne ignorée.`);
+        }
+        const refSafe = ref !== null && Math.abs(ref) <= BUDGET_AMOUNT_MAX ? ref : null;
+        await db.insert(s.budgets).values({ brandId, year: rowYear, amount: amount.toFixed(2), referenceRevenue: refSafe !== null ? refSafe.toFixed(2) : null, pctOfRevenue: pct !== null ? pct.toFixed(2) : null })
+          .onConflictDoUpdate({ target: [s.budgets.brandId, s.budgets.year], set: { amount: amount.toFixed(2), ...(refSafe !== null ? { referenceRevenue: refSafe.toFixed(2) } : {}), ...(pct !== null ? { pctOfRevenue: pct.toFixed(2) } : {}) } });
+        out.inserted++;
+      }
+    } catch (e) {
+      // Une ligne fautive (contrainte, débordement imprévu…) ne doit pas annuler les autres :
+      // on la journalise et on continue, au lieu de laisser l'exception remonter jusqu'à
+      // runImport() qui marquerait tout l'import FAILED sans distinguer les lignes valides.
+      out.errors.push({ row: rowNo, message: `${brandValue} ${rowYear} : ${explainDbError(e)}` });
     }
   }
   // s'assurer qu'un budget total existe pour les marques n'ayant que des lignes
   for (const [key, total] of lineTotals) {
     const [brandId, y] = key.split("|");
-    await db.insert(s.budgets).values({ brandId, year: Number(y), amount: total.toFixed(2) }).onConflictDoNothing();
+    try {
+      await db.insert(s.budgets).values({ brandId, year: Number(y), amount: total.toFixed(2) }).onConflictDoNothing();
+    } catch (e) {
+      out.errors.push({ row: 0, message: `Total budget ${y} : ${explainDbError(e)}` });
+    }
   }
 }
 
