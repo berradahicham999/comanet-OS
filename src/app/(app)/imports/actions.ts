@@ -61,7 +61,7 @@ export async function runImportAction(formData: FormData) {
     },
   });
   await db.delete(importFiles).where(eq(importFiles.id, fileId));
-  revalidatePath("/imports"); revalidatePath("/"); revalidatePath("/produits"); revalidatePath("/clients"); revalidatePath("/stock"); revalidatePath("/terrain"); revalidatePath("/reglementaire"); revalidatePath("/marketing"); revalidatePath("/marketing/ads");
+  revalidatePath("/imports"); revalidatePath("/"); revalidatePath("/produits"); revalidatePath("/clients"); revalidatePath("/stock"); revalidatePath("/terrain"); revalidatePath("/reglementaire"); revalidatePath("/marketing"); revalidatePath("/marketing/ads"); revalidatePath("/marketing/influence");
   redirect(`/imports/${summary.importId}`);
 }
 

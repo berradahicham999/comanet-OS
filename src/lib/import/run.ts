@@ -239,6 +239,7 @@ export async function runImport(params: {
       case "ADS": await importAds(rows, mapping, options, resolver, imp.id, summary); break;
       case "MEDECINS": await importMedecins(rows, mapping, options, imp.id, summary); break;
       case "INVENTORY": await importInventory(rows, mapping, options, resolver, imp.id, summary); break;
+      case "INFLUENCERS": await importInfluencers(rows, mapping, summary); break;
     }
     await resolver.flushAliases(type);
     summary.created = resolver.created;
@@ -1212,6 +1213,64 @@ async function importMedecins(rows: Record<string, unknown>[], mapping: Mapping,
   }
   out.inserted += pending.filter((p) => !existingKeys.has(p.key)).length;
   out.updated += pending.filter((p) => existingKeys.has(p.key)).length;
+}
+
+/* ------------------------------ Influenceuses ------------------------------ */
+
+/**
+ * Répertoire influenceuses. Idempotent : une influenceuse est identifiée par son nom
+ * (insensible à la casse, même clé que l'unicité en base) ; recharger le même fichier met
+ * à jour la fiche au lieu de la dupliquer. Anti-régression : une colonne vide dans le fichier
+ * ne remplace pas une valeur déjà saisie dans l'application (Réseaux, tarif, contact…) — on ne
+ * pose que les champs renseignés dans la ligne.
+ */
+async function importInfluencers(rows: Record<string, unknown>[], mapping: Mapping, out: ImportSummary) {
+  const existing = new Map(
+    ((await db.execute(sql`select id, lower(name) as k from influencers`)).rows as { id: string; k: string }[]).map((x) => [x.k, x.id]),
+  );
+  const seen = new Set<string>();
+  const toInsert: (typeof s.influencers.$inferInsert)[] = [];
+  const toUpdate: { id: string; set: Partial<typeof s.influencers.$inferInsert> }[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const name = txt(r, mapping, "name");
+    if (!name) { out.errors.push({ row: i + 2, message: "Nom manquant" }); continue; }
+    const key = name.toLowerCase();
+    if (seen.has(key)) { out.duplicates++; continue; }
+    seen.add(key);
+
+    const followers = num(r, mapping, "followers");
+    const engagementRate = num(r, mapping, "engagementRate");
+    const usualRate = num(r, mapping, "usualRate");
+    const fields: Partial<typeof s.influencers.$inferInsert> = {};
+    const instagram = txt(r, mapping, "instagram"); if (instagram) fields.instagram = instagram;
+    const tiktok = txt(r, mapping, "tiktok"); if (tiktok) fields.tiktok = tiktok;
+    if (followers !== null) fields.followers = Math.round(followers);
+    if (engagementRate !== null) fields.engagementRate = engagementRate.toFixed(2);
+    const category = txt(r, mapping, "category"); if (category) fields.category = category;
+    const city = txt(r, mapping, "city"); if (city) fields.city = city;
+    if (usualRate !== null) fields.usualRate = usualRate.toFixed(2);
+    const contact = txt(r, mapping, "contact"); if (contact) fields.contact = contact;
+    const notes = txt(r, mapping, "notes"); if (notes) fields.notes = notes;
+
+    const id = existing.get(key);
+    if (id) toUpdate.push({ id, set: fields });
+    else toInsert.push({ name, ...fields });
+  }
+
+  for (let i = 0; i < toInsert.length; i += 200) {
+    const chunk = toInsert.slice(i, i + 200);
+    const inserted = await db.insert(s.influencers).values(chunk).onConflictDoNothing().returning({ id: s.influencers.id, name: s.influencers.name });
+    out.inserted += inserted.length;
+    // Doublon de nom apparu entre le chargement et l'insertion (course ou variante de casse) : à revoir manuellement plutôt qu'ignoré en silence.
+    if (inserted.length < chunk.length) out.warnings.push(`${chunk.length - inserted.length} influenceuse(s) déjà présente(s) sous un nom très proche — vérifiez le répertoire.`);
+  }
+  for (const u of toUpdate) {
+    if (Object.keys(u.set).length === 0) continue;
+    await db.update(s.influencers).set(u.set).where(eq(s.influencers.id, u.id));
+    out.updated++;
+  }
 }
 
 /* ------------------------------ Inventaire matériel ------------------------------ */

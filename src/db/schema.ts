@@ -72,6 +72,7 @@ export const importTypeEnum = pgEnum("import_type", [
   "ADS",
   "MEDECINS",
   "INVENTORY",
+  "INFLUENCERS",
 ]);
 
 export const importStatusEnum = pgEnum("import_status", [

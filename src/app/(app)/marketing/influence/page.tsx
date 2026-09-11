@@ -7,9 +7,9 @@ import { listBrands } from "@/lib/users";
 import { resolvePeriod, PERIOD_OPTIONS, type PeriodParam } from "@/lib/periods";
 import { PageHeader, Card, Kpi, Badge, BrandDot, Section, Empty, Tabs, Progress } from "@/components/ui";
 import { fmtMAD, fmtNum, fmtPct, fmtDateShort } from "@/lib/format";
-import { COLLAB_STATUS } from "@/lib/marketing-shared";
+import { COLLAB_STATUS, CAMPAIGN_STATUS } from "@/lib/marketing-shared";
 import { listCollaborations, collabKpis, scoreCollaborations, rankInfluencers, collabPipeline, influenceTotals, influenceAdvice } from "@/lib/influence";
-import { saveInfluencer, saveCollaboration, setCollaborationStatus, deleteCollaboration } from "../actions";
+import { saveInfluencer, saveCollaboration, setCollaborationStatus, deleteCollaboration, saveCampaign } from "../actions";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Influence" };
@@ -176,7 +176,27 @@ export default async function InfluencePage(props: { searchParams: Promise<{ bra
         </Card>
       </Section>
 
-      <div className="grid lg:grid-cols-2 gap-4 mt-6">
+      <div className="grid lg:grid-cols-2 xl:grid-cols-3 gap-4 mt-6">
+        <Card className="min-w-0" title="Nouvelle campagne influence">
+          <form action={saveCampaign} className="grid gap-2 text-[13px]">
+            <input type="hidden" name="channel" value="INFLUENCE" />
+            <input type="hidden" name="type" value="INFLUENCE" />
+            <label className="block"><span className="label block mb-1">Marque *</span>
+              <select name="brandId" defaultValue={brandId ?? ""} className="select h-9" required><option value="">— choisir —</option>{brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>
+            </label>
+            <label className="block"><span className="label block mb-1">Nom *</span><input name="name" className="input h-9" placeholder="Ex : KLORANE — Influenceuses rentrée" required /></label>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block"><span className="label block mb-1">Début</span><input type="date" name="startDate" className="input h-9" /></label>
+              <label className="block"><span className="label block mb-1">Fin</span><input type="date" name="endDate" className="input h-9" /></label>
+              <label className="block"><span className="label block mb-1">Budget (MAD)</span><input name="budget" className="input h-9" placeholder="0" /></label>
+              <label className="block"><span className="label block mb-1">Statut</span><select name="status" className="select h-9" defaultValue="PLANNED">{Object.entries(CAMPAIGN_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></label>
+            </div>
+            <label className="block"><span className="label block mb-1">Objectif</span><input name="objective" className="input h-9" placeholder="Ex : recruter 300 clientes via 8 influenceuses" /></label>
+            <button className="btn-primary" type="submit">Créer la campagne</button>
+            <p className="text-[11.5px] text-faint">Canal « Influence » appliqué automatiquement. Une fois créée, elle apparaît dans le menu « Campagne » du formulaire de collaboration, pour y rattacher chaque influenceuse.</p>
+          </form>
+        </Card>
+
         <Card className="min-w-0" title="Ajouter / mettre à jour une collaboration">
           <form action={saveCollaboration} className="grid sm:grid-cols-2 gap-2 text-[13px]">
             <label className="block"><span className="label block mb-1">Influenceuse *</span>
@@ -212,7 +232,7 @@ export default async function InfluencePage(props: { searchParams: Promise<{ bra
           </form>
         </Card>
 
-        <Card className="min-w-0" title={`Répertoire influenceuses (${influencerList.length})`}>
+        <Card className="min-w-0" title={`Répertoire influenceuses (${influencerList.length})`} action={<Link href="/imports?type=INFLUENCERS" className="btn-secondary btn-sm">Importer une liste</Link>}>
           {influencerList.length > 0 && (
             <div className="max-h-72 overflow-auto mb-3">
               <table className="tbl text-[12.5px]">

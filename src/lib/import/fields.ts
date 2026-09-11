@@ -5,7 +5,7 @@
 import { normKey } from "./normalize";
 import type { ModuleKey } from "@/lib/access-shared";
 
-export type ImportType = "SALES" | "CLIENTS" | "PRODUCTS" | "STOCK" | "OBJECTIVES" | "BUDGETS" | "REGULATORY" | "ANIMATIONS" | "ANIM_OBJECTIVES" | "ADS" | "MEDECINS" | "INVENTORY";
+export type ImportType = "SALES" | "CLIENTS" | "PRODUCTS" | "STOCK" | "OBJECTIVES" | "BUDGETS" | "REGULATORY" | "ANIMATIONS" | "ANIM_OBJECTIVES" | "ADS" | "MEDECINS" | "INVENTORY" | "INFLUENCERS";
 
 /**
  * Module dont relève chaque type d'import : importer = droit « Créer » sur ce module,
@@ -24,6 +24,7 @@ export const IMPORT_MODULE: Record<ImportType, ModuleKey> = {
   ADS: "marketing",
   MEDECINS: "medical",
   INVENTORY: "marketing",
+  INFLUENCERS: "influence",
 };
 
 export type FieldDef = { key: string; label: string; required?: boolean; synonyms: string[]; hint?: string };
@@ -41,9 +42,22 @@ export const IMPORT_TYPES: { key: ImportType; label: string; description: string
   { key: "ADS", label: "Publicités (Meta / TikTok / Google)", description: "Export de la régie : une ligne par jour × campagne (ou par publicité). Dépense, impressions, clics, achats, CA." },
   { key: "MEDECINS", label: "Médecins (référentiel)", description: "Référentiel des médecins visités : identité, spécialité, ville, secteur, délégué responsable." },
   { key: "INVENTORY", label: "Inventaire matériel (PLV, échantillons, goodies)", description: "Inventaire initial du matériel marketing : une ligne par article avec catégorie, marque, quantité en stock, coût unitaire et seuil d'alerte." },
+  { key: "INFLUENCERS", label: "Influenceuses (répertoire)", description: "Liste d'influenceuses déjà identifiées : réseaux, audience, catégorie, ville, tarif habituel, contact. Recharger le même fichier met à jour les fiches (rapprochées par nom), sans dupliquer." },
 ];
 
 export const FIELDS: Record<ImportType, FieldDef[]> = {
+  INFLUENCERS: [
+    { key: "name", label: "Nom", required: true, synonyms: ["nom", "influenceuse", "influenceur", "name", "nom complet", "profil"] },
+    { key: "instagram", label: "Instagram", synonyms: ["instagram", "insta", "compte instagram", "ig", "compte ig"] },
+    { key: "tiktok", label: "TikTok", synonyms: ["tiktok", "tik tok", "compte tiktok"] },
+    { key: "followers", label: "Abonnés", synonyms: ["abonnes", "followers", "nombre d abonnes", "audience", "communaute"] },
+    { key: "engagementRate", label: "Taux d'engagement (%)", synonyms: ["taux d engagement", "engagement", "taux engagement", "er", "taux d engagement %"] },
+    { key: "category", label: "Catégorie", synonyms: ["categorie", "niche", "domaine", "category", "thematique"] },
+    { key: "city", label: "Ville", synonyms: ["ville", "city", "localite"] },
+    { key: "usualRate", label: "Tarif habituel (MAD)", synonyms: ["tarif", "tarif habituel", "cachet", "prix", "rate", "tarif mad"] },
+    { key: "contact", label: "Contact (téléphone / e-mail)", synonyms: ["contact", "telephone", "tel", "gsm", "email", "e mail", "whatsapp"] },
+    { key: "notes", label: "Notes", synonyms: ["notes", "remarque", "remarques", "commentaire", "commentaires"] },
+  ],
   INVENTORY: [
     { key: "name", label: "Article", required: true, synonyms: ["article", "designation", "nom", "libelle", "materiel", "item"] },
     { key: "category", label: "Catégorie (PLV / échantillon / goodie / print)", synonyms: ["categorie", "type", "famille", "category"], hint: "Vide : PLV." },

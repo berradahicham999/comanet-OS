@@ -107,7 +107,7 @@ export async function saveCampaign(formData: FormData) {
     await db.delete(campaignProducts).where(eq(campaignProducts.campaignId, campaignId));
     if (ids.length) await db.insert(campaignProducts).values(ids.map((productId) => ({ campaignId: campaignId!, productId }))).onConflictDoNothing();
   }
-  revalidatePath("/marketing"); revalidatePath("/marketing/campagnes");
+  revalidatePath("/marketing"); revalidatePath("/marketing/campagnes"); revalidatePath("/marketing/influence");
   if (campaignId) revalidatePath(`/marketing/campagnes/${campaignId}`);
   if (!id && campaignId && str(formData, "redirectToDetail")) redirect(`/marketing/campagnes/${campaignId}`);
 }
