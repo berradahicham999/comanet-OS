@@ -5,6 +5,7 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { askCopilot, CopilotError } from "@/lib/ai/service";
+import { MARKETING_AGENT_MODULE, MARKETING_AGENT_SURFACE, marketingAgentInstructions } from "@/lib/ai/marketing-agent";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 90;
@@ -13,10 +14,14 @@ const enc = new TextEncoder();
 const sse = (event: string, data: unknown) => enc.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
 export async function POST(req: Request) {
-  let body: { question?: string; conversationId?: string | null; contextPath?: string | null };
+  let body: { question?: string; conversationId?: string | null; contextPath?: string | null; agent?: string | null; brand?: string | null; period?: string | null };
   try { body = await req.json(); } catch { return Response.json({ error: "Corps invalide." }, { status: 400 }); }
   const question = String(body.question ?? "").trim();
   if (!question) return Response.json({ error: "Question vide." }, { status: 400 });
+  // Agent marketing : même boucle, même outils, même droits ; seule la consigne de surface change (persona + marque sélectionnée).
+  const marketing = body.agent === MARKETING_AGENT_SURFACE;
+  const brandName = marketing && body.brand ? String(body.brand).slice(0, 80) : null;
+  const periodKey = marketing && body.period && /^[a-z0-9]{1,12}$/i.test(String(body.period)) ? String(body.period) : null;
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -24,7 +29,9 @@ export async function POST(req: Request) {
       try {
         let metaSent = false;
         const out = await askCopilot({
-          question, conversationId: body.conversationId ?? null, contextPath: body.contextPath ?? null, tier: "advanced", surface: "chat",
+          question, conversationId: body.conversationId ?? null, contextPath: body.contextPath ?? null, tier: "advanced",
+          surface: marketing ? MARKETING_AGENT_SURFACE : "chat", contextModule: marketing ? MARKETING_AGENT_MODULE : undefined,
+          surfaceInstructions: marketing ? marketingAgentInstructions(brandName, periodKey) : null,
           onEvent: (e) => {
             if (!metaSent) { metaSent = true; send("meta", { started: true }); }
             send(e.type, e);

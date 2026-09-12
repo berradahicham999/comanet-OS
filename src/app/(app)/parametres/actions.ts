@@ -27,6 +27,12 @@ export async function updateSettings(formData: FormData) {
     reorderGraceDays: num(formData, "reorderGraceDays", cur.reorderGraceDays),
     defaultMarginPct: num(formData, "defaultMarginPct", cur.defaultMarginPct),
     stockCriticalRevenue: num(formData, "stockCriticalRevenue", cur.stockCriticalRevenue),
+    marketingIntel: {
+      starContributionPct: num(formData, "mi_starContributionPct", cur.marketingIntel.starContributionPct),
+      minPeriodRevenueMad: num(formData, "mi_minPeriodRevenueMad", cur.marketingIntel.minPeriodRevenueMad),
+      lowMarginPct: num(formData, "mi_lowMarginPct", cur.marketingIntel.lowMarginPct),
+      maxDecisions: Math.max(1, Math.round(num(formData, "mi_maxDecisions", cur.marketingIntel.maxDecisions))),
+    },
   };
   if (!next.regulatoryAlertDays.length) next.regulatoryAlertDays = cur.regulatoryAlertDays;
   await saveSettings(next);

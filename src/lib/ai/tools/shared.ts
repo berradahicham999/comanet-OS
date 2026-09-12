@@ -4,6 +4,9 @@
  */
 import { z } from "zod";
 import { resolvePeriod, type PeriodParam } from "@/lib/periods";
+import { MARKETING_PERIOD_KEYS } from "@/lib/marketing-intel/build";
+import { gatesFor } from "@/lib/marketing-intel/gates";
+import type { IntelContext } from "@/lib/marketing-intel/types";
 import type { ToolAccess, ToolContext, ToolResult } from "./types";
 
 /** Nombre maximal de lignes renvoyées au modèle : il a besoin d'agrégats et d'un top N, pas d'un export. */
@@ -86,3 +89,37 @@ export function inBrandScope<T>(rows: T[], access: ToolAccess, brandIdOf: (r: T)
     return id ? set.has(id) : true;
   });
 }
+
+/* ------------------------------ Agent marketing ------------------------------ */
+
+/** Périodes des outils marketing : 7d / 30d / 90d / ytd et les périodes calendaires ; comparaison = période précédente de même longueur. */
+export const marketingPeriodSchema = z
+  .enum(MARKETING_PERIOD_KEYS)
+  .default("30d")
+  .describe("Période : 7d, 30d (défaut), 90d, ytd (année en cours), month (mois en cours à date), prevMonth, quarter, last12m, ou custom avec period_start/period_end (AAAA-MM-JJ, fin exclue). Comparaison : période précédente de même longueur.");
+
+/** Contexte de la couche Marketing Intelligence pour la personne connectée : mêmes dépendances, portes déduites de ses droits. */
+export function intelContext(ctx: ToolContext): IntelContext {
+  return {
+    deps: ctx.deps, settings: ctx.settings, refDate: ctx.refDate, now: ctx.now,
+    gates: gatesFor(ctx.access.perms, ctx.access.seeInternalCosts),
+    scopeBrandIds: ctx.access.brandIds, scopeClientIds: ctx.access.clientIds,
+  };
+}
+
+/** Nombre de jours entre la date de référence des ventes et aujourd'hui (retard d'import). */
+export function staleDays(ctx: ToolContext): number {
+  return Math.max(0, Math.round((ctx.now.getTime() - ctx.refDate.getTime()) / 86_400_000));
+}
+
+/** Note de fraîcheur à répéter dans chaque réponse de l'agent marketing. */
+export function freshnessNotes(ctx: ToolContext, stockDate?: string | null): string[] {
+  const d = ctx.refDate.toISOString().slice(0, 10);
+  const stale = staleDays(ctx);
+  const notes = [stale > 0 ? `Données de vente Sage à jour au ${d} (${stale} jour(s) de retard sur aujourd'hui).` : `Données de vente Sage à jour au ${d}.`];
+  if (stockDate !== undefined) notes.push(stockDate ? `Photo de stock du ${stockDate}.` : "Aucune photo de stock : couverture non mesurable.");
+  return notes;
+}
+
+/** Légende des étiquettes de fiabilité, jointe aux résultats de l'agent marketing. */
+export const DATA_TAGS_LEGEND = { CONFIRMED: "lu tel quel (facture, photo de stock, objectif saisi)", CALCULATED: "formule officielle (couverture, croissance, contribution, run-rate)", INFERRED: "interprétation (profil, catégorie, décision)", MISSING: "absent — jamais estimé" } as const;

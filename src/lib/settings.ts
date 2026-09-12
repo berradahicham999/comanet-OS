@@ -80,6 +80,31 @@ export type ComanetSettings = {
   analytics: AnalyticsSettings;
   /** Copilote IA : limites d'usage et plafond de coût (les modèles et la clé restent en variables d'environnement). */
   ai: AiSettings;
+  /** Agent marketing : seuils de lecture d'un produit (contribution, marge faible, volume minimal) et nombre de décisions. */
+  marketingIntel: MarketingIntelSettings;
+};
+
+/**
+ * Seuils de l'Agent marketing (couche `src/lib/marketing-intel/`). Les seuils de stock (couverture,
+ * tension, surstock) et de croissance (`analytics.productCases.sellingGrowthPct`) sont réutilisés tels
+ * quels : seuls les seuils propres à la lecture marketing d'un produit vivent ici.
+ */
+export type MarketingIntelSettings = {
+  /** Contribution au CA de la marque (%) à partir de laquelle un produit est STAR (en croissance) ou CASH_COW (stable). */
+  starContributionPct: number;
+  /** CA sell-in minimal (MAD) sur la période pour classer un produit ; en dessous, « données insuffisantes ». */
+  minPeriodRevenueMad: number;
+  /** Marge brute (%) en dessous de laquelle un produit est à « marge faible » : la publicité n'est jamais scalée automatiquement. */
+  lowMarginPct: number;
+  /** Nombre maximal de recommandations rendues par le moteur de décision marketing. */
+  maxDecisions: number;
+};
+
+export const DEFAULT_MARKETING_INTEL: MarketingIntelSettings = {
+  starContributionPct: 10,
+  minPeriodRevenueMad: 2000,
+  lowMarginPct: 25,
+  maxDecisions: 5,
 };
 
 export type AiSettings = {
@@ -342,6 +367,7 @@ export const DEFAULT_SETTINGS: ComanetSettings = {
   activations: DEFAULT_ACTIVATION_SETTINGS,
   analytics: DEFAULT_ANALYTICS_SETTINGS,
   ai: DEFAULT_AI_SETTINGS,
+  marketingIntel: DEFAULT_MARKETING_INTEL,
 };
 
 export const SETTINGS_KEY = "comanet.rules";
@@ -364,6 +390,7 @@ export function mergeSettings(stored: Partial<ComanetSettings> | null | undefine
     activations: { ...DEFAULT_ACTIVATION_SETTINGS, ...(stored.activations ?? {}) },
     analytics: mergeAnalytics(stored.analytics),
     ai: { ...DEFAULT_AI_SETTINGS, ...(stored.ai ?? {}) },
+    marketingIntel: { ...DEFAULT_MARKETING_INTEL, ...(stored.marketingIntel ?? {}) },
   };
 }
 

@@ -1,7 +1,7 @@
 import { periodRange, shiftRange } from "./analytics";
 import { addDays, addMonths, iso, startOfMonth, fmtDate, fmtMonth } from "./format";
 
-export type PeriodParam = "month" | "prevMonth" | "quarter" | "ytd" | "year" | "last30" | "last90" | "last12m" | "custom";
+export type PeriodParam = "month" | "prevMonth" | "quarter" | "ytd" | "year" | "last7" | "last30" | "last90" | "last12m" | "custom";
 
 export const PERIOD_OPTIONS: { key: PeriodParam; label: string }[] = [
   { key: "month", label: "Mois en cours" },
@@ -27,6 +27,7 @@ export function resolvePeriod(key: PeriodParam | undefined, ref: Date, custom?: 
       start = iso(addMonths(som, -1)); end = iso(som); label = fmtMonth(start);
       break;
     }
+    case "last7": start = iso(addDays(ref, -6)); end = tomorrow; label = "7 derniers jours"; break;
     case "last30": start = iso(addDays(ref, -29)); end = tomorrow; label = "30 derniers jours"; break;
     case "last90": start = iso(addDays(ref, -89)); end = tomorrow; label = "90 derniers jours"; break;
     case "last12m": start = iso(addMonths(startOfMonth(ref), -11)); end = tomorrow; label = "12 derniers mois"; break;

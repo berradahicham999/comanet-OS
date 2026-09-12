@@ -55,6 +55,13 @@ function makeDeps(calls: Calls, over: Partial<ToolDeps> = {}): ToolDeps {
     salesTotals: async (start, end, f) => (f.brandId === "b-alpha" ? { amount: 0, quantity: 0, orders: 0, clients: 0, lines: 0 } : { amount: start < "2026-08-01" ? 80_000 : 100_000, quantity: 500, orders: 40, clients: 25, lines: 300 }),
     salesByDim: async (dim, _s, _e, _f, limit) => Array.from({ length: 200 }, (_, i) => ({ id: dim === "brand" ? (i === 0 ? "b-gamarde" : "b-alpha") : `x${i}`, name: `${dim} ${i}`, extra: null, amount: 1000 - i, quantity: 10, orders: 1, clients: 1 })).slice(0, limit),
     salesObjective: async () => 120_000,
+    annualObjective: async () => 1_400_000,
+    productCatalog: async (_ref, opts) => [
+      { id: "p1", name: "Crème A", sku: "SKU1", shortName: null, category: null, active: true, needsReview: false, brandId: "b-gamarde", brandName: "Gamarde", brandColor: null, priceWholesale: 80, costPrice: 40, priceRetail: 120, revenue12: 300_000, qty12: 3_000, revenue3: 90_000, qtyPrev3: 800, qty3: 900, clients12: 40, lastSale: "2026-08-30" },
+      { id: "p2", name: "Sérum B", sku: "SKU2", shortName: null, category: null, active: true, needsReview: false, brandId: "b-alpha", brandName: "Alphascience", brandColor: null, priceWholesale: 150, costPrice: 90, priceRetail: 220, revenue12: 50_000, qty12: 400, revenue3: 10_000, qtyPrev3: 100, qty3: 80, clients12: 12, lastSale: "2026-08-15" },
+    ].filter((p) => !opts.brandId || p.brandId === opts.brandId),
+    adsProductsToPush: async () => [{ productId: "p1", decision: "PUSH", costPerResult: 5, why: ["Coût par résultat -20 % vs moyenne Gamarde"] }],
+    marketingActivity: async () => ({ campaigns: [], contents: [], collaborations: [], activations: [], brandObjectives: null }),
     clientIntel: async (opts) => clients.filter((c) => !opts.clientIds || opts.clientIds.includes(c.id)),
     animationTotals: async (_r, filter) => (filter?.city === "Nulle-Part" ? { revenue: 0, units: 0, days: 0, animations: 0, pos: 0, customers: 0, cost: 0 } : { revenue: 34_000, units: 210, days: 20, animations: 20, pos: 6, customers: 400, cost: 6_360 }),
     animationsByDim: async (dim) => (dim === "brand" ? [{ id: "b-gamarde", name: "Gamarde", extra: null, color: null, revenue: 30_000, units: 180, days: 18, animations: 18, prevRevenue: 25_000 }, { id: "b-alpha", name: "Alphascience", extra: null, color: null, revenue: 4_000, units: 30, days: 2, animations: 2, prevRevenue: 0 }]
@@ -123,10 +130,11 @@ type Ko = { available: false; reason: string; howToFix: string };
 /* ------------------------------ Registre ------------------------------ */
 
 describe("registre des outils", () => {
-  test("les douze outils du plan (plus get_ads_intelligence) sont présents, triés par nom", () => {
+  test("les douze outils du plan, get_ads_intelligence et les dix outils de l'Agent marketing sont présents, triés par nom", () => {
     assert.deepEqual(TOOL_NAMES, [...TOOL_NAMES].sort());
     for (const n of ["get_sales_summary", "get_client_intelligence", "get_terrain_summary", "get_stock_coverage", "get_marketing_budget", "get_ads_performance", "get_regulatory_alerts", "get_action_center", "get_tasks", "search_entities", "propose_task", "propose_report"]) assert.ok(TOOL_NAMES.includes(n), n);
-    assert.equal(TOOLS.length, 13);
+    for (const n of ["get_brand_overview", "get_sales_performance", "get_sales_breakdown", "get_sales_targets", "get_inventory_status", "get_stock_risk", "get_top_skus", "get_product_performance", "get_marketing_context", "get_marketing_recommendations"]) assert.ok(TOOL_NAMES.includes(n), n);
+    assert.equal(TOOLS.length, 23);
   });
   test("chaque schéma JSON est un objet fermé sans $schema, avec descriptions", () => {
     for (const d of toolDefinitions(TOOLS)) {

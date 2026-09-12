@@ -79,6 +79,15 @@ export default async function ParametresPage(props: { searchParams: Promise<{ ta
               <Field name="budgetAlertPct" label="Alerte budget engagé à (%)" value={s.budgetAlertPct} />
             </div>
           </Card>
+          <Card title="Agent marketing">
+            <p className="text-[12px] text-muted mb-2">Lecture marketing d&apos;un produit. Les seuils de stock (couverture, tension, surstock) et de croissance (Analytics marketing → « se vend si croissance ≥ ») sont réutilisés tels quels.</p>
+            <div className="grid grid-cols-2 gap-2">
+              <Field name="mi_starContributionPct" label="STAR / CASH COW si contribution ≥ (% du CA)" value={s.marketingIntel.starContributionPct} />
+              <Field name="mi_minPeriodRevenueMad" label="Classable si CA période ≥ (MAD)" value={s.marketingIntel.minPeriodRevenueMad} hint="En dessous : données insuffisantes" />
+              <Field name="mi_lowMarginPct" label="Marge faible si < (%)" value={s.marketingIntel.lowMarginPct} hint="Jamais de scale automatique" />
+              <Field name="mi_maxDecisions" label="Recommandations rendues (max)" value={s.marketingIntel.maxDecisions} />
+            </div>
+          </Card>
           <div className="md:col-span-2"><button className="btn-primary" type="submit">Enregistrer les seuils</button></div>
         </form>
       )}
