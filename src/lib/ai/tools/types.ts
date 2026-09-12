@@ -11,18 +11,15 @@ import type { z } from "zod";
 import type { ModuleKey, ScopeKey } from "@/lib/access-shared";
 import type { PermissionAction, PermissionSet } from "@/lib/permissions-shared";
 import type { ComanetSettings } from "@/lib/settings";
-import type { SalesFilter, Totals, DimRow, Dim } from "@/lib/analytics";
 import type { ClientIntel } from "@/lib/clients";
-import type { ProductStock } from "@/lib/stock";
-import type { BudgetConsumption, BudgetCategoryRow } from "@/lib/budget";
-import type { AdRow, AdKpis, Diagnosis } from "@/lib/ads";
-import type { AdThresholds } from "@/lib/settings";
+import type { BudgetCategoryRow } from "@/lib/budget";
 import type { Totals as AnimTotals, DimRow as AnimDimRow, ObjectiveRow, Range } from "@/lib/animations";
 import type { RecommendationWithState } from "@/lib/rules/types";
 import type { TaskRow } from "@/lib/tasks";
 import type { TaskPriority } from "@/db/schema";
 import type { SearchResult } from "@/lib/search";
 import type { ADS_AGENT_API } from "@/lib/ads-intel/agent";
+import type { MarketingIntelDeps } from "@/lib/marketing-intel/types";
 
 /** Droits de la personne connectée, tels que résolus par `permissions.ts`. `brandIds`/`clientIds` à `null` = tout. */
 export type ToolAccess = {
@@ -63,18 +60,16 @@ export type ToolCallLog = {
 /**
  * Fonctions métier accessibles aux outils. Chacune renvoie vers la définition officielle
  * du tableau « Une notion métier = une seule fonction » de CLAUDE.md ; aucune n'est redéfinie ici.
+ * Les lectures ventes / stock / budget / publicité / catalogue / activité marketing sont celles de la
+ * couche Marketing Intelligence (`MarketingIntelDeps`) : mêmes fonctions, un seul câblage (`deps.ts`).
  */
-export type ToolDeps = {
+export type ToolDeps = MarketingIntelDeps & {
   // Référentiels (résolution d'un nom saisi par le modèle vers un identifiant)
   findBrand(query: string): Promise<Ref | null>;
   findClient(query: string): Promise<Ref | null>;
   findProduct(query: string): Promise<Ref | null>;
   findUser(query: string): Promise<Ref | null>;
   clientIdsInCity(city: string): Promise<string[]>;
-  // Ventes sell-in (Sage)
-  salesTotals(start: string, end: string, f: SalesFilter): Promise<Totals>;
-  salesByDim(dim: Dim, start: string, end: string, f: SalesFilter, limit: number): Promise<DimRow[]>;
-  salesObjective(year: number, month: number, brandId: string | null): Promise<number | null>;
   // Clients
   clientIntel(opts: { clientIds?: string[] | null; brandIds?: string[] | null }, ref: Date): Promise<ClientIntel[]>;
   // Terrain (sell-out animatrices)
@@ -82,16 +77,8 @@ export type ToolDeps = {
   animationsByDim(dim: "animatrice" | "city" | "pos" | "brand" | "product", range: Range, prev: Range, filter?: { animatriceId?: string; city?: string }): Promise<AnimDimRow[]>;
   animationObjectives(year: number): Promise<ObjectiveRow[]>;
   objectiveForRange(objectives: ObjectiveRow[], range: Range, opts?: { cities?: string[]; brandId?: string }): number;
-  // Stock
-  productStocks(opts: { brandId?: string }, ref: Date): Promise<ProductStock[]>;
-  // Budget marketing
-  budgetConsumption(year: number, brandId?: string | null): Promise<BudgetConsumption>;
+  // Budget marketing (répartition par catégorie ; la consommation vient de `MarketingIntelDeps`)
   budgetByCategory(year: number, brandId: string | null, brandIds: string[] | null): Promise<BudgetCategoryRow[]>;
-  // Publicité
-  adsByDim(dim: "campaign" | "brand", range: Range, filter?: { brandId?: string | null; platform?: string | null }): Promise<AdRow[]>;
-  adKpis(r: AdRow): AdKpis;
-  adDiagnose(cur: AdKpis, ref: AdKpis | null, brandAvg: { cpa: number | null; roas: number | null; ctr: number | null } | null, t: AdThresholds): Diagnosis;
-  adBrandAverages(rows: AdKpis[]): { cpa: number | null; roas: number | null; ctr: number | null };
   /** Ads Command Center : mêmes moteurs que l'écran (`lib/ads-intel/agent.ts`), aucune logique ici. */
   adsIntel: typeof ADS_AGENT_API;
   // Réglementaire

@@ -17,9 +17,11 @@ type ToolStep = { id: string; name: string; ok: boolean | null; summary: string;
 type Turn = { id: string; role: "user" | "assistant"; content: string; tools?: ToolStep[]; notices?: string[]; streaming?: boolean; error?: string | null; meta?: { latencyMs: number; model: string } };
 type ConversationSummary = { id: string; title: string | null; contextPath: string | null; updatedAt: string };
 
-const TOOL_LABEL: Record<string, string> = {
+export const TOOL_LABEL: Record<string, string> = {
   get_sales_summary: "Ventes sell-in", get_client_intelligence: "Clients", get_terrain_summary: "Terrain sell-out", get_stock_coverage: "Stock", get_marketing_budget: "Budget marketing",
   get_ads_performance: "Digital Ads", get_regulatory_alerts: "Réglementaire", get_action_center: "Action Center", get_tasks: "Tâches", search_entities: "Recherche", propose_task: "Tâche proposée", propose_report: "Brouillon de rapport",
+  get_ads_intelligence: "Intelligence Ads", get_brand_overview: "Vue marque", get_sales_performance: "Performance ventes", get_sales_breakdown: "Ventes par dimension", get_sales_targets: "Objectifs",
+  get_inventory_status: "Stock par SKU", get_stock_risk: "Risques de stock", get_top_skus: "Top SKU", get_product_performance: "Performance produit", get_marketing_context: "Contexte marketing", get_marketing_recommendations: "Moteur de décision",
 };
 
 export function CopilotPanel({ enabled, configured }: { enabled: boolean; configured: boolean }) {

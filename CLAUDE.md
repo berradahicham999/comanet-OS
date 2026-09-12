@@ -23,6 +23,7 @@ npm run lint
 npm run db:generate    # génère une migration depuis src/db/schema.ts
 npm run db:push        # pousse le schéma sans migration (dev uniquement)
 npm run db:studio
+npm run agent:tool -- <outil> '<json>'   # pont CLI de l'Agent marketing (lecture seule, données réelles)
 ```
 
 Variables d'environnement : `DATABASE_URL`, `DATABASE_SSL`, `SESSION_SECRET`, `SETUP_KEY`,
@@ -44,13 +45,14 @@ src/lib/              logique métier, une bibliothèque par domaine
 src/lib/import/       moteur d'import (parse → mapping → run → rollback)
 src/lib/meta/         connexion Meta Ads en lecture seule (client → sync → links)
 src/lib/rules/        moteur de recommandations (Action Center)
+src/lib/marketing-intel/ couche Marketing Intelligence de l'Agent marketing (vue marque, stock par SKU, performance produit, décisions)
 src/lib/content/      planning éditorial (référentiels, workflow, notifications, fichiers, démo)
 src/lib/activations/  activations marketing hors digital (référentiels, workflow, budget, inventaire, ROI, démo)
 drizzle/              migrations SQL + meta/_journal.json
 ```
 
 Modules : Cockpit, Action Center, Ventes, Clients, Produits, Marques, Stock,
-**Marketing** (vue d'ensemble, campagnes, Digital Ads, Influence, planning éditorial, activations, matériel, budgets),
+**Marketing** (vue d'ensemble, campagnes, Digital Ads, Influence, planning éditorial, activations, matériel, budgets, analytics, agent marketing),
 Terrain (animations, animatrices, saisie), Réglementaire, Tâches, Imports, Paramètres.
 
 ---
@@ -93,6 +95,7 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Statut d'un contenu éditorial, transitions, retards | `src/lib/content/workflow.ts` + `src/lib/content/shared.ts` | `transition()` (seule écriture du statut), `checkTransition()`, `nextTransitions()`, `lateness()`, `canValidateBrand()` |
 | Statut d'une activation, budget, retards, retour | `src/lib/activations/workflow.ts` + `shared.ts` + `budget.ts` + `roi.ts` | `transitionActivation()` (seule écriture du statut), `budgetTotals()`, `expenseRowsFor()`, `syncActivationExpenses()` (seul reflet dans `marketing_expenses`), `activationLateness()`, `compareSales()`, `roiVerdict()`, `canValidateActivation()` |
 | Stock d'un article d'inventaire | `src/lib/activations/inventory.ts` + `shared.ts` | `recordMovement()` (seule écriture du stock), `consumeMaterial()`, `inventoryStatus()` |
+| Lecture marketing d'une marque (statut de stock par SKU, profil / catégorie produit, objectifs et écart, contexte marketing, décisions) | `src/lib/marketing-intel/` | `buildBrandOverview()`, `buildInventory()`, `buildProductPerformance()`, `buildSalesTargets()`, `buildMarketingContext()`, `buildRecommendations()`, `stockStatusOf()`, `stockRiskOf()`, `salesProfileOf()`, `decide()` |
 
 `tests/definitions-uniques.test.ts` échoue si une seconde définition réapparaît.
 
@@ -136,6 +139,18 @@ cache), clé et modèles en variables d'environnement, limites dans `settings.ai
 ⌘K (`/api/ai/chat`, SSE), « Expliquer » sur les cartes (`explain.ts`, cache 1 h), brief du matin (`brief.ts`, cache
 quotidien, administrateurs), « Détailler » sur l'Action Center (`plans.ts`), rapports (`reports.ts`, module `rapports`).
 Ouvert aux profils hors portée OWN (`copilotAllowed()`).
+
+**Agent marketing** (`docs/guide-agent-marketing.md`). Le copilote avec la persona marketing
+(`src/lib/ai/prompts/marketing-agent.md`) et dix outils de lecture (`src/lib/ai/tools/marketing-*.ts`) posés sur la
+couche `src/lib/marketing-intel/` (pure, dépendances injectées, aucune formule maison : elle appelle les fonctions du
+tableau ci-dessus). Chaque valeur rendue au modèle est étiquetée CONFIRMED / CALCULATED / INFERRED / MISSING ; une
+donnée absente est dite manquante, jamais estimée. Le moteur de décision (`decisions.ts`) ne décide jamais sur les
+ventes seules : ventes ↑ + stock faible = RESTOCK, ventes ↓ + stock élevé = promotion / sell-out, marge faible = pas
+de scale automatique ; seuils dans `settings.marketingIntel` (Paramètres → Agent marketing) et réutilisation des
+seuils de stock et de croissance existants. Surfaces : page `/marketing/agent` (contexte métier calculé côté
+serveur, « données à jour au … », recommandation du moteur, chat avec la marque transmise), panneau ⌘K, et le
+sous-agent Claude Code `comanet-marketing` via `npm run agent:tool -- <outil> '<json>'` (lecture seule). Aucune
+donnée de vente ou de stock n'entre dans un prompt : elle est lue par les outils à chaque question.
 
 **Permissions modulaires par utilisateur** (`docs/permissions-modulaires.md`). Chaque compte porte
 sa propre matrice `user_permissions` (14 modules × Voir / Créer / Modifier / Valider), une portée

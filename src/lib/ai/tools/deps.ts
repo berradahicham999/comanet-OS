@@ -2,20 +2,19 @@
  * Liaison des outils aux fonctions métier réelles (serveur uniquement).
  *
  * Chaque entrée renvoie vers la définition officielle ; ce fichier ne contient que des requêtes de
- * résolution de noms, une lecture d'appoint (dossiers réglementaires) et les
- * trois écritures autorisées (tâche proposée, brouillon de rapport, journal des appels).
+ * résolution de noms, une lecture d'appoint (dossiers réglementaires), le câblage partagé avec la couche
+ * Marketing Intelligence (`realIntelDeps`) et les trois écritures autorisées (tâche proposée, brouillon
+ * de rapport, journal des appels).
  */
 import "server-only";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { aiReports, aiToolCalls, tasks } from "@/db/schema";
-import { byDim, objectiveFor, totals } from "@/lib/analytics";
 import { clientIntel } from "@/lib/clients";
 import { animationObjectives, animationTotals, animationsByDim, objectiveForRange } from "@/lib/animations";
-import { productStocks } from "@/lib/stock";
-import { budgetByCategory, budgetConsumption } from "@/lib/budget";
-import { adsByDim, brandAverages, diagnose, kpis } from "@/lib/ads";
+import { budgetByCategory } from "@/lib/budget";
 import { ADS_AGENT_API } from "@/lib/ads-intel/agent";
+import { realIntelDeps } from "@/lib/marketing-intel/server";
 import { getRecommendations } from "@/lib/rules";
 import { listTasks } from "@/lib/tasks";
 import { searchEntities } from "@/lib/search";
@@ -101,17 +100,12 @@ async function regulatoryFiles(): Promise<RegulatoryRow[]> {
 }
 
 export const realDeps: ToolDeps = {
+  // Ventes, objectifs, stock, catalogue, budget consommé, publicité, activité marketing : câblage de la couche Marketing Intelligence.
+  ...realIntelDeps,
   findBrand, findClient, findProduct, findUser, clientIdsInCity,
-  salesTotals: (start, end, f) => totals(start, end, f),
-  salesByDim: (dim, start, end, f, limit) => byDim(dim, start, end, f, limit),
-  salesObjective: (year, month, brandId) => objectiveFor(year, month, brandId),
   clientIntel: (opts, ref) => clientIntel(opts, ref),
   animationTotals, animationsByDim, animationObjectives, objectiveForRange,
-  productStocks: (opts, ref) => productStocks(opts, ref),
-  budgetConsumption: (year, brandId) => budgetConsumption(year, brandId),
   budgetByCategory: (year, brandId, brandIds) => budgetByCategory(year, brandId, brandIds),
-  adsByDim: (dim, range, filter) => adsByDim(dim, range, filter),
-  adKpis: kpis, adDiagnose: diagnose, adBrandAverages: brandAverages,
   adsIntel: ADS_AGENT_API,
   regulatoryFiles,
   recommendations: () => getRecommendations(),

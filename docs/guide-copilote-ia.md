@@ -35,6 +35,8 @@ Pour une question purement factuelle, le bloc Donnée porte la réponse et les a
 
 **Tâches → « Proposées par le copilote ».** Quand vous demandez explicitement une tâche au copilote, elle apparaît dans cet onglet, hors des compteurs. Accepter (en choisissant le responsable) la passe « À faire » ; Refuser l'annule sans la supprimer. Il faut le droit Modifier sur Tâches.
 
+**Agent marketing** (`/marketing/agent`, module Marketing). Le copilote avec la persona « Directeur Marketing & Croissance » et dix outils supplémentaires (vue marque, performance ventes, stock par SKU, risques, top SKU, performance produit, contexte marketing, objectifs, moteur de décision). La page affiche le contexte métier de la marque calculé côté serveur (« données à jour au … »), la recommandation du moteur (ACTION / POURQUOI / DONNÉES / IMPACT / CONFIANCE) et un chat où la marque sélectionnée est transmise automatiquement. Voir `docs/guide-agent-marketing.md`.
+
 **Rapports** (`/rapports`, module Rapports). COMANET WEEKLY (semaine complète, toutes marques) et MONTHLY BRAND REVIEW (mois complet, une marque). Chaque section indique sa source et sa période ; les outils lus sont listés en bas. Le rapport reste un brouillon jusqu'à Valider (droit Valider sur Rapports). Export en Markdown, impression ou PDF.
 
 ## Ce que le copilote refuse

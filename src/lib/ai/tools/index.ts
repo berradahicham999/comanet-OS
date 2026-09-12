@@ -22,6 +22,10 @@ import { getRegulatoryAlerts } from "./regulatory";
 import { getActionCenter, getTasks } from "./actions";
 import { searchEntities } from "./search";
 import { proposeReport, proposeTask } from "./propose";
+import { getBrandOverview, getMarketingRecommendations, getSalesTargets } from "./marketing-brand";
+import { getInventoryStatus, getProductPerformance, getStockRisk, getTopSkus } from "./marketing-products";
+import { getSalesBreakdown, getSalesPerformance } from "./marketing-sales";
+import { getMarketingContext } from "./marketing-context";
 
 export type { AiTool, ToolAccess, ToolContext, ToolDeps, ToolResult, ToolCallLog } from "./types";
 
@@ -29,7 +33,13 @@ export type { AiTool, ToolAccess, ToolContext, ToolDeps, ToolResult, ToolCallLog
 export const TOOLS: AiTool<any>[] = [
   getActionCenter, getAdsIntelligence, getAdsPerformance, getClientIntelligence, getMarketingBudget, getRegulatoryAlerts, getSalesSummary,
   getStockCoverage, getTasks, getTerrainSummary, proposeReport, proposeTask, searchEntities,
+  // Agent marketing (couche `src/lib/marketing-intel/`)
+  getBrandOverview, getSalesTargets, getMarketingRecommendations, getInventoryStatus, getStockRisk, getTopSkus, getProductPerformance,
+  getSalesPerformance, getSalesBreakdown, getMarketingContext,
 ].sort((a, b) => a.name.localeCompare(b.name));
+
+/** Outils de l'Agent marketing, dans l'ordre d'appel conseillé pour « que pousser cette semaine ». */
+export const MARKETING_AGENT_TOOLS = ["get_brand_overview", "get_sales_performance", "get_inventory_status", "get_top_skus", "get_product_performance", "get_marketing_context", "get_stock_risk", "get_sales_targets", "get_sales_breakdown", "get_marketing_recommendations"] as const;
 
 export const TOOL_NAMES = TOOLS.map((t) => t.name);
 

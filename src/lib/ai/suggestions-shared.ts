@@ -1,6 +1,7 @@
 /** Questions suggérées selon la page courante (partagé client / serveur, aucune dépendance). */
 
 const BY_PREFIX: [string, string[]][] = [
+  ["/marketing/agent", ["Qu'est-ce que je dois pousser cette semaine pour cette marque ?", "Quels produits risquent la rupture et lesquels sont en surstock ?", "Où en est la marque par rapport à son objectif du mois ?", "Pourquoi recommandes-tu ce produit ?"]],
   ["/marketing/budgets", ["Où est-ce qu'on surconsomme le budget cette année ?", "Quelles marques ont dépensé plus de 90 % de leur enveloppe ?", "Combien reste-t-il sur le budget Gamarde ?"]],
   ["/marketing/ads", ["Quelles campagnes sont en STOP ou OPTIMIZE ce mois-ci et pourquoi ?", "Quel est le coût par conversation par marque sur 30 jours ?", "Les campagnes à scaler poussent-elles des produits en tension de stock ?"]],
   ["/marketing/analytics", ["Quel canal marche le mieux pour Gamarde ce trimestre ?", "Quels produits sont poussés sans effet sur le sell-in ?"]],
