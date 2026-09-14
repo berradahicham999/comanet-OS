@@ -1,4 +1,4 @@
-# COMANET OS — V1
+# COMANET OS — V1.1
 
 Plateforme interne de pilotage stratégique, marketing et opérationnel de COMANET.
 Couche d'intelligence, de recommandation et d'exécution **au-dessus de Sage** (Sage reste la source de vérité ; COMANET OS n'y écrit jamais).
