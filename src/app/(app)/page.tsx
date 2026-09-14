@@ -44,7 +44,7 @@ export default async function CockpitPage() {
     <>
       <PageHeader
         eyebrow="COMANET TODAY"
-        title={`Bonjour ${user.name}`}
+        title={`Bonjour ${user.name.split(" ")[0]}`}
         subtitle={<>{fmtDateLong(d.refDate.ref)} · {critical > 0 ? <span className="text-red font-medium">{critical} action{critical > 1 ? "s" : ""} critique{critical > 1 ? "s" : ""}</span> : "aucune action critique"} · {d.recs.filter((r) => !r.existingTask).length} recommandations ouvertes</>}
         actions={<Link href="/actions" className="btn-primary">Action Center <ArrowRight size={16} /></Link>}
       />
