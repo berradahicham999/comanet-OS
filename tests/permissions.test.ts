@@ -6,7 +6,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { MODULE_KEYS, FLAG_KEYS } from "@/lib/access-shared";
 import {
   ACTIONS, can, describeMatrix, hasAnyModule, isAdmin, legacyRoleFor, matrixFromRows, mergeFlags, mergeMatrix,
@@ -140,11 +140,12 @@ describe("cas d'acceptation du cahier des charges (section 7)", () => {
 });
 
 describe("plus aucune décision d'accès sur l'ancien enum de rôle", () => {
+  /** Chemins toujours en `/`, même sous Windows, pour matcher les littéraux `"src/…"` des tests. */
   function walk(dir: string, out: string[] = []): string[] {
     for (const e of readdirSync(dir)) {
       const p = join(dir, e);
       if (statSync(p).isDirectory()) walk(p, out);
-      else if (p.endsWith(".ts") || p.endsWith(".tsx")) out.push(p);
+      else if (p.endsWith(".ts") || p.endsWith(".tsx")) out.push(p.split(sep).join("/"));
     }
     return out;
   }
