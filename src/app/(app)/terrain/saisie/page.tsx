@@ -9,7 +9,7 @@ import { AnimationQuickForm } from "@/components/animation-quick-form";
 import { saveAnimation } from "../actions";
 import { iso, fmtDateShort } from "@/lib/format";
 import { ANIMATION_ERRORS, ANIMATION_WARNINGS } from "@/lib/animations-shared";
-import { usualProductsForAnimatrice, animatedProductCatalog, lastClientForAnimatrice } from "@/lib/terrain/usual-products";
+import { animatedProductCatalog, lastClientForAnimatrice } from "@/lib/terrain/usual-products";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Saisie terrain" };
@@ -34,23 +34,21 @@ export default async function SaisiePage(props: { searchParams: Promise<{ client
   );
 
   if (isAnimatrice) {
-    const [clients, usual, catalog, lastClient, recent] = await Promise.all([
+    const [clients, catalog, lastClient, recent] = await Promise.all([
       db.execute(sql`select id, name, city from clients where active and type <> 'GROSSISTE' order by name`),
-      usualProductsForAnimatrice(user.id),
       animatedProductCatalog(),
       lastClientForAnimatrice(user.id),
       recentP,
     ]);
     return (
       <>
-        <PageHeader eyebrow="Terrain" title="Saisie d'animation" subtitle="Vos produits habituels sont déjà là : saisissez juste les quantités." />
+        <PageHeader eyebrow="Terrain" title="Saisie d'animation" subtitle="Ajoutez vos produits depuis la liste, puis saisissez les quantités." />
         {banners}
         <div className="grid lg:grid-cols-[minmax(0,480px)_1fr] gap-4">
           <Card>
             <AnimationQuickForm
               action={saveAnimation}
               clients={(clients.rows as { id: string; name: string; city: string | null }[])}
-              usualProducts={usual}
               catalog={catalog}
               defaultClientId={sp.client ?? lastClient?.id ?? null}
               today={iso(new Date())}

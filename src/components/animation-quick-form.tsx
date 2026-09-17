@@ -8,9 +8,9 @@ import { normKey } from "@/lib/import/normalize";
  * SAISIE RAPIDE — pour le rôle Animatrice uniquement.
  *
  * Le formulaire d'origine (`AnimationForm`) fait choisir un produit dans une liste
- * alphabétique de 157 entrées, répétée à chaque ligne : sur une journée médiane de 8 produits,
- * c'est environ 45 gestes, contre une vingtaine de secondes pour écrire le même contenu par
- * WhatsApp. Ici, ses produits habituels sont déjà affichés — elle ne saisit que des nombres.
+ * alphabétique de 157 entrées, répétée à chaque ligne. Ici, un seul menu « Ajouter un
+ * produit » groupé par marque : l'animatrice choisit ses produits un par un, puis ne
+ * saisit que des nombres sur chaque ligne ajoutée.
  *
  * Les champs envoyés (`product_i`, `qty_i`, `stock_i`, `clientId`, `date`…) sont EXACTEMENT
  * ceux que lit `readForm()` côté serveur : ce composant ne change aucune règle de saisie,
@@ -23,13 +23,11 @@ export type QuickClient = { id: string; name: string; city: string | null };
 type Row = { productId: string; name: string; qty: string; stock: string };
 
 export function AnimationQuickForm({
-  action, clients, usualProducts, catalog, defaultClientId, today, id,
+  action, clients, catalog, defaultClientId, today, id,
 }: {
   action: (formData: FormData) => void | Promise<void>;
   clients: QuickClient[];
-  /** Ses produits habituels, déjà triés par fréquence — affichés sans recherche. */
-  usualProducts: QuickProduct[];
-  /** Le reste du catalogue réellement animé, pour le menu « Ajouter un produit », groupé par marque. */
+  /** Le catalogue réellement animé, pour le menu « Ajouter un produit », groupé par marque. */
   catalog: QuickProduct[];
   defaultClientId?: string | null;
   today: string;
@@ -39,7 +37,7 @@ export function AnimationQuickForm({
   const [clientQuery, setClientQuery] = useState("");
   const [clientSearchOpen, setClientSearchOpen] = useState(!defaultClientId);
   const [clientId, setClientId] = useState(defaultClientId ?? "");
-  const [rows, setRows] = useState<Row[]>(usualProducts.map((p) => ({ productId: p.id, name: p.name, qty: "", stock: "" })));
+  const [rows, setRows] = useState<Row[]>([]);
   const [showMore, setShowMore] = useState(false);
 
   const usedIds = useMemo(() => new Set(rows.map((r) => r.productId)), [rows]);
@@ -143,7 +141,7 @@ export function AnimationQuickForm({
               <input type="hidden" name={`product_${i}`} value={r.productId} />
             </div>
           ))}
-          {rows.length === 0 && <div className="text-[13px] text-muted py-2">Aucun produit habituel pour le moment — ajoutez-en un ci-dessous.</div>}
+          {rows.length === 0 && <div className="text-[13px] text-muted py-2">Ajoutez un produit ci-dessous pour commencer.</div>}
         </div>
 
         <div className="mt-2">
