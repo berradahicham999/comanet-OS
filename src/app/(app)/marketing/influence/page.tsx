@@ -129,7 +129,7 @@ export default async function InfluencePage(props: { searchParams: Promise<{ bra
                   {ranked.map((r) => (
                     <tr key={r.id}>
                       <td>
-                        <div className="font-medium">{r.name}{!r.active && <span className="text-faint"> (inactive)</span>}</div>
+                        <div className="font-medium"><Link href={`/marketing/influence/${r.id}`} className="hover:text-accent">{r.name}</Link>{!r.active && <span className="text-faint"> (inactive)</span>}</div>
                         <div className="text-[11px] text-faint">{[r.instagram, r.category, r.city, r.followers ? `${fmtNum(r.followers)} abonnés` : null].filter(Boolean).join(" · ")}</div>
                       </td>
                       <td className="text-muted">{r.brands.join(", ")}</td>
@@ -159,7 +159,7 @@ export default async function InfluencePage(props: { searchParams: Promise<{ bra
                 {scored.map((r) => (
                   <tr key={r.id}>
                     <td className="whitespace-nowrap">{fmtDateShort(r.date)}</td>
-                    <td className="font-medium">{r.influencer}</td>
+                    <td className="font-medium"><Link href={`/marketing/influence/${r.influencer_id}`} className="hover:text-accent">{r.influencer}</Link></td>
                     <td><span className="flex items-center gap-1.5">{r.brand_color && <BrandDot color={r.brand_color} />}{r.brand}</span></td>
                     <td className="text-muted">{[r.reels ? `${r.reels} reel(s)` : null, r.stories ? `${r.stories} story(s)` : null, r.posts ? `${r.posts} post(s)` : null].filter(Boolean).join(" · ") || r.content_type || "—"}{r.campaign && <span className="text-faint"> · {r.campaign}</span>}</td>
                     <td className="num">{seeCosts ? fmtMAD(r.cost, { suffix: false }) : "•••"}</td>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { Pencil, Trash2 } from "lucide-react";
 import { Modal } from "@/components/content-calendar";
 import { COLLAB_STATUS } from "@/lib/marketing-shared";
@@ -11,7 +12,7 @@ export type FormBrand = { id: string; name: string };
 export type FormInfluencer = { id: string; name: string; instagram: string | null; tiktok: string | null; followers: number | null; engagement_rate: number | null; category: string | null; city: string | null; usual_rate: number | null; contact: string | null; notes: string | null; active: boolean };
 export type FormCampaign = { id: string; name: string; brand_id: string };
 export type FormProduct = { id: string; name: string; brand_id: string | null };
-/** Filtres de la page, renvoyés à l'action pour revenir au même écran après l'enregistrement. */
+/** Filtres de la page (et `path` pour la page détail), renvoyés à l'action pour revenir au même écran. */
 export type ReturnParams = Record<string, string>;
 
 export type CollabInitial = {
@@ -156,6 +157,21 @@ function InfluencerForm({ action, initial, returnParams, onDone }: { action: Act
 }
 
 /** Répertoire : recherche, fiche modifiable en modale, ajout. */
+/** Bouton « Modifier la fiche » seul (page détail). */
+export function InfluencerEditButton({ influencer, action, returnParams }: { influencer: FormInfluencer; action: Action; returnParams: ReturnParams }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} className="btn-secondary btn-sm">Modifier la fiche</button>
+      {open && (
+        <Modal title={`Fiche — ${influencer.name}`} onClose={() => setOpen(false)}>
+          <InfluencerForm action={action} initial={influencer} returnParams={returnParams} onDone={() => setOpen(false)} />
+        </Modal>
+      )}
+    </>
+  );
+}
+
 export function InfluencerDirectory({ influencers, action, canEdit, canCreate, returnParams }: { influencers: FormInfluencer[]; action: Action; canEdit: boolean; canCreate: boolean; returnParams: ReturnParams }) {
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<FormInfluencer | null>(null);
@@ -174,7 +190,7 @@ export function InfluencerDirectory({ influencers, action, canEdit, canCreate, r
               <tbody>
                 {list.map((i) => (
                   <tr key={i.id} className={i.active ? "" : "opacity-50"}>
-                    <td>{i.name}<div className="text-[11px] text-faint">{[i.category, i.city].filter(Boolean).join(" · ")}</div></td>
+                    <td><Link href={`/marketing/influence/${i.id}`} className="font-medium hover:text-accent">{i.name}</Link><div className="text-[11px] text-faint">{[i.category, i.city].filter(Boolean).join(" · ")}</div></td>
                     <td className="text-muted text-[11.5px]">{[i.instagram, i.tiktok].filter(Boolean).join(" / ") || "—"}</td>
                     <td className="num">{i.followers ? fmtNum(i.followers) : "—"}</td>
                     <td className="num">{i.usual_rate ? fmtMAD(i.usual_rate, { suffix: false }) : "—"}</td>

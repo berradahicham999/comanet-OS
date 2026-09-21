@@ -135,9 +135,12 @@ export async function setCampaignStatus(formData: FormData) {
 /** Retour vers la page Influence avec un message (`ok` ou `erreur`), en conservant les filtres. */
 function backToInfluence(formData: FormData, params: Record<string, string>): never {
   const q = new URLSearchParams();
+  // Page détail d'une influenceuse : `return_path` ne peut viser qu'une page du module.
+  const path = str(formData, "return_path");
+  const base = path && /^\/marketing\/influence\/[0-9a-f-]{36}$/i.test(path) ? path : "/marketing/influence";
   for (const k of ["brand", "period", "start", "end", "status"]) { const v = str(formData, `return_${k}`); if (v) q.set(k, v); }
   for (const [k, v] of Object.entries(params)) q.set(k, v);
-  redirect(`/marketing/influence?${q.toString()}`);
+  redirect(`${base}?${q.toString()}`);
 }
 
 /** Montant saisi : `null` si vide, refus (clé `nombre`) s'il est illisible. */
