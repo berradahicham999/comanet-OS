@@ -8,6 +8,7 @@ import {
   type AnimationErrorCode, type ParsedAnimation,
 } from "./animation-input";
 import { EVENT_SOURCES, EVENT_TYPES, emitEvent, eventKey, obsoleteEvent } from "@/lib/events/emit";
+import { recordReadings, deleteReadingsOfAnimation } from "@/lib/client-stock";
 
 /**
  * ENREGISTREMENT D'UNE ANIMATION — service métier transactionnel.
@@ -112,6 +113,20 @@ export async function saveAnimation({ id, parsed }: SaveAnimationContext): Promi
       );
     }
 
+    // Stock constaté en rayon : relevé daté du jour de l'animation, dans la table commune aux
+    // deux canaux (`client_stock_readings`). Une correction remplace les relevés de CETTE animation.
+    // Seule une animation réalisée constitue un relevé ; prévue ou annulée, ses relevés sont retirés.
+    await recordReadings({
+      clientId: parsed.clientId,
+      userId: parsed.animatriceId,
+      channel: "ANIMATION",
+      readAt: parsed.date,
+      animationId,
+      lines: parsed.status === "DONE"
+        ? valued.filter((l) => l.stockObserved !== null).map((l) => ({ productId: l.productId, quantity: l.stockObserved as number }))
+        : [],
+    }, tx);
+
     // Seule une journée RÉALISÉE est un fait métier. Une animation prévue n'a rien produit ;
     // une animation annulée retire le fait sans effacer sa trace.
     const key = eventKey(EVENT_TYPES.ANIMATION_COMPLETED, animationId);
@@ -156,6 +171,7 @@ export async function saveAnimation({ id, parsed }: SaveAnimationContext): Promi
 export async function deleteAnimation(id: string): Promise<void> {
   await db.transaction(async (tx) => {
     await obsoleteEvent(tx, eventKey(EVENT_TYPES.ANIMATION_COMPLETED, id));
+    await deleteReadingsOfAnimation(id, tx);
     await tx.delete(animations).where(eq(animations.id, id));
   });
 }

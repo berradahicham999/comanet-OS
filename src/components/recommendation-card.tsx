@@ -21,7 +21,7 @@ export function RecommendationCard({ rec, users, compact = false, redirectTo, co
   plan?: StoredPlan | null;
 }) {
   const cat = CATEGORY_META[rec.category];
-  const defaultAssignee = users.find((u) => u.role === rec.task.role) ?? users.find((u) => u.role === "ADMIN");
+  const defaultAssignee = (rec.suggestedAssigneeId ? users.find((u) => u.id === rec.suggestedAssigneeId) : undefined) ?? users.find((u) => u.role === rec.task.role) ?? users.find((u) => u.role === "ADMIN");
   const due = iso(addDays(today(), rec.task.dueInDays));
   const description = `${rec.why}\n\nAction recommandée : ${rec.action}`;
   return (

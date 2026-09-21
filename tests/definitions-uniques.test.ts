@@ -154,3 +154,19 @@ describe("Tableaux SQL — toujours via pgArray()", () => {
     assert.deepEqual(found, [], `Tableau passé sans pgArray() dans : ${found.join(", ")}`);
   });
 });
+
+describe("Stock chez le client — une seule écriture, une seule lecture du dernier relevé", () => {
+  test("seul `src/lib/client-stock.ts` écrit dans `client_stock_readings`", () => {
+    const found = codeHits(/insert\(clientStockReadings\)|insert\s+into\s+client_stock_readings|delete\(clientStockReadings\)|delete\s+from\s+client_stock_readings/i, ["lib/client-stock.ts"]);
+    assert.deepEqual(found, [], `Écriture concurrente dans : ${found.join(", ")}`);
+  });
+  test("l'ancienneté et la couverture ne sont définies qu'une fois", () => {
+    assert.deepEqual(hits(/export function agingOf\(/), ["src/lib/client-stock-shared.ts"]);
+    assert.deepEqual(hits(/export function estimatedCoverageWeeks\(/), ["src/lib/client-stock-shared.ts"]);
+  });
+  test("aucun seuil d'ancienneté en dur hors des paramètres", () => {
+    // Un appel `agingOf(…, { freshDays: 15, staleDays: 45 })` contournerait `settings.clientStock`.
+    const found = codeHits(/agingOf\([^;]*?\{[^}]*(freshDays|staleDays)\s*:\s*\d/, ["lib/settings.ts"]);
+    assert.deepEqual(found, [], `Seuil d'ancienneté écrit en dur dans : ${found.join(", ")}`);
+  });
+});

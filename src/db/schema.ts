@@ -752,6 +752,53 @@ export const animationLines = pgTable(
 );
 
 /* ------------------------------------------------------------------ */
+/* Stock chez le client (relevés terrain)                              */
+/* ------------------------------------------------------------------ */
+
+/** Par quel canal un relevé de stock a été fait. */
+export const clientStockChannelEnum = pgEnum("client_stock_channel", ["ANIMATION", "TOURNEE_COMMERCIALE", "IMPORT"]);
+
+/**
+ * Relevé du stock constaté CHEZ un client (le point de vente est le client : il n'existe
+ * pas de second référentiel). Une ligne par relevé, jamais d'écrasement : l'historique
+ * est conservé et le « stock actuel » est le dernier relevé par produit
+ * (`src/lib/client-stock.ts`, seul module autorisé à écrire ici).
+ *
+ * Donnée terrain, distincte du stock COMANET (`stock_snapshots`) et jamais renvoyée
+ * vers Sage. Deux populations alimentent la même table : les animatrices depuis la
+ * saisie terrain (`channel = ANIMATION`, `animation_id` renseigné) et les commerciaux
+ * depuis la fiche client (`channel = TOURNEE_COMMERCIALE`).
+ */
+export const clientStockReadings = pgTable(
+  "client_stock_readings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    /** Unités constatées en rayon + réserve du point de vente. */
+    quantity: integer("quantity").notNull(),
+    /** Jour du relevé (jour de l'animation, ou jour de la tournée). */
+    readAt: date("read_at").notNull(),
+    /** Qui a relevé (animatrice ou commercial). */
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    channel: clientStockChannelEnum("channel").notNull(),
+    /** Journée d'animation d'origine : une correction de l'animation remplace SES relevés, pas ceux des autres. */
+    animationId: uuid("animation_id").references(() => animations.id, { onDelete: "set null" }),
+    comment: text("comment"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("client_stock_readings_client_product_date_idx").on(t.clientId, t.productId, t.readAt),
+    index("client_stock_readings_animation_idx").on(t.animationId),
+    index("client_stock_readings_user_idx").on(t.userId),
+  ],
+);
+
+/* ------------------------------------------------------------------ */
 /* Réglementaire                                                       */
 /* ------------------------------------------------------------------ */
 
@@ -2791,6 +2838,8 @@ export type Product = typeof products.$inferSelect;
 export type Client = typeof clients.$inferSelect;
 export type Sale = typeof sales.$inferSelect;
 export type StockSnapshot = typeof stockSnapshots.$inferSelect;
+export type ClientStockReading = typeof clientStockReadings.$inferSelect;
+export type ClientStockChannel = (typeof clientStockChannelEnum.enumValues)[number];
 export type Animation = typeof animations.$inferSelect;
 export type RegulatoryFile = typeof regulatoryFiles.$inferSelect;
 export type RegulatoryEvent = typeof regulatoryEvents.$inferSelect;

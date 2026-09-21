@@ -36,6 +36,8 @@ export type Recommendation = {
   impact?: string;
   /** Tâche proposée. */
   task: { title: string; dueInDays: number; role: UserRole; priority?: TaskPriority };
+  /** Personne à proposer par défaut pour la tâche (ex. commercial en charge du client), avant le repli par rôle. */
+  suggestedAssigneeId?: string | null;
   entity?: { type: "product" | "client" | "brand" | "regulatory" | "campaign" | "task" | "user" | "doctor" | "content" | "activation" | "inventory"; id: string; href: string };
   brandId?: string | null;
   /** Enjeu (MAD) pour ordonner les recommandations de même priorité. */

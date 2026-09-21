@@ -7,23 +7,27 @@ import { requireAccess } from "@/lib/access";
 import { clientIntel, SEGMENT_META } from "@/lib/clients";
 import { getRefDate } from "@/lib/ref-date";
 import { monthlySeries, ORDER_KEY } from "@/lib/analytics";
-import { PageHeader, Card, Badge, Delta, Section, PriorityBadge, StatusBadge } from "@/components/ui";
+import { PageHeader, Card, Badge, Delta, Section, PriorityBadge, StatusBadge, Tabs } from "@/components/ui";
+import { ClientStockTab } from "./stock-tab";
 import { MonthlyRevenueChart } from "@/components/charts";
 import { fmtMAD, fmtNum, fmtDate, fmtDateShort, addDays, iso } from "@/lib/format";
 import { updateClient } from "../actions";
+import { readingsForClient } from "@/lib/client-stock";
 import { SECTORS, cityToSector } from "@/lib/sectors";
 
 export const dynamic = "force-dynamic";
 
 const REC_TONE: Record<string, "red" | "orange" | "blue" | "green" | "accent" | "gray"> = { RELANCE: "blue", REACTIVATION: "red", ANALYSE: "orange", ANIMATION: "accent", DEVELOPPEMENT: "green", NONE: "gray" };
 
-export default async function ClientPage(props: { params: Promise<{ id: string }> }) {
+export default async function ClientPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; releve?: string; brand?: string; sort?: string; done?: string; error?: string }> }) {
   await requireAccess("clients");
   const { id } = await props.params;
+  const sp = await props.searchParams;
+  const tab = sp.tab === "stock" ? "stock" : "apercu";
   const client = await db.query.clients.findFirst({ where: eq(clientsTable.id, id) });
   if (!client) notFound();
   const { ref } = await getRefDate();
-  const [intelList, series, products, orders, animations, openTasks, aliases] = await Promise.all([
+  const [intelList, series, products, orders, animations, openTasks, aliases, stockReadings] = await Promise.all([
     clientIntel({ clientId: id }, ref),
     monthlySeries(13, { clientId: id }, ref),
     db.execute(sql`
@@ -42,7 +46,9 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
       where a.client_id = ${id}::uuid group by a.id, u.name, b.name order by a.date desc limit 10`),
     db.select().from(tasksTable).where(sql`${tasksTable.entityId} = ${id}::uuid and ${tasksTable.status} in ('TODO','IN_PROGRESS')`).orderBy(desc(tasksTable.createdAt)),
     db.execute(sql`select alias from client_aliases where client_id = ${id}::uuid order by alias`),
+    readingsForClient(id),
   ]);
+  const stockProducts = new Set(stockReadings.map((r) => r.productId)).size;
   const intel = intelList[0];
   if (!intel) notFound();
   const seg = SEGMENT_META[intel.segment];
@@ -55,8 +61,11 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
         title={<span className="flex items-center gap-2 flex-wrap">{client.name} {intel.highPotential && <span title="Fort potentiel">⭐</span>} <Badge tone={seg.tone}>{seg.label}</Badge></span>}
         subtitle={[client.code, client.type, client.city, client.sector ? `Secteur : ${client.sector}` : null, client.salesRep ? `Commercial : ${client.salesRep}` : null].filter(Boolean).join(" · ")}
         actions={<Link href={`/taches/nouvelle?entityType=client&entityId=${id}&title=${encodeURIComponent(rec.title + " — " + client.name)}`} className="btn-primary btn-sm">+ Tâche</Link>}
-      />
+      >
+        <Tabs current={tab === "stock" ? `/clients/${id}?tab=stock` : `/clients/${id}`} tabs={[{ href: `/clients/${id}`, label: "Vue d'ensemble" }, { href: `/clients/${id}?tab=stock`, label: "Stock en point de vente", count: stockProducts }]} />
+      </PageHeader>
 
+      {tab === "stock" ? <ClientStockTab clientId={id} clientName={client.name} sp={sp} /> : (<>
       {/* Recommandation */}
       <div className={`card card-pad mb-4 border-l-4`} style={{ borderLeftColor: rec.kind === "NONE" ? "#d6d6d1" : rec.kind === "REACTIVATION" ? "#dc2626" : rec.kind === "ANALYSE" ? "#ea580c" : rec.kind === "RELANCE" ? "#2563eb" : "#0f766e" }}>
         <div className="flex flex-wrap items-center gap-2 mb-1"><span className="label">Plan d&apos;action</span><Badge tone={REC_TONE[rec.kind]}>{rec.title}</Badge></div>
@@ -163,6 +172,7 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
           </Section>
         </div>
       </div>
+      </>)}
     </>
   );
 }
