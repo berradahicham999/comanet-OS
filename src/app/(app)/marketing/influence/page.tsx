@@ -1,12 +1,14 @@
 import Link from "next/link";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireAccess, brandFilter, hasFlag } from "@/lib/access";
+import { requireAccess, brandFilter, hasFlag, canDo } from "@/lib/access";
 import { getRefDate } from "@/lib/ref-date";
 import { listBrands } from "@/lib/users";
 import { resolvePeriod, PERIOD_OPTIONS, type PeriodParam } from "@/lib/periods";
 import { PageHeader, Card, Kpi, Badge, BrandDot, Section, Empty, Tabs, Progress } from "@/components/ui";
-import { fmtMAD, fmtNum, fmtPct, fmtDateShort } from "@/lib/format";
+import { fmtMAD, fmtNum, fmtPct, fmtDateShort, iso } from "@/lib/format";
+import { INFLUENCE_ERRORS, INFLUENCE_OK } from "@/lib/influence-shared";
+import { CollabForm, CollabRowActions, InfluencerDirectory, type FormInfluencer } from "@/components/influence-forms";
 import { COLLAB_STATUS, CAMPAIGN_STATUS } from "@/lib/marketing-shared";
 import { listCollaborations, collabKpis, scoreCollaborations, rankInfluencers, collabPipeline, influenceTotals, influenceAdvice } from "@/lib/influence";
 import { saveInfluencer, saveCollaboration, setCollaborationStatus, deleteCollaboration, saveCampaign } from "../actions";
@@ -16,10 +18,10 @@ export const metadata = { title: "Influence" };
 
 const ADVICE_TONE = { green: "green", orange: "orange", red: "red", blue: "blue" } as const;
 
-export default async function InfluencePage(props: { searchParams: Promise<{ brand?: string; period?: string; start?: string; end?: string; status?: string }> }) {
+export default async function InfluencePage(props: { searchParams: Promise<{ brand?: string; period?: string; start?: string; end?: string; status?: string; ok?: string; erreur?: string }> }) {
   await requireAccess("influence");
   const sp = await props.searchParams;
-  const [scopeBrands, seeCosts] = await Promise.all([brandFilter(), hasFlag("seeInternalCosts")]);
+  const [scopeBrands, seeCosts, canEdit, canDelete, canCreate] = await Promise.all([brandFilter(), hasFlag("seeInternalCosts"), canDo("influence", "edit"), canDo("influence", "validate"), canDo("influence", "create")]);
   const { ref } = await getRefDate();
   const period = resolvePeriod((sp.period as PeriodParam) || "last90", ref, { start: sp.start, end: sp.end });
   const brands = (await listBrands()).filter((b) => b.active && (scopeBrands === null || scopeBrands.includes(b.id)));
@@ -27,22 +29,25 @@ export default async function InfluencePage(props: { searchParams: Promise<{ bra
   const status = sp.status && sp.status in COLLAB_STATUS ? sp.status : null;
 
   const [rows, influencerRows, campaignRows, productRows] = await Promise.all([
-    listCollaborations({ start: period.start, end: period.end }, { brandId, status, brandIds: scopeBrands }),
-    db.execute(sql`select id, name, instagram, tiktok, followers, engagement_rate::float8 as engagement_rate, category, city, usual_rate::float8 as usual_rate, active from influencers order by active desc, name`),
-    db.execute(sql`select id, name, brand_id from campaigns where status in ('DRAFT','PLANNED','ACTIVE') order by name`),
+    listCollaborations({ start: period.start, end: period.end }, { brandId, brandIds: scopeBrands }),
+    db.execute(sql`select id, name, instagram, tiktok, followers, engagement_rate::float8 as engagement_rate, category, city, usual_rate::float8 as usual_rate, contact, notes, active from influencers order by active desc, name`),
+    db.execute(sql`select id, name, brand_id from campaigns where channel = 'INFLUENCE' and status in ('DRAFT','PLANNED','ACTIVE') order by name`),
     db.execute(sql`select id, name, brand_id from products where active order by name limit 600`),
   ]);
 
-  const influencerList = influencerRows.rows as { id: string; name: string; instagram: string | null; tiktok: string | null; followers: number | null; engagement_rate: number | null; category: string | null; city: string | null; usual_rate: number | null; active: boolean }[];
+  const influencerList = influencerRows.rows as FormInfluencer[];
   const meta = new Map(influencerList.map((i) => [i.id, { instagram: i.instagram, tiktok: i.tiktok, active: i.active, usualRate: i.usual_rate }]));
 
-  const scored = scoreCollaborations(rows.map(collabKpis));
+  // Le pipeline compte toutes les étapes ; le filtre de statut ne s'applique qu'ensuite.
+  const all = scoreCollaborations(rows.map(collabKpis));
+  const pipeline = collabPipeline(all);
+  const scored = status ? scoreCollaborations(all.filter((r) => r.status === status)) : all;
   const ranked = rankInfluencers(scored, meta);
   const totals = influenceTotals(scored);
-  const pipeline = collabPipeline(scored);
-  const advice = influenceAdvice(scored, ranked);
+  const advice = influenceAdvice(scored, ranked, iso(ref));
   const campaigns = campaignRows.rows as { id: string; name: string; brand_id: string }[];
-  const products = productRows.rows as { id: string; name: string; brand_id: string }[];
+  const products = productRows.rows as { id: string; name: string; brand_id: string | null }[];
+  const message = sp.ok ? { tone: "green", text: INFLUENCE_OK[sp.ok] ?? sp.ok } : sp.erreur ? { tone: "red", text: INFLUENCE_ERRORS[sp.erreur] ?? sp.erreur } : null;
 
   const qs = (patch: Record<string, string>) => {
     const p = new URLSearchParams();
@@ -53,6 +58,13 @@ export default async function InfluencePage(props: { searchParams: Promise<{ bra
     const s = p.toString();
     return s ? `/marketing/influence?${s}` : "/marketing/influence";
   };
+  /** Filtres courants, renvoyés aux actions pour revenir au même écran. */
+  const returnParams: Record<string, string> = {};
+  if (brandId) returnParams.brand = brandId;
+  if (period.key !== "last90") returnParams.period = period.key;
+  if (period.key === "custom") { if (sp.start) returnParams.start = sp.start; if (sp.end) returnParams.end = sp.end; }
+  if (status) returnParams.status = status;
+  const formProps = { action: saveCollaboration, brands, influencers: influencerList, campaigns, products, seeCosts, returnParams };
 
   return (
     <>
@@ -64,6 +76,7 @@ export default async function InfluencePage(props: { searchParams: Promise<{ bra
       >
         <form className="flex flex-wrap items-end gap-2 mb-3">
           {brandId && <input type="hidden" name="brand" value={brandId} />}
+          {status && <input type="hidden" name="status" value={status} />}
           <label className="block"><span className="label block mb-1">Période</span><select name="period" defaultValue={period.key} className="select h-9 w-44">{PERIOD_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}</select></label>
           {period.key === "custom" && (<><label className="block"><span className="label block mb-1">Du</span><input type="date" name="start" defaultValue={period.start} className="input h-9" /></label><label className="block"><span className="label block mb-1">Au</span><input type="date" name="end" defaultValue={sp.end ?? ""} className="input h-9" /></label></>)}
           <button className="btn-secondary btn-sm h-9" type="submit">Appliquer</button>
@@ -72,11 +85,13 @@ export default async function InfluencePage(props: { searchParams: Promise<{ bra
           <Kpi label="Investissement influence" value={seeCosts ? fmtMAD(totals.cost, { compact: true }) : "masqué"} sub={seeCosts ? "cachets + valeur produits" : "coûts internes non visibles sur ce compte"} />
           <Kpi label="Personnes touchées" value={totals.reach !== null ? fmtNum(totals.reach) : "—"} sub={totals.reach !== null ? `CPM ${totals.cpm !== null ? fmtMAD(totals.cpm) : "—"}` : "reach non saisi"} />
           <Kpi label="Engagement moyen" value={totals.engagement !== null ? fmtPct(totals.engagement, 2) : "—"} sub={totals.interactions !== null ? `${fmtNum(totals.interactions)} interactions` : "statistiques non saisies"} />
-          <Kpi label="CA attribué mesuré" value={totals.measuredRevenue ? fmtMAD(totals.measuredRevenue, { compact: true }) : "—"} sub={`${totals.measuredCollabs}/${totals.collabs} collaboration(s) mesurable(s)`} />
+          <Kpi label="CA attribué mesuré" value={totals.measuredCollabs ? fmtMAD(totals.measuredRevenue, { compact: true }) : "—"} sub={`${totals.measuredCollabs}/${totals.collabs} collaboration(s) mesurable(s)`} />
           <Kpi label="ROAS mesuré" value={totals.roas === null ? "—" : totals.roas.toFixed(2) + "×"} tone={totals.roas !== null && totals.roas < 1 ? "red" : totals.roas !== null && totals.roas >= 3 ? "green" : undefined} sub={totals.measuredCost > 0 ? `sur ${fmtMAD(totals.measuredCost, { compact: true })} traçables` : "aucune attribution"} />
         </div>
-        <Tabs current={brandId ? `/marketing/influence?brand=${brandId}` : "/marketing/influence"} tabs={[{ href: "/marketing/influence", label: "Toutes les marques" }, ...brands.map((b) => ({ href: `/marketing/influence?brand=${b.id}`, label: b.name }))]} />
+        <Tabs current={qs({})} tabs={[{ href: qs({ brand: "" }), label: "Toutes les marques" }, ...brands.map((b) => ({ href: qs({ brand: b.id }), label: b.name }))]} />
       </PageHeader>
+
+      {message && <div className={`mb-4 rounded-2xl px-4 py-3 text-[13px] font-medium ${message.tone === "green" ? "bg-green-soft border border-green/30 text-green" : "bg-red-soft border border-red/30 text-red"}`}>{message.text}</div>}
 
       {advice.length > 0 && (
         <Section title="Ce que dit la période">
@@ -123,7 +138,7 @@ export default async function InfluencePage(props: { searchParams: Promise<{ bra
                       <td className="num">{r.reach !== null ? fmtNum(r.reach) : "—"}</td>
                       <td className="num">{r.cpm !== null ? Math.round(r.cpm) : "—"}</td>
                       <td className="num">{r.engagement !== null ? r.engagement.toFixed(1) + " %" : "—"}</td>
-                      <td className="num">{r.measuredRevenue ? fmtMAD(r.measuredRevenue, { compact: true, suffix: false }) : "—"}</td>
+                      <td className="num">{r.measuredCost > 0 ? fmtMAD(r.measuredRevenue, { compact: true, suffix: false }) : "—"}</td>
                       <td className={`num ${r.roas !== null && r.roas >= 3 ? "text-green" : r.roas !== null && r.roas < 1 ? "text-red" : ""}`}>{r.roas !== null ? r.roas.toFixed(2) + "×" : "—"}</td>
                       <td className="num">{r.score === null ? <span className="text-faint">n/c</span> : <Badge tone={r.score >= 70 ? "green" : r.score >= 40 ? "yellow" : "red"}>{r.score}</Badge>}</td>
                     </tr>
@@ -139,7 +154,7 @@ export default async function InfluencePage(props: { searchParams: Promise<{ bra
         <Card>
           <div className="overflow-x-auto">
             <table className="tbl text-[12.5px]">
-              <thead><tr><th>Date</th><th>Influenceuse</th><th>Marque</th><th>Contenu</th><th className="num">Coût</th><th className="num">Reach</th><th className="num">Eng.</th><th className="num">CA mesuré</th><th className="num">Score</th><th>Statut</th><th></th></tr></thead>
+              <thead><tr><th>Date</th><th>Influenceuse</th><th>Marque</th><th>Contenu</th><th className="num">Coût</th><th className="num">Reach</th><th className="num">Eng.</th><th className="num">CA mesuré</th><th className="num">Score</th><th colSpan={2}>Statut</th></tr></thead>
               <tbody>
                 {scored.map((r) => (
                   <tr key={r.id}>
@@ -152,17 +167,12 @@ export default async function InfluencePage(props: { searchParams: Promise<{ bra
                     <td className="num">{r.engagement !== null ? r.engagement.toFixed(1) + " %" : "—"}</td>
                     <td className="num">{r.measured ? fmtMAD(r.attributed_revenue ?? 0, { suffix: false }) : <span className="text-faint" title="Aucun code promo ou lien tracké : impossible d'attribuer un CA à cette collaboration.">non mesurable</span>}</td>
                     <td className="num">{r.score === null ? <span className="text-faint">n/c</span> : r.score}</td>
-                    <td>
-                      <form action={setCollaborationStatus} className="flex items-center gap-1">
-                        <input type="hidden" name="id" value={r.id} />
-                        <select name="status" defaultValue={r.status} className="select h-7 text-[11.5px] w-32">{Object.entries(COLLAB_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select>
-                        <button className="text-[11px] text-accent" type="submit">OK</button>
-                      </form>
+                    <td colSpan={2}>
+                      <CollabRowActions row={r} label={`${r.influencer} · ${r.brand} · ${fmtDateShort(r.date)}`} canEdit={canEdit} canDelete={canDelete} statusAction={setCollaborationStatus} deleteAction={deleteCollaboration} {...formProps} />
                     </td>
-                    <td><form action={deleteCollaboration}><input type="hidden" name="id" value={r.id} /><button className="text-faint hover:text-red" type="submit" title="Supprimer">×</button></form></td>
                   </tr>
                 ))}
-                {scored.length === 0 && <tr><td colSpan={11} className="text-muted text-center py-4">Aucune collaboration sur cette période.</td></tr>}
+                {scored.length === 0 && <tr><td colSpan={10} className="text-muted text-center py-4">Aucune collaboration sur cette période.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -197,69 +207,14 @@ export default async function InfluencePage(props: { searchParams: Promise<{ bra
           </form>
         </Card>
 
-        <Card className="min-w-0" title="Ajouter / mettre à jour une collaboration">
-          <form action={saveCollaboration} className="grid sm:grid-cols-2 gap-2 text-[13px]">
-            <label className="block"><span className="label block mb-1">Influenceuse *</span>
-              <select name="influencerId" className="select h-9" required><option value="">— choisir —</option>{influencerList.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}</select>
-            </label>
-            <label className="block"><span className="label block mb-1">Marque *</span>
-              <select name="brandId" defaultValue={brandId ?? ""} className="select h-9" required><option value="">— choisir —</option>{brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>
-            </label>
-            <label className="block"><span className="label block mb-1">Date *</span><input type="date" name="date" className="input h-9" required /></label>
-            <label className="block"><span className="label block mb-1">Statut</span><select name="status" className="select h-9" defaultValue="CONFIRMEE">{Object.entries(COLLAB_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></label>
-            <label className="block"><span className="label block mb-1">Campagne</span><select name="campaignId" className="select h-9"><option value="">— aucune —</option>{campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-            <label className="block"><span className="label block mb-1">Produit poussé</span><select name="productId" className="select h-9"><option value="">— aucun —</option>{products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-            <div className="sm:col-span-2 grid grid-cols-3 gap-2">
-              <label className="block"><span className="label block mb-1">Reels</span><input name="reels" className="input h-9" placeholder="0" /></label>
-              <label className="block"><span className="label block mb-1">Stories</span><input name="stories" className="input h-9" placeholder="0" /></label>
-              <label className="block"><span className="label block mb-1">Posts</span><input name="posts" className="input h-9" placeholder="0" /></label>
-            </div>
-            {seeCosts && <label className="block"><span className="label block mb-1">Cachet (MAD)</span><input name="fee" className="input h-9" placeholder="0" /></label>}
-            <label className="block"><span className="label block mb-1">Valeur produits offerts</span><input name="productValue" className="input h-9" placeholder="0" /></label>
-            <div className="sm:col-span-2 border-t border-line pt-2 mt-1"><span className="label">Après publication</span></div>
-            <label className="block"><span className="label block mb-1">Reach</span><input name="reach" className="input h-9" /></label>
-            <label className="block"><span className="label block mb-1">Impressions</span><input name="impressions" className="input h-9" /></label>
-            <label className="block"><span className="label block mb-1">Likes</span><input name="likes" className="input h-9" /></label>
-            <label className="block"><span className="label block mb-1">Commentaires</span><input name="comments" className="input h-9" /></label>
-            <label className="block"><span className="label block mb-1">Partages</span><input name="shares" className="input h-9" /></label>
-            <label className="block"><span className="label block mb-1">Enregistrements</span><input name="saves" className="input h-9" /></label>
-            <label className="block"><span className="label block mb-1">Clics sur le lien</span><input name="linkClicks" className="input h-9" /></label>
-            <label className="block"><span className="label block mb-1">Code promo</span><input name="promoCode" className="input h-9" placeholder="Ex : SARAH15" /></label>
-            <label className="block"><span className="label block mb-1">Commandes avec le code</span><input name="conversions" className="input h-9" /></label>
-            <label className="block"><span className="label block mb-1">CA du code promo (MAD)</span><input name="attributedRevenue" className="input h-9" /></label>
-            <button className="btn-primary sm:col-span-2" type="submit">Enregistrer la collaboration</button>
-            <p className="text-[11.5px] text-faint sm:col-span-2">Le CA n&apos;est retenu comme attribué que si un code promo est renseigné avec son chiffre d&apos;affaires. Sans cela, la collaboration reste comparable sur le reach et l&apos;engagement uniquement.</p>
-          </form>
-        </Card>
+        {canCreate && (
+          <Card className="min-w-0" title="Nouvelle collaboration">
+            <CollabForm {...formProps} defaultBrandId={brandId} />
+          </Card>
+        )}
 
-        <Card className="min-w-0" title={`Répertoire influenceuses (${influencerList.length})`} action={<Link href="/imports?type=INFLUENCERS" className="btn-secondary btn-sm">Importer une liste</Link>}>
-          {influencerList.length > 0 && (
-            <div className="max-h-72 overflow-auto mb-3">
-              <table className="tbl text-[12.5px]">
-                <thead><tr><th>Nom</th><th>Réseaux</th><th className="num">Abonnés</th><th className="num">Tarif</th></tr></thead>
-                <tbody>{influencerList.map((i) => (
-                  <tr key={i.id} className={i.active ? "" : "opacity-50"}>
-                    <td>{i.name}<div className="text-[11px] text-faint">{[i.category, i.city].filter(Boolean).join(" · ")}</div></td>
-                    <td className="text-muted text-[11.5px]">{[i.instagram, i.tiktok].filter(Boolean).join(" / ") || "—"}</td>
-                    <td className="num">{i.followers ? fmtNum(i.followers) : "—"}</td>
-                    <td className="num">{i.usual_rate ? fmtMAD(i.usual_rate, { suffix: false }) : "—"}</td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
-          )}
-          <form action={saveInfluencer} className="grid sm:grid-cols-2 gap-2 text-[13px] border-t border-line pt-3">
-            <label className="block sm:col-span-2"><span className="label block mb-1">Nom *</span><input name="name" className="input h-9" required /></label>
-            <label className="block"><span className="label block mb-1">Instagram</span><input name="instagram" className="input h-9" placeholder="@compte" /></label>
-            <label className="block"><span className="label block mb-1">TikTok</span><input name="tiktok" className="input h-9" placeholder="@compte" /></label>
-            <label className="block"><span className="label block mb-1">Abonnés</span><input name="followers" className="input h-9" /></label>
-            <label className="block"><span className="label block mb-1">Taux d&apos;engagement (%)</span><input name="engagementRate" className="input h-9" /></label>
-            <label className="block"><span className="label block mb-1">Catégorie</span><input name="category" className="input h-9" placeholder="Beauté, lifestyle, médical…" /></label>
-            <label className="block"><span className="label block mb-1">Ville</span><input name="city" className="input h-9" placeholder="Casablanca" /></label>
-            <label className="block"><span className="label block mb-1">Tarif habituel (MAD)</span><input name="usualRate" className="input h-9" /></label>
-            <label className="block"><span className="label block mb-1">Contact</span><input name="contact" className="input h-9" placeholder="Téléphone / e-mail" /></label>
-            <button className="btn-secondary sm:col-span-2" type="submit">Ajouter au répertoire</button>
-          </form>
+        <Card className="min-w-0" title={`Répertoire influenceuses (${influencerList.length})`} action={canCreate ? <Link href="/imports?type=INFLUENCERS" className="btn-secondary btn-sm">Importer une liste</Link> : undefined}>
+          <InfluencerDirectory influencers={influencerList} action={saveInfluencer} canEdit={canEdit} canCreate={canCreate} returnParams={returnParams} />
         </Card>
       </div>
     </>

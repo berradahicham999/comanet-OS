@@ -57,6 +57,15 @@ describe("Score animatrice — une seule source de vérité", () => {
   });
 });
 
+describe("Score influence — un seul moteur", () => {
+  test("le score relatif (CPM / engagement / ROAS) n'est calculé que par `relativeScore`", () => {
+    const found = codeHits(/Math\.min\(\.\.\.cpms\)/, ["lib/influence.ts"]);
+    assert.deepEqual(found, [], `Second calcul du score influence dans : ${found.join(", ")}`);
+    const body = FILES.find((f) => f.path === "src/lib/influence.ts")!.code;
+    assert.equal(body.match(/Math\.min\(\.\.\.cpms\)/g)?.length, 1);
+  });
+});
+
 describe("Verdict Ads — un seul moteur, aucun seuil en dur", () => {
   test("`diagnose` n'est défini qu'une fois", () => {
     const found = hits(/export function diagnose\(/);
