@@ -9,7 +9,9 @@ import {
   influencers, collaborations, adCreatives, campaignAdLinks, adAccounts,
   type BudgetCategory,
 } from "@/db/schema";
-import { requirePermission, requireFlag } from "@/lib/access";
+import { requirePermission, requireFlag, brandInScope } from "@/lib/access";
+import { parseAmount } from "@/lib/influence-shared";
+import { COLLAB_STATUS } from "@/lib/marketing-shared";
 import { categoryFromLabel } from "@/lib/budget-categories";
 import { matchKeyFor, backfillLink, clearLink } from "@/lib/meta/links";
 import { syncAccount, syncAll } from "@/lib/meta/sync";
@@ -130,67 +132,124 @@ export async function setCampaignStatus(formData: FormData) {
 
 /* ------------------------------- Influence -------------------------------- */
 
+/** Retour vers la page Influence avec un message (`ok` ou `erreur`), en conservant les filtres. */
+function backToInfluence(formData: FormData, params: Record<string, string>): never {
+  const q = new URLSearchParams();
+  // Page détail d'une influenceuse : `return_path` ne peut viser qu'une page du module.
+  const path = str(formData, "return_path");
+  const base = path && /^\/marketing\/influence\/[0-9a-f-]{36}$/i.test(path) ? path : "/marketing/influence";
+  for (const k of ["brand", "period", "start", "end", "status"]) { const v = str(formData, `return_${k}`); if (v) q.set(k, v); }
+  for (const [k, v] of Object.entries(params)) q.set(k, v);
+  redirect(`${base}?${q.toString()}`);
+}
+
+/** Montant saisi : `null` si vide, refus (clé `nombre`) s'il est illisible. */
+function amount(fd: FormData, k: string, formData: FormData): number | null {
+  const v = parseAmount(str(fd, k));
+  if (v !== null && (Number.isNaN(v) || v < 0)) backToInfluence(formData, { erreur: "nombre" });
+  return v;
+}
+
+/** La collaboration existe-t-elle dans le périmètre de marques de la personne ? */
+async function collaborationInScope(id: string): Promise<{ id: string; brandId: string } | null> {
+  const [row] = await db.select({ id: collaborations.id, brandId: collaborations.brandId }).from(collaborations).where(eq(collaborations.id, id));
+  if (!row) return null;
+  return (await brandInScope(row.brandId)) ? row : null;
+}
+
 export async function saveInfluencer(formData: FormData) {
-  await requirePermission("influence", "create");
-  const id = str(formData, "id"); const name = str(formData, "name");
-  if (!name) return;
+  const id = str(formData, "id");
+  await requirePermission("influence", id ? "edit" : "create");
+  const name = str(formData, "name");
+  if (!name) backToInfluence(formData, { erreur: "nom" });
+  const followers = amount(formData, "followers", formData);
+  const engagementRate = amount(formData, "engagementRate", formData);
+  const usualRate = amount(formData, "usualRate", formData);
   const values = {
     name,
     instagram: str(formData, "instagram"), tiktok: str(formData, "tiktok"),
-    followers: num(formData, "followers") !== null ? Math.round(num(formData, "followers")!) : null,
-    engagementRate: num(formData, "engagementRate") !== null ? num(formData, "engagementRate")!.toFixed(2) : null,
+    followers: followers !== null ? Math.round(followers) : null,
+    engagementRate: engagementRate !== null ? engagementRate.toFixed(2) : null,
     audience: str(formData, "audience"), city: str(formData, "city"), category: str(formData, "category"),
-    usualRate: num(formData, "usualRate") !== null ? num(formData, "usualRate")!.toFixed(2) : null,
+    usualRate: usualRate !== null ? usualRate.toFixed(2) : null,
     contact: str(formData, "contact"), notes: str(formData, "notes"),
     active: formData.get("active") !== "off",
   };
+  // Le nom est unique (insensible à la casse) : un doublon est signalé, jamais ignoré en silence.
+  const [dup] = await db.execute(sql`select id from influencers where lower(name) = lower(${name}) ${id ? sql`and id <> ${id}::uuid` : sql``} limit 1`).then((r) => r.rows as { id: string }[]);
+  if (dup) backToInfluence(formData, { erreur: "doublon" });
   if (id) await db.update(influencers).set(values).where(eq(influencers.id, id));
-  else await db.insert(influencers).values(values).onConflictDoNothing();
+  else await db.insert(influencers).values(values);
   revalidatePath("/marketing/influence");
+  backToInfluence(formData, { ok: "fiche" });
 }
 
 export async function saveCollaboration(formData: FormData) {
-  await requirePermission("influence", "create");
   const id = str(formData, "id");
+  await requirePermission("influence", id ? "edit" : "create");
   const influencerId = str(formData, "influencerId"); const brandId = str(formData, "brandId"); const date = str(formData, "date");
-  if (!influencerId || !brandId || !date) return;
-  const int = (k: string) => { const v = num(formData, k); return v === null ? null : Math.round(v); };
-  const values = {
-    influencerId, brandId, date,
-    productId: str(formData, "productId"), campaignId: str(formData, "campaignId"),
+  if (!influencerId) backToInfluence(formData, { erreur: "influenceuse" });
+  if (!brandId || !(await brandInScope(brandId))) backToInfluence(formData, { erreur: "marque" });
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) backToInfluence(formData, { erreur: "date" });
+  const status = str(formData, "status") ?? "PROSPECT";
+  if (!(status in COLLAB_STATUS)) backToInfluence(formData, { erreur: "statut" });
+  if (id && !(await collaborationInScope(id))) backToInfluence(formData, { erreur: "introuvable" });
+
+  // Campagne et produit doivent appartenir à la marque de la collaboration.
+  const campaignId = str(formData, "campaignId"); const productId = str(formData, "productId");
+  if (campaignId) {
+    const [c] = await db.select({ brandId: campaigns.brandId }).from(campaigns).where(eq(campaigns.id, campaignId));
+    if (!c || c.brandId !== brandId) backToInfluence(formData, { erreur: "campagne" });
+  }
+  if (productId) {
+    const [p] = await db.execute(sql`select brand_id from products where id = ${productId}::uuid`).then((r) => r.rows as { brand_id: string | null }[]);
+    if (!p || (p.brand_id && p.brand_id !== brandId)) backToInfluence(formData, { erreur: "produit" });
+  }
+
+  const int = (k: string) => { const v = amount(formData, k, formData); return v === null ? null : Math.round(v); };
+  const values: Partial<typeof collaborations.$inferInsert> = {
+    influencerId, brandId, date, productId, campaignId,
     contentType: str(formData, "contentType"),
     stories: int("stories") ?? 0, reels: int("reels") ?? 0, posts: int("posts") ?? 0,
-    fee: (num(formData, "fee") ?? 0).toFixed(2),
-    productValue: (num(formData, "productValue") ?? 0).toFixed(2),
-    status: str(formData, "status") ?? "PROSPECT",
+    productValue: (amount(formData, "productValue", formData) ?? 0).toFixed(2),
+    status,
     reach: int("reach"), impressions: int("impressions"), views: int("views"),
     likes: int("likes"), comments: int("comments"), shares: int("shares"), saves: int("saves"),
     linkClicks: int("linkClicks"), promoCode: str(formData, "promoCode"), conversions: int("conversions"),
-    attributedRevenue: num(formData, "attributedRevenue") !== null ? num(formData, "attributedRevenue")!.toFixed(2) : null,
+    attributedRevenue: (() => { const v = amount(formData, "attributedRevenue", formData); return v !== null ? v.toFixed(2) : null; })(),
     notes: str(formData, "notes"),
     updatedAt: new Date(),
   };
+  // Le cachet n'est envoyé que par les comptes qui voient les coûts internes : son absence
+  // du formulaire ne remet jamais un cachet existant à zéro.
+  if (formData.has("fee")) values.fee = (amount(formData, "fee", formData) ?? 0).toFixed(2);
   if (id) await db.update(collaborations).set(values).where(eq(collaborations.id, id));
-  else await db.insert(collaborations).values(values);
+  else await db.insert(collaborations).values(values as typeof collaborations.$inferInsert);
   await refreshAfterWrite(["COLLABORATION"]);
   revalidatePath("/marketing/influence"); revalidatePath("/marketing");
+  backToInfluence(formData, { ok: id ? "collab_maj" : "collab" });
 }
 
 export async function setCollaborationStatus(formData: FormData) {
   await requirePermission("influence", "edit");
   const id = str(formData, "id"); const status = str(formData, "status");
   if (!id || !status) return;
+  if (!(status in COLLAB_STATUS)) backToInfluence(formData, { erreur: "statut" });
+  if (!(await collaborationInScope(id))) backToInfluence(formData, { erreur: "introuvable" });
   await db.update(collaborations).set({ status, updatedAt: new Date() }).where(eq(collaborations.id, id));
   await refreshAfterWrite(["COLLABORATION"]);
   revalidatePath("/marketing/influence");
+  backToInfluence(formData, { ok: "statut" });
 }
 
 export async function deleteCollaboration(formData: FormData) {
   await requirePermission("influence", "validate");
   const id = str(formData, "id"); if (!id) return;
+  if (!(await collaborationInScope(id))) backToInfluence(formData, { erreur: "introuvable" });
   await db.delete(collaborations).where(eq(collaborations.id, id));
   await refreshAfterWrite(["COLLABORATION"]);
   revalidatePath("/marketing/influence");
+  backToInfluence(formData, { ok: "suppr" });
 }
 
 /* ------------------------------ Créatives Ads ------------------------------ */

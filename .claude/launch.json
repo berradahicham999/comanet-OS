@@ -4,14 +4,32 @@
     {
       "name": "comanet-os-dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 3000
     },
     {
       "name": "comanet-os-dev-3010",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "-p", "3010"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "-p",
+        "3010"
+      ],
       "port": 3010
+    },
+    {
+      "name": "stock-clients-worktree",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd '/private/tmp/claude-501/-Users-hichamberrada-Downloads-comanet-os/2f59b3a9-2e38-4c98-9f1b-e83959454681/scratchpad/wt-stock' && npx next dev --webpack -p 3020"
+      ],
+      "port": 3020
     }
   ]
 }
