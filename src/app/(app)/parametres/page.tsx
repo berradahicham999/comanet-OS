@@ -59,6 +59,14 @@ export default async function ParametresPage(props: { searchParams: Promise<{ ta
               <Field name="defaultMarginPct" label="Marge par défaut (%)" value={s.defaultMarginPct} hint="Si coût de revient inconnu" />
             </div>
           </Card>
+          <Card title="Stock chez le client">
+            <div className="grid grid-cols-2 gap-2">
+              <Field name="cs_freshDays" label="🟢 Relevé récent si < (jours)" value={s.clientStock.freshDays} hint="Entre les deux seuils : 🟠 à vérifier" />
+              <Field name="cs_staleDays" label="🔴 À refaire à partir de (jours)" value={s.clientStock.staleDays} hint="Déclenche « Relevé de stock à faire »" />
+              <Field name="cs_coverageWindowDays" label="Fenêtre sell-in / sell-out (jours)" value={s.clientStock.coverageWindowDays} hint="Couverture estimée = stock relevé ÷ rythme de sell-in" />
+              <Field name="cs_stockoutSelloutDays" label="Rupture : sell-out sur (jours)" value={s.clientStock.stockoutSelloutDays} hint="Stock à 0 + ventes en animation = réassort à proposer" />
+            </div>
+          </Card>
           <Card title="Clients">
             <div className="grid grid-cols-2 gap-2">
               <Field name="clientInactiveDays" label="Inactif après (jours)" value={s.clientInactiveDays} />

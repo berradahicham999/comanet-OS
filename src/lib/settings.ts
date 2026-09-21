@@ -82,6 +82,31 @@ export type ComanetSettings = {
   ai: AiSettings;
   /** Agent marketing : seuils de lecture d'un produit (contribution, marge faible, volume minimal) et nombre de décisions. */
   marketingIntel: MarketingIntelSettings;
+  /** Stock chez le client : ancienneté d'un relevé, fenêtres de croisement sell-in / sell-out. */
+  clientStock: ClientStockSettings;
+};
+
+/**
+ * Seuils du stock chez le client (`src/lib/client-stock-shared.ts`). Aucun de ces nombres
+ * n'est écrit dans le code : l'ancienneté d'un relevé et la fenêtre de couverture estimée
+ * viennent d'ici.
+ */
+export type ClientStockSettings = {
+  /** Relevé « frais » (vert) s'il a strictement moins de N jours. */
+  freshDays: number;
+  /** Relevé « à refaire » (rouge) à partir de N jours ; entre les deux, orange. */
+  staleDays: number;
+  /** Jours de sell-in Sage et de sell-out animation croisés avec le dernier relevé. */
+  coverageWindowDays: number;
+  /** Fenêtre (jours) de sell-out animation qui qualifie un client « actif » sur un produit en rupture. */
+  stockoutSelloutDays: number;
+};
+
+export const DEFAULT_CLIENT_STOCK: ClientStockSettings = {
+  freshDays: 15,
+  staleDays: 45,
+  coverageWindowDays: 90,
+  stockoutSelloutDays: 30,
 };
 
 /**
@@ -368,6 +393,7 @@ export const DEFAULT_SETTINGS: ComanetSettings = {
   analytics: DEFAULT_ANALYTICS_SETTINGS,
   ai: DEFAULT_AI_SETTINGS,
   marketingIntel: DEFAULT_MARKETING_INTEL,
+  clientStock: DEFAULT_CLIENT_STOCK,
 };
 
 export const SETTINGS_KEY = "comanet.rules";
@@ -391,6 +417,7 @@ export function mergeSettings(stored: Partial<ComanetSettings> | null | undefine
     analytics: mergeAnalytics(stored.analytics),
     ai: { ...DEFAULT_AI_SETTINGS, ...(stored.ai ?? {}) },
     marketingIntel: { ...DEFAULT_MARKETING_INTEL, ...(stored.marketingIntel ?? {}) },
+    clientStock: { ...DEFAULT_CLIENT_STOCK, ...(stored.clientStock ?? {}) },
   };
 }
 

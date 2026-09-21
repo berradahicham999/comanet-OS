@@ -148,6 +148,13 @@
       "when": 1789800000000,
       "tag": "0020_import_influencers",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1789800100000,
+      "tag": "0021_client_stock_readings",
+      "breakpoints": true
     }
   ]
 }

@@ -27,6 +27,12 @@ export async function updateSettings(formData: FormData) {
     reorderGraceDays: num(formData, "reorderGraceDays", cur.reorderGraceDays),
     defaultMarginPct: num(formData, "defaultMarginPct", cur.defaultMarginPct),
     stockCriticalRevenue: num(formData, "stockCriticalRevenue", cur.stockCriticalRevenue),
+    clientStock: {
+      freshDays: Math.max(1, Math.round(num(formData, "cs_freshDays", cur.clientStock.freshDays))),
+      staleDays: Math.max(2, Math.round(num(formData, "cs_staleDays", cur.clientStock.staleDays))),
+      coverageWindowDays: Math.max(7, Math.round(num(formData, "cs_coverageWindowDays", cur.clientStock.coverageWindowDays))),
+      stockoutSelloutDays: Math.max(7, Math.round(num(formData, "cs_stockoutSelloutDays", cur.clientStock.stockoutSelloutDays))),
+    },
     marketingIntel: {
       starContributionPct: num(formData, "mi_starContributionPct", cur.marketingIntel.starContributionPct),
       minPeriodRevenueMad: num(formData, "mi_minPeriodRevenueMad", cur.marketingIntel.minPeriodRevenueMad),

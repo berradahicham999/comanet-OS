@@ -88,6 +88,7 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Historique Meta 2023 → (rattrapage reprenable) | `src/lib/meta/backfill.ts` | `backfillAccount()`, `backfillAll()` |
 | Diagnostic réel de la connexion Meta | `src/lib/meta/doctor.ts` | `runDoctor()`, `explainMetaError()` |
 | Score animatrice | `src/lib/animations.ts` | `animatriceScores()` — source unique |
+| Stock chez le client (dernier relevé, ancienneté, écart, couverture estimée, droits par canal) | `src/lib/client-stock.ts` + `client-stock-shared.ts` | `recordReadings()` (seule écriture), `latestByProduct()`, `agingOf()`, `deltaOf()`, `estimatedCoverageWeeks()`, `canRecordReading()` |
 | Clé de commande, commercial, canal | `src/lib/analytics.ts` | `ORDER_KEY`, `SALES_REP`, `SALES_CHANNEL` |
 | Ville, clé d'animation | `src/lib/animations-shared.ts` | `normalizeCity()`, `cityKey()`, `animationKey()` |
 | Droits d'accès, portée, interrupteurs | `src/lib/permissions.ts` + `src/lib/access.ts` | `requireAccess()`, `requirePermission()`, `requireAdmin()`, `requireFlag()`, `canDo()`, `isOwnOnly()`, `brandFilter()`, `clientFilter()`, `hasFlag()` |
@@ -116,6 +117,12 @@ pour son prévu (devis puis facture remplacent) : le reflet vit dans `marketing_
 ailleurs. Le matériel sorti est une dépense au coût du moment. L'impact ventes (sell-in HT avant / pendant / après sur les
 clients et produits rattachés) est une corrélation observée ; une fenêtre « après » incomplète affiche « pas encore
 comparable ». Les fichiers réutilisent `content_assets` (polymorphe : contenu, activation, article d'inventaire).
+
+**Stock chez le client** (`docs/guide-stock-clients.md`). Le point de vente EST le client. Une seule table
+`client_stock_readings`, une ligne par relevé (photo datée, jamais d'écrasement), alimentée par deux canaux :
+l'animatrice depuis la saisie terrain (champ « rayon », `ANIMATION`, `animation_id`) et le commercial depuis la fiche
+client, onglet « Stock en point de vente » (`TOURNEE_COMMERCIALE`). Stock actuel = dernier relevé. Seuils d'ancienneté
+et fenêtres dans `settings.clientStock`. La couverture est une estimation (stock ÷ rythme de sell-in), jamais une mesure.
 
 **Ads Command Center** (`docs/ads-command-center.md`). `/marketing/ads` est UNE page : santé, snapshot, Action Center (3 à 5
 décisions avec WHY / DATA / ACTION / CONFIANCE, « ne rien faire » compris), où mettre l'argent, winners et problèmes,

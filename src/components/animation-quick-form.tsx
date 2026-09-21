@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { X, ChevronDown } from "lucide-react";
 import { normKey } from "@/lib/import/normalize";
 
@@ -21,6 +21,9 @@ export type QuickProduct = { id: string; name: string; brandId: string | null; b
 export type QuickClient = { id: string; name: string; city: string | null };
 
 type Row = { productId: string; name: string; qty: string; stock: string };
+type LastStock = Record<string, { quantity: number; readAt: string }>;
+
+const shortDate = (isoDate: string) => `${isoDate.slice(8, 10)}/${isoDate.slice(5, 7)}`;
 
 export function AnimationQuickForm({
   action, clients, catalog, defaultClientId, today, id,
@@ -39,6 +42,24 @@ export function AnimationQuickForm({
   const [clientId, setClientId] = useState(defaultClientId ?? "");
   const [rows, setRows] = useState<Row[]>([]);
   const [showMore, setShowMore] = useState(false);
+  /** Dernier relevé de stock connu par produit chez le point de vente choisi (pré-remplit « rayon »). */
+  const [lastByClient, setLastByClient] = useState<{ clientId: string; data: LastStock } | null>(null);
+  const lastStock: LastStock = lastByClient?.clientId === clientId ? lastByClient.data : {};
+
+  useEffect(() => {
+    if (!clientId) return;
+    let cancelled = false;
+    fetch(`/api/client-stock/${clientId}`)
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((data: LastStock) => {
+        if (cancelled) return;
+        setLastByClient({ clientId, data });
+        // Les lignes déjà ajoutées sans valeur de rayon reçoivent le dernier relevé connu.
+        setRows((rs) => rs.map((r) => (r.stock === "" && data[r.productId] ? { ...r, stock: String(data[r.productId].quantity) } : r)));
+      })
+      .catch(() => { if (!cancelled) setLastByClient({ clientId, data: {} }); });
+    return () => { cancelled = true; };
+  }, [clientId]);
 
   const usedIds = useMemo(() => new Set(rows.map((r) => r.productId)), [rows]);
   /** Le reste du catalogue, groupé par marque — plus rapide à parcourir qu'une recherche
@@ -66,7 +87,7 @@ export function AnimationQuickForm({
     setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   }
   function addProduct(p: QuickProduct) {
-    setRows((rs) => [...rs, { productId: p.id, name: p.name, qty: "", stock: "" }]);
+    setRows((rs) => [...rs, { productId: p.id, name: p.name, qty: "", stock: lastStock[p.id] ? String(lastStock[p.id].quantity) : "" }]);
   }
   function removeRow(i: number) {
     setRows((rs) => rs.filter((_, j) => j !== i));
@@ -124,7 +145,10 @@ export function AnimationQuickForm({
         <div className="space-y-1.5">
           {rows.map((r, i) => (
             <div key={r.productId} className="grid grid-cols-[1fr_76px_76px_28px] gap-1.5 items-center">
-              <div className="text-[13px] truncate py-2">{r.name}</div>
+              <div className="min-w-0 py-1.5">
+                <div className="text-[13px] truncate">{r.name}</div>
+                {lastStock[r.productId] && <div className="text-[10px] text-faint truncate">relevé {lastStock[r.productId].quantity} u. le {shortDate(lastStock[r.productId].readAt)}</div>}
+              </div>
               <input
                 name={`qty_${i}`} value={r.qty} onChange={(e) => patchRow(i, { qty: e.target.value })}
                 inputMode="numeric" placeholder="0" aria-label={`Vendu — ${r.name}`}
@@ -162,7 +186,7 @@ export function AnimationQuickForm({
             ))}
           </select>
         </div>
-        <div className="text-[11px] text-faint mt-1.5">Vendu = unités vendues pendant l&apos;animation · Rayon (facultatif) = ce qu&apos;il reste en stock</div>
+        <div className="text-[11px] text-faint mt-1.5">Vendu = unités vendues pendant l&apos;animation · Rayon (facultatif) = ce qu&apos;il reste en stock chez le point de vente, pré-rempli avec le dernier relevé : corrigez-le si ça a changé.</div>
       </div>
 
       <div>
