@@ -129,9 +129,9 @@ function ProductRow({ p }: { p: ClientStockProduct }) {
     <>
       <tr>
         <td>
+          <Link href={`/produits/${p.productId}`} className="font-medium hover:underline">{p.name}</Link>
           <details className="group">
             <summary className="cursor-pointer list-none">
-              <Link href={`/produits/${p.productId}`} className="font-medium hover:underline" onClick={(e) => e.stopPropagation()}>{p.name}</Link>
               <div className="text-[11px] text-muted">{p.brandName ?? "—"} · {p.history.length} relevé{p.history.length > 1 ? "s" : ""} <span className="text-accent group-open:hidden">▸ historique</span><span className="text-accent hidden group-open:inline">▾ replier</span></div>
             </summary>
             <History history={p.history} />
