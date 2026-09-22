@@ -6,6 +6,7 @@ import {
   FLAG_KEYS, FLAG_LABELS, MODULE_GROUPS, MODULE_HINTS, MODULE_LABELS, SCOPE_HINTS, SCOPE_KEYS, SCOPE_LABELS, VALIDATE_HINTS,
   type FlagKey, type ModuleKey, type ScopeKey,
 } from "@/lib/access-shared";
+import { cityKey } from "@/lib/animations-shared";
 import {
   ACTIONS, ACTION_LABELS, mergeFlags, mergeMatrix, normalizeMatrix, widestScope,
   type AccessConfig, type FlagSet, type PermissionAction, type PermissionSet,
@@ -20,14 +21,18 @@ export type TemplateOption = { id: string; name: string; description: string | n
  * s'appliquent en cumul, jamais en écrasement.
  *
  * Le composant n'envoie rien : il rend des champs nommés (`p_<module>_<action>`,
- * `scope`, `f_<flag>`, `brand_<id>`, `client_<id>`, `templates`) lus par la server
- * action du formulaire qui l'entoure.
+ * `scope`, `f_<flag>`, `brand_<id>`, `all_brands`, `city_scope`, `client_<id>`, `templates`)
+ * lus par la server action du formulaire qui l'entoure.
  */
-export function PermissionMatrix({ initial, templates, brands, clients, showAssignments = true, showScope = true, showFlags = true, lockAdministration }: {
+export function PermissionMatrix({ initial, templates, brands, clients, cities: cityOptions, userCity, showAssignments = true, showScope = true, showFlags = true, lockAdministration }: {
   initial: AccessConfig;
   templates: TemplateOption[];
   brands?: { id: string; name: string; active: boolean }[];
   clients?: { id: string; name: string; city: string | null }[];
+  /** Villes des clients actifs (variantes regroupées), avec leur nombre de clients. */
+  cities?: { city: string; clients: number }[];
+  /** Ville renseignée sur la fiche : proposée en un clic. */
+  userCity?: string | null;
   showAssignments?: boolean;
   showScope?: boolean;
   showFlags?: boolean;
@@ -39,6 +44,8 @@ export function PermissionMatrix({ initial, templates, brands, clients, showAssi
   const [flags, setFlags] = useState<FlagSet>(initial.flags);
   const [brandIds, setBrandIds] = useState<Set<string>>(() => new Set(initial.brandIds));
   const [clientIds, setClientIds] = useState<Set<string>>(() => new Set(initial.clientIds));
+  const [allBrands, setAllBrands] = useState(initial.allBrands);
+  const [cities, setCities] = useState<string[]>(initial.cities);
   const [applied, setApplied] = useState<string[]>([]);
   const [clientQuery, setClientQuery] = useState("");
 
@@ -78,6 +85,15 @@ export function PermissionMatrix({ initial, templates, brands, clients, showAssi
     if (!q) return picked.length ? picked : list.slice(0, 30);
     return list.filter((c) => c.name.toLowerCase().includes(q) || (c.city ?? "").toLowerCase().includes(q)).slice(0, 40);
   }, [clientQuery, clients, clientIds]);
+
+  const cityKeys = useMemo(() => new Set(cities.map(cityKey)), [cities]);
+  const cityClientCount = useMemo(() => (clients ?? []).filter((c) => cityKeys.has(cityKey(c.city))).length, [clients, cityKeys]);
+  const extraClients = useMemo(() => [...clientIds].filter((id) => !cityKeys.has(cityKey((clients ?? []).find((c) => c.id === id)?.city))).length, [clientIds, clients, cityKeys]);
+  const toggleCity = (city: string) =>
+    setCities((prev) => (prev.some((c) => cityKey(c) === cityKey(city)) ? prev.filter((c) => cityKey(c) !== cityKey(city)) : [...prev, city]));
+  const suggestedCity = userCity && cityKey(userCity) && !cityKeys.has(cityKey(userCity))
+    ? (cityOptions ?? []).find((o) => cityKey(o.city) === cityKey(userCity))?.city ?? userCity
+    : null;
 
   const adminLocked = lockAdministration && perms.administration.validate;
 
@@ -138,21 +154,53 @@ export function PermissionMatrix({ initial, templates, brands, clients, showAssi
 
       {/* Assignations */}
       {showAssignments && scope !== "ALL" && (
+        <div className="space-y-4">
+        <div>
+          <div className="label mb-1.5">
+            Villes <span className="text-faint font-normal normal-case tracking-normal">— tous les clients de la ville, y compris ceux importés plus tard</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {suggestedCity && (
+              <button type="button" onClick={() => toggleCity(suggestedCity)} className="btn-secondary btn-sm border-accent text-accent">+ Sa ville : {suggestedCity}</button>
+            )}
+            {(cityOptions ?? []).map((o) => {
+              const on = cityKeys.has(cityKey(o.city));
+              return (
+                <button key={o.city} type="button" onClick={() => toggleCity(o.city)} aria-pressed={on} className={clsx("btn-sm", on ? "btn-primary" : "btn-secondary")}>
+                  {on && "✓ "}{o.city} <span className={clsx("text-[11px]", on ? "opacity-80" : "text-muted")}>{o.clients}</span>
+                </button>
+              );
+            })}
+            {(cityOptions ?? []).length === 0 && <div className="text-[12px] text-faint">Aucun client avec une ville renseignée.</div>}
+          </div>
+          {cities.length > 0 && (
+            <div className="text-[12px] text-muted mt-1.5">
+              {cityClientCount} client{cityClientCount > 1 ? "s" : ""} actif{cityClientCount > 1 ? "s" : ""} aujourd&apos;hui dans {cities.length > 1 ? "ces villes" : "cette ville"}
+              {extraClients > 0 && <> · + {extraClients} client{extraClients > 1 ? "s" : ""} coché{extraClients > 1 ? "s" : ""} un à un ailleurs</>}
+            </div>
+          )}
+        </div>
         <div className="grid lg:grid-cols-2 gap-4">
           <div>
-            <div className="label mb-1.5">Marques assignées <span className="text-faint font-normal normal-case tracking-normal">({brandIds.size})</span></div>
-            <div className="card px-3 py-2 max-h-56 overflow-auto space-y-1">
+            <div className="label mb-1.5">Marques assignées <span className="text-faint font-normal normal-case tracking-normal">({allBrands ? "toutes" : brandIds.size})</span></div>
+            <label className={clsx("card px-3 py-2 mb-2 flex items-center gap-2 text-[13px] cursor-pointer", allBrands && "border-accent ring-1 ring-accent/30")}>
+              <input type="checkbox" name="all_brands" checked={allBrands} onChange={() => setAllBrands((v) => !v)} />
+              <span><span className="font-medium">Toutes les marques</span> <span className="text-[11.5px] text-muted">— y compris celles ajoutées plus tard</span></span>
+            </label>
+            <div className={clsx("card px-3 py-2 max-h-56 overflow-auto space-y-1", allBrands && "opacity-50")}>
               {(brands ?? []).map((b) => (
                 <label key={b.id} className="flex items-center gap-2 text-[13px]">
-                  <input type="checkbox" name={`brand_${b.id}`} checked={brandIds.has(b.id)} onChange={() => setBrandIds((prev) => { const n = new Set(prev); if (n.has(b.id)) n.delete(b.id); else n.add(b.id); return n; })} />
+                  <input type="checkbox" name={`brand_${b.id}`} disabled={allBrands} checked={allBrands || brandIds.has(b.id)} onChange={() => setBrandIds((prev) => { const n = new Set(prev); if (n.has(b.id)) n.delete(b.id); else n.add(b.id); return n; })} />
                   <span className={clsx(!b.active && "text-muted")}>{b.name}{!b.active && " (inactive)"}</span>
                 </label>
               ))}
               {(brands ?? []).length === 0 && <div className="text-[12px] text-faint">Aucune marque.</div>}
             </div>
+            {/* Cases désactivées : la sélection individuelle reste conservée pour le jour où « toutes » est décoché. */}
+            {allBrands && [...brandIds].map((id) => <input key={id} type="hidden" name={`brand_${id}`} value="1" />)}
           </div>
           <div>
-            <div className="label mb-1.5">Clients assignés <span className="text-faint font-normal normal-case tracking-normal">({clientIds.size})</span></div>
+            <div className="label mb-1.5">Clients assignés un à un <span className="text-faint font-normal normal-case tracking-normal">({clientIds.size}{cities.length > 0 && ", en plus des villes"})</span></div>
             <input value={clientQuery} onChange={(e) => setClientQuery(e.target.value)} placeholder="Rechercher un client ou une ville…" className="input h-9 mb-2" />
             <div className="card px-3 py-2 max-h-56 overflow-auto space-y-1">
               {filteredClients.map((c) => (
@@ -168,7 +216,10 @@ export function PermissionMatrix({ initial, templates, brands, clients, showAssi
             {[...clientIds].map((id) => <input key={id} type="hidden" name={`client_${id}`} value="1" />)}
           </div>
         </div>
+        </div>
       )}
+      {showAssignments && cities.map((c) => <input key={c} type="hidden" name="city_scope" value={c} />)}
+      {showAssignments && scope === "ALL" && allBrands && <input type="hidden" name="all_brands" value="on" />}
       {showAssignments && scope === "ALL" && [...brandIds].map((id) => <input key={id} type="hidden" name={`brand_${id}`} value="1" />)}
       {showAssignments && scope === "ALL" && [...clientIds].map((id) => <input key={id} type="hidden" name={`client_${id}`} value="1" />)}
 

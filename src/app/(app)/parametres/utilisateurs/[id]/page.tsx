@@ -60,7 +60,7 @@ export default async function UserAdminPage(props: { params: Promise<{ id: strin
             ) : (
               <form action={saveConfigAction} className="space-y-4">
                 <input type="hidden" name="id" value={id} />
-                <PermissionMatrix initial={cfg} templates={templates} brands={options.brands} clients={options.clients} lockAdministration={lastAdmin} />
+                <PermissionMatrix initial={cfg} templates={templates} brands={options.brands} clients={options.clients} cities={options.cities} userCity={cfg.user.city} lockAdministration={lastAdmin} />
                 <div className="flex flex-wrap gap-2 justify-end items-center">
                   <span className="text-[12px] text-muted mr-auto">Application immédiate : la personne verra ses nouveaux droits à sa prochaine action.</span>
                   <button className="btn-primary" type="submit">Enregistrer les droits</button>

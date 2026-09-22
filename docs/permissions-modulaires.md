@@ -204,3 +204,21 @@ dashboard médical. Le mode hors ligne est un lot séparé (décision 9).
 ### Tests
 `tests/permissions.test.ts` : dépendances, cumul, rôle legacy, lecture du formulaire, les cinq cas
 d'acceptation, et l'interdiction de toute décision d'accès sur `user.role`.
+
+## 8. Portée par ville et « toutes les marques » (22 septembre 2026, migration `0022_portee_ville`)
+
+Demande d'Hicham : assigner les clients aux animatrices un par un est trop lourd ; chaque animatrice doit
+couvrir **toute la base clients de sa ville** et **toutes les marques**.
+
+- `user_scope.all_brands` : toutes les marques, y compris celles créées plus tard. La liste
+  `user_brand_assignments` est conservée (elle revient si l'on décoche).
+- `user_city_assignments (user_id, city)` : tous les clients de ces villes entrent dans la portée,
+  **y compris les clients importés plus tard**, en plus des clients cochés un à un.
+- Rapprochement par `cityKey()` (`src/lib/animations-shared.ts`) : « FES », « Fès » et « FÈS » ne font qu'une ville.
+- Résolution dans `resolveAccessFor()` via `expandAssignments()` (`src/lib/permissions-shared.ts`) : villes et
+  « toutes les marques » sont dépliées en `brandIds` / `clientIds`. Aucune page, règle ni outil IA n'a changé :
+  `brandFilter()`, `clientFilter()` et consorts voient simplement des listes complètes.
+- Écran : fiche utilisateur → bloc « Villes » (bouton « + Sa ville » d'après le champ Ville de la fiche) et case
+  « Toutes les marques ». Liste des comptes → « Appliquer à toutes les animatrices » (`applyCityScopeToAnimatrices()`) :
+  chaque animatrice active avec une ville reçoit sa ville et toutes les marques, en cumul, journalisé compte par compte.
+- Avant l'application de la migration, colonne et table absentes sont tolérées (portée vide) : la connexion ne casse pas.

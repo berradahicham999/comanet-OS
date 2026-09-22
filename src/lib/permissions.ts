@@ -15,6 +15,7 @@ import {
   noFlags,
   noPermissions,
   ACTION_LABELS,
+  expandAssignments,
   type FlagSet,
   type PermissionAction,
   type PermissionSet,
@@ -127,6 +128,7 @@ async function resolveFromTables(userId: string): Promise<ResolvedAccess> {
     db.execute<{ brand_id: string }>(sql`select brand_id from user_brand_assignments where user_id = ${userId}::uuid`),
     db.execute<{ client_id: string }>(sql`select client_id from user_client_assignments where user_id = ${userId}::uuid`),
   ]);
+  const { allBrands, cities } = await readCityScope(userId);
   const perms = matrixFromRows(
     permRows.rows.map((r) => ({ module: r.module, canView: r.can_view, canCreate: r.can_create, canEdit: r.can_edit, canValidate: r.can_validate })),
   );
@@ -142,14 +144,39 @@ async function resolveFromTables(userId: string): Promise<ResolvedAccess> {
         readActivityLog: !!f.read_activity_log,
       }
     : noFlags();
-  return {
-    perms,
-    scope,
-    flags,
-    brandIds: brandRows.rows.map((r) => r.brand_id),
-    clientIds: clientRows.rows.map((r) => r.client_id),
-    home: homeFor(perms, scope),
-  };
+  const explicit = { brandIds: brandRows.rows.map((r) => r.brand_id), clientIds: clientRows.rows.map((r) => r.client_id), allBrands, cities };
+  // Catalogue lu seulement si nécessaire : la plupart des comptes n'ont ni ville ni « toutes les marques ».
+  const [allBrandRows, cityClientRows] = await Promise.all([
+    allBrands ? db.execute<{ id: string }>(sql`select id from brands`) : null,
+    cities.length ? db.execute<{ id: string; city: string | null }>(sql`select id, city from clients where city is not null`) : null,
+  ]);
+  const { brandIds, clientIds } = expandAssignments(explicit, {
+    brandIds: allBrandRows?.rows.map((r) => r.id) ?? [],
+    clients: cityClientRows?.rows ?? [],
+  });
+  return { perms, scope, flags, brandIds, clientIds, home: homeFor(perms, scope) };
+}
+
+/**
+ * « Toutes les marques » et villes assignées (migration 0022). Tant que la migration n'est pas
+ * appliquée, colonne et table manquent : on renvoie une portée vide plutôt que de bloquer la connexion.
+ */
+export async function readCityScope(userId: string): Promise<{ allBrands: boolean; cities: string[] }> {
+  try {
+    const [b, c] = await Promise.all([
+      db.execute<{ all_brands: boolean }>(sql`select all_brands from user_scope where user_id = ${userId}::uuid`),
+      db.execute<{ city: string }>(sql`select city from user_city_assignments where user_id = ${userId}::uuid order by city`),
+    ]);
+    return { allBrands: !!b.rows[0]?.all_brands, cities: c.rows.map((r) => r.city) };
+  } catch (e) {
+    if (isMissingTable(e) || isMissingColumn(e)) return { allBrands: false, cities: [] };
+    throw e;
+  }
+}
+
+function isMissingColumn(e: unknown) {
+  const code = (e as { code?: string; cause?: { code?: string } })?.code ?? (e as { cause?: { code?: string } })?.cause?.code;
+  return code === "42703";
 }
 
 /* ------------------------------------------------------------------ */

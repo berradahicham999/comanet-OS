@@ -4,6 +4,7 @@
  * `src/lib/permissions.ts`, côté serveur.
  */
 import { FLAG_KEYS, MODULE_KEYS, type FlagKey, type ModuleKey, type ScopeKey } from "./access-shared";
+import { cityKey, normalizeCity } from "./animations-shared";
 
 export const ACTIONS = ["view", "create", "edit", "validate"] as const;
 export type PermissionAction = (typeof ACTIONS)[number];
@@ -26,6 +27,10 @@ export type AccessConfig = {
   flags: FlagSet;
   brandIds: string[];
   clientIds: string[];
+  /** Toutes les marques (présentes et futures) : la liste `brandIds` est alors ignorée. */
+  allBrands: boolean;
+  /** Villes dont tous les clients entrent dans la portée, en plus des clients cochés un à un. */
+  cities: string[];
 };
 
 export function noPermissions(): PermissionSet {
@@ -152,4 +157,36 @@ export function legacyRoleFor(perms: PermissionSet, scope: ScopeKey): LegacyRole
   if (can(perms, "reglementaire", "edit")) return "REGLEMENTAIRE";
   if (can(perms, "marketing", "create") || can(perms, "budgets", "view")) return "MARKETING";
   return "TRADE";
+}
+
+/* ------------------------------------------------------------------ */
+/* Portée par ville et toutes les marques                              */
+/* ------------------------------------------------------------------ */
+
+/** Villes d'assignation dédoublonnées sous leur forme canonique (« Fes », « FÈS » → « FÈS »). */
+export function normalizeCities(cities: readonly (string | null | undefined)[]): string[] {
+  const out = new Map<string, string>();
+  for (const c of cities) {
+    const n = normalizeCity(c);
+    if (n && !out.has(cityKey(n))) out.set(cityKey(n), n);
+  }
+  return [...out.values()];
+}
+
+/**
+ * Périmètre effectif : les clients cochés un à un, plus tous les clients des villes assignées
+ * (accents et alias ignorés) ; toutes les marques si `allBrands`. Les pages ne voient que le
+ * résultat, sous forme de listes d'identifiants.
+ */
+export function expandAssignments(
+  input: { brandIds: string[]; clientIds: string[]; allBrands: boolean; cities: string[] },
+  catalog: { brandIds: string[]; clients: { id: string; city: string | null }[] },
+): { brandIds: string[]; clientIds: string[] } {
+  const keys = new Set(input.cities.map(cityKey).filter(Boolean));
+  const clientIds = new Set(input.clientIds);
+  if (keys.size) for (const c of catalog.clients) if (keys.has(cityKey(c.city))) clientIds.add(c.id);
+  return {
+    brandIds: input.allBrands ? [...catalog.brandIds] : [...new Set(input.brandIds)],
+    clientIds: [...clientIds],
+  };
 }

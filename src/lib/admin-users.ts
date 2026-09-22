@@ -8,6 +8,7 @@ import {
   userFlags,
   userBrandAssignments,
   userClientAssignments,
+  userCityAssignments,
   roleTemplates,
   roleTemplatePermissions,
   permissionAuditLogs,
@@ -16,6 +17,7 @@ import { FLAG_KEYS, MODULE_KEYS, type ModuleKey, type ScopeKey } from "./access-
 import {
   describeMatrix,
   legacyRoleFor,
+  normalizeCities,
   matrixFromRows,
   noFlags,
   noPermissions,
@@ -27,6 +29,9 @@ import {
   type PermissionSet,
 } from "./permissions-shared";
 import { hashPassword } from "./auth";
+import { readCityScope } from "./permissions";
+import { ANIMATRICE_SQL } from "./users";
+import { cityKey } from "./animations-shared";
 
 /* ------------------------------------------------------------------ */
 /* Lecture                                                             */
@@ -44,6 +49,9 @@ export type AdminUserRow = {
   scope: ScopeKey;
   modules: ModuleKey[];
   isAdmin: boolean;
+  /** Villes assignées (tous leurs clients) et « toutes les marques ». */
+  cities: string[];
+  allBrands: boolean;
 };
 
 /** Liste des comptes avec leurs modules actifs, pour l'écran d'administration. */
@@ -63,6 +71,7 @@ export async function listAdminUsers(filter: { q?: string; module?: ModuleKey; i
       ${filter.q ? sql`and (u.name ilike ${"%" + filter.q + "%"} or u.email ilike ${"%" + filter.q + "%"})` : sql``}
       ${filter.module ? sql`and exists (select 1 from user_permissions p where p.user_id = u.id and p.module = ${filter.module} and p.can_view)` : sql``}
     order by u.active desc, u.name`);
+  const cityScope = await cityScopeSummary();
   return r.rows.map((x) => ({
     id: x.id,
     name: x.name,
@@ -75,7 +84,23 @@ export async function listAdminUsers(filter: { q?: string; module?: ModuleKey; i
     scope: x.scope ?? "ALL",
     modules: (x.modules ?? []).filter((m): m is ModuleKey => (MODULE_KEYS as readonly string[]).includes(m)),
     isAdmin: x.is_admin,
+    cities: cityScope.get(x.id)?.cities ?? [],
+    allBrands: cityScope.get(x.id)?.allBrands ?? false,
   }));
+}
+
+/** Villes et « toutes les marques » de chaque compte ; vide tant que la migration 0022 n'est pas appliquée. */
+async function cityScopeSummary(): Promise<Map<string, { cities: string[]; allBrands: boolean }>> {
+  const out = new Map<string, { cities: string[]; allBrands: boolean }>();
+  try {
+    const r = await db.execute<{ user_id: string; all_brands: boolean; cities: string[] | null }>(sql`
+      select s.user_id, s.all_brands, (select array_agg(c.city order by c.city) from user_city_assignments c where c.user_id = s.user_id) as cities
+      from user_scope s`);
+    for (const x of r.rows) out.set(x.user_id, { cities: x.cities ?? [], allBrands: x.all_brands });
+  } catch {
+    // Migration 0022 non appliquée : rien à résumer.
+  }
+  return out;
 }
 
 export type UserConfig = AccessConfig & {
@@ -88,11 +113,12 @@ export async function getUserConfig(id: string): Promise<UserConfig | null> {
   if (!u) return null;
   const [perms, scope, flags, brandIds, clientIds] = await Promise.all([
     db.select().from(userPermissions).where(eq(userPermissions.userId, id)),
-    db.select().from(userScope).where(eq(userScope.userId, id)),
+    db.select({ scope: userScope.scope }).from(userScope).where(eq(userScope.userId, id)),
     db.select().from(userFlags).where(eq(userFlags.userId, id)),
     db.select({ id: userBrandAssignments.brandId }).from(userBrandAssignments).where(eq(userBrandAssignments.userId, id)),
     db.select({ id: userClientAssignments.clientId }).from(userClientAssignments).where(eq(userClientAssignments.userId, id)),
   ]);
+  const cityScope = await readCityScope(id);
   const f = flags[0];
   return {
     user: { id: u.id, name: u.name, email: u.email, active: u.active, city: u.city, phone: u.phone, jobTitle: u.jobTitle, lastLoginAt: u.lastLoginAt, createdAt: u.createdAt },
@@ -103,11 +129,13 @@ export async function getUserConfig(id: string): Promise<UserConfig | null> {
       : noFlags(),
     brandIds: brandIds.map((b) => b.id),
     clientIds: clientIds.map((c) => c.id),
+    allBrands: cityScope.allBrands,
+    cities: cityScope.cities,
   };
 }
 
 export function emptyConfig(): AccessConfig {
-  return { perms: noPermissions(), scope: "ALL", flags: noFlags(), brandIds: [], clientIds: [] };
+  return { perms: noPermissions(), scope: "ALL", flags: noFlags(), brandIds: [], clientIds: [], allBrands: false, cities: [] };
 }
 
 /* ------------------------------------------------------------------ */
@@ -156,7 +184,7 @@ async function logChange(actor: Actor, target: { id: string | null; name: string
 }
 
 function configSnapshot(c: AccessConfig) {
-  return { modules: describeMatrix(c.perms), scope: c.scope, flags: FLAG_KEYS.filter((f) => c.flags[f]), brandIds: c.brandIds, clientIds: c.clientIds };
+  return { modules: describeMatrix(c.perms), scope: c.scope, flags: FLAG_KEYS.filter((f) => c.flags[f]), brandIds: c.allBrands ? "toutes" : c.brandIds, clientIds: c.clientIds, cities: c.cities };
 }
 
 /* ------------------------------------------------------------------ */
@@ -170,7 +198,15 @@ export async function saveUserConfig(actor: Actor, targetId: string, input: Acce
   if (!before) throw new AdminGuardError("Compte introuvable.");
   const perms = normalizeMatrix(input.perms);
   await assertNotLastAdmin(targetId, perms.administration.validate || !before.user.active);
-  const next: AccessConfig = { perms, scope: input.scope, flags: input.flags, brandIds: [...new Set(input.brandIds)], clientIds: [...new Set(input.clientIds)] };
+  const next: AccessConfig = {
+    perms,
+    scope: input.scope,
+    flags: input.flags,
+    brandIds: [...new Set(input.brandIds)],
+    clientIds: [...new Set(input.clientIds)],
+    allBrands: input.allBrands,
+    cities: normalizeCities(input.cities),
+  };
 
   await db.transaction(async (tx) => {
     await tx.delete(userPermissions).where(eq(userPermissions.userId, targetId));
@@ -178,8 +214,8 @@ export async function saveUserConfig(actor: Actor, targetId: string, input: Acce
     if (rows.length) await tx.insert(userPermissions).values(rows);
     await tx
       .insert(userScope)
-      .values({ userId: targetId, scope: next.scope })
-      .onConflictDoUpdate({ target: userScope.userId, set: { scope: next.scope, updatedAt: sql`now()` } });
+      .values({ userId: targetId, scope: next.scope, allBrands: next.allBrands })
+      .onConflictDoUpdate({ target: userScope.userId, set: { scope: next.scope, allBrands: next.allBrands, updatedAt: sql`now()` } });
     const f = next.flags;
     await tx
       .insert(userFlags)
@@ -189,6 +225,8 @@ export async function saveUserConfig(actor: Actor, targetId: string, input: Acce
     if (next.brandIds.length) await tx.insert(userBrandAssignments).values(next.brandIds.map((brandId) => ({ userId: targetId, brandId })));
     await tx.delete(userClientAssignments).where(eq(userClientAssignments.userId, targetId));
     if (next.clientIds.length) await tx.insert(userClientAssignments).values(next.clientIds.map((clientId) => ({ userId: targetId, clientId })));
+    await tx.delete(userCityAssignments).where(eq(userCityAssignments.userId, targetId));
+    if (next.cities.length) await tx.insert(userCityAssignments).values(next.cities.map((city) => ({ userId: targetId, city })));
     // Enum legacy, lecture seule : recalculée, jamais décisionnelle.
     await tx.update(users).set({ role: legacyRoleFor(perms, next.scope) }).where(eq(users.id, targetId));
   });
@@ -198,7 +236,7 @@ export async function saveUserConfig(actor: Actor, targetId: string, input: Acce
   if (!sameMatrix(before.perms, perms)) changes.push("PERMISSIONS");
   if (before.scope !== next.scope) changes.push("SCOPE");
   if (FLAG_KEYS.some((k) => before.flags[k] !== next.flags[k])) changes.push("FLAGS");
-  if (JSON.stringify([...before.brandIds].sort()) !== JSON.stringify([...next.brandIds].sort()) || JSON.stringify([...before.clientIds].sort()) !== JSON.stringify([...next.clientIds].sort())) changes.push("ASSIGNMENTS");
+  if (JSON.stringify([...before.brandIds].sort()) !== JSON.stringify([...next.brandIds].sort()) || JSON.stringify([...before.clientIds].sort()) !== JSON.stringify([...next.clientIds].sort()) || before.allBrands !== next.allBrands || JSON.stringify([...before.cities].sort()) !== JSON.stringify([...next.cities].sort())) changes.push("ASSIGNMENTS");
   if (opts.templateNames?.length) changes.unshift("TEMPLATE_APPLIED");
   if (changes.length) {
     await logChange(actor, { id: targetId, name: before.user.name }, changes.join("+"), b, { ...a, templates: opts.templateNames ?? undefined });
@@ -267,7 +305,7 @@ export async function setUserActive(actor: Actor, targetId: string, active: bool
 export async function duplicateUser(actor: Actor, sourceId: string, profile: ProfileInput): Promise<string> {
   const src = await getUserConfig(sourceId);
   if (!src) throw new AdminGuardError("Compte source introuvable.");
-  const id = await createUser(actor, profile, { perms: src.perms, scope: src.scope, flags: src.flags, brandIds: src.brandIds, clientIds: src.clientIds });
+  const id = await createUser(actor, profile, { perms: src.perms, scope: src.scope, flags: src.flags, brandIds: src.brandIds, clientIds: src.clientIds, allBrands: src.allBrands, cities: src.cities });
   await logChange(actor, { id, name: profile.name }, "DUPLICATED", null, { from: src.user.name });
   return id;
 }
@@ -364,12 +402,50 @@ export async function allUserConfigs(): Promise<UserConfig[]> {
   return out.sort((a, b) => Number(b.user.active) - Number(a.user.active) || a.user.name.localeCompare(b.user.name, "fr"));
 }
 
-/** Marques et clients disponibles pour l'assignation de périmètre. */
+/** Marques, clients et villes disponibles pour l'assignation de périmètre. */
 export async function assignmentOptions() {
-  const [brands, clients] = await Promise.all([
+  const [brands, clients, cityRows] = await Promise.all([
     db.execute<{ id: string; name: string; active: boolean }>(sql`select id, name, active from brands order by active desc, name`),
     db.execute<{ id: string; name: string; city: string | null }>(sql`select id, name, city from clients where active order by name limit 2000`),
+    db.execute<{ city: string; n: number }>(sql`select city, count(*)::int as n from clients where active and city is not null group by city`),
   ]);
-  return { brands: brands.rows, clients: clients.rows };
+  return { brands: brands.rows, clients: clients.rows, cities: cityOptions(cityRows.rows) };
+}
+
+/** Villes des clients actifs, variantes d'écriture regroupées (« FES » et « FÈS » ne font qu'une). */
+function cityOptions(rows: { city: string; n: number }[]): { city: string; clients: number }[] {
+  const byKey = new Map<string, { city: string; clients: number }>();
+  for (const r of rows) {
+    const [city] = normalizeCities([r.city]);
+    if (!city) continue;
+    const cur = byKey.get(cityKey(city));
+    if (cur) cur.clients += r.n;
+    else byKey.set(cityKey(city), { city, clients: r.n });
+  }
+  return [...byKey.values()].sort((a, b) => b.clients - a.clients || a.city.localeCompare(b.city, "fr"));
+}
+
+/**
+ * Raccourci d'administration : chaque animatrice (active, portée « ses données », ville renseignée)
+ * reçoit sa ville et toutes les marques. Cumulatif : les clients cochés un à un et les autres villes
+ * sont conservés. Chaque compte modifié est journalisé comme une modification manuelle.
+ */
+export async function applyCityScopeToAnimatrices(actor: Actor): Promise<{ updated: string[]; skipped: { name: string; reason: string }[] }> {
+  const rows = await db.execute<{ id: string; name: string; city: string | null }>(
+    sql`select u.id, u.name, u.city from users u where u.active and ${ANIMATRICE_SQL} order by u.name`,
+  );
+  const updated: string[] = [], skipped: { name: string; reason: string }[] = [];
+  for (const u of rows.rows) {
+    if (u.id === actor.id) { skipped.push({ name: u.name, reason: "votre propre compte" }); continue; }
+    const [city] = normalizeCities([u.city]);
+    if (!city) { skipped.push({ name: u.name, reason: "ville non renseignée sur la fiche" }); continue; }
+    const cfg = await getUserConfig(u.id);
+    if (!cfg) continue;
+    const cities = normalizeCities([...cfg.cities, city]);
+    if (cfg.allBrands && cities.length === cfg.cities.length) { skipped.push({ name: u.name, reason: "déjà configurée" }); continue; }
+    await saveUserConfig(actor, u.id, { ...cfg, allBrands: true, cities });
+    updated.push(u.name);
+  }
+  return { updated, skipped };
 }
 

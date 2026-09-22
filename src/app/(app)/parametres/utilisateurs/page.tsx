@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireAdmin } from "@/lib/access";
 import { listAdminUsers } from "@/lib/admin-users";
+import { cityScopeAnimatricesAction } from "./actions";
 import { MODULE_KEYS, MODULE_LABELS, MODULE_SHORT, SCOPE_SHORT, type ModuleKey } from "@/lib/access-shared";
 import { PageHeader, Card, Badge, Tabs, Empty } from "@/components/ui";
 import { fmtDate } from "@/lib/format";
@@ -8,7 +9,7 @@ import { fmtDate } from "@/lib/format";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Utilisateurs & droits" };
 
-export default async function UsersAdminPage(props: { searchParams: Promise<{ q?: string; module?: string; suspendus?: string; error?: string }> }) {
+export default async function UsersAdminPage(props: { searchParams: Promise<{ q?: string; module?: string; suspendus?: string; error?: string; ok?: string }> }) {
   const me = await requireAdmin();
   const sp = await props.searchParams;
   const moduleFilter = (MODULE_KEYS as readonly string[]).includes(sp.module ?? "") ? (sp.module as ModuleKey) : undefined;
@@ -31,6 +32,15 @@ export default async function UsersAdminPage(props: { searchParams: Promise<{ q?
       </PageHeader>
 
       {sp.error && <div className="mb-4 rounded-2xl bg-red-soft border border-red/30 px-4 py-3 text-[13px] text-red">{sp.error}</div>}
+      {sp.ok && <div className="mb-4 rounded-2xl bg-green-soft border border-green/30 px-4 py-3 text-[13px] text-green">{sp.ok}</div>}
+
+      <form action={cityScopeAnimatricesAction} className="card mb-4 px-4 py-3 flex flex-wrap items-center gap-3 text-[13px]">
+        <div className="flex-1 min-w-[260px]">
+          <div className="font-medium">Animatrices : tous les clients de leur ville, toutes les marques</div>
+          <div className="text-[12px] text-muted">Chaque animatrice reçoit la ville inscrite sur sa fiche (clients actuels et futurs) et toutes les marques. Cumulatif : les clients déjà cochés restent. Chaque changement est journalisé et modifiable ensuite sur la fiche.</div>
+        </div>
+        <button type="submit" className="btn-secondary btn-sm">Appliquer à toutes les animatrices</button>
+      </form>
 
       <form action="/parametres/utilisateurs" method="get" className="flex flex-wrap gap-2 mb-4 text-[13px]">
         <input name="q" defaultValue={sp.q ?? ""} placeholder="Nom ou e-mail…" className="input h-9 w-56" />
@@ -63,7 +73,12 @@ export default async function UsersAdminPage(props: { searchParams: Promise<{ q?
                         {u.modules.map((m) => <Badge key={m} tone={m === "administration" ? "accent" : "gray"}>{MODULE_SHORT[m]}</Badge>)}
                       </div>
                     </td>
-                    <td className="whitespace-nowrap text-[12.5px]">{SCOPE_SHORT[u.scope]}</td>
+                    <td className="text-[12.5px]">
+                      <div className="whitespace-nowrap">{SCOPE_SHORT[u.scope]}</div>
+                      {u.scope !== "ALL" && (u.cities.length > 0 || u.allBrands) && (
+                        <div className="text-[11.5px] text-muted">{[u.cities.join(", "), u.allBrands && "toutes marques"].filter(Boolean).join(" · ")}</div>
+                      )}
+                    </td>
                     <td>{u.active ? <Badge tone="green" dot>Actif</Badge> : <Badge tone="red" dot>Suspendu</Badge>}</td>
                     <td className="whitespace-nowrap text-[12.5px] text-muted">{u.lastLoginAt ? fmtDate(u.lastLoginAt) : "jamais"}</td>
                     <td className="text-right"><Link href={`/parametres/utilisateurs/${u.id}`} className="text-[12px] text-accent">Configurer</Link></td>
