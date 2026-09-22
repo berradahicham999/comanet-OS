@@ -29,7 +29,7 @@ export default async function NewUserPage(props: { searchParams: Promise<{ error
           </div>
         </Card>
         <Card title="Droits">
-          <PermissionMatrix initial={emptyConfig()} templates={templates} brands={options.brands} clients={options.clients} />
+          <PermissionMatrix initial={emptyConfig()} templates={templates} brands={options.brands} clients={options.clients} cities={options.cities} />
         </Card>
         <div className="flex gap-2 justify-end">
           <Link href="/parametres/utilisateurs" className="btn-secondary">Annuler</Link>

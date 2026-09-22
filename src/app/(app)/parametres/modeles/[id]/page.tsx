@@ -30,7 +30,7 @@ export default async function TemplateEditPage(props: { params: Promise<{ id: st
           </div>
         </Card>
         <Card title="Droits du modèle">
-          <PermissionMatrix initial={{ perms: t.perms, scope: t.scope, flags: t.flags, brandIds: [], clientIds: [] }} templates={others} showAssignments={false} />
+          <PermissionMatrix initial={{ perms: t.perms, scope: t.scope, flags: t.flags, brandIds: [], clientIds: [], allBrands: false, cities: [] }} templates={others} showAssignments={false} />
         </Card>
         <div className="flex gap-2 justify-end">
           <Link href="/parametres/modeles" className="btn-secondary">Retour</Link>

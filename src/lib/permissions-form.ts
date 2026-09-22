@@ -9,11 +9,13 @@ export function readConfig(fd: FormData): AccessConfig {
   for (const f of FLAG_KEYS) flags[f] = fd.get(`f_${f}`) === "on";
   const rawScope = String(fd.get("scope") ?? "ALL");
   const scope: ScopeKey = (SCOPE_KEYS as readonly string[]).includes(rawScope) ? (rawScope as ScopeKey) : "ALL";
-  const brandIds: string[] = [], clientIds: string[] = [];
+  const brandIds: string[] = [], clientIds: string[] = [], cities: string[] = [];
   for (const [k, v] of fd.entries()) {
     if (!v) continue;
     if (k.startsWith("brand_")) brandIds.push(k.slice(6));
     else if (k.startsWith("client_")) clientIds.push(k.slice(7));
+    else if (k === "city_scope") cities.push(String(v));
   }
-  return { perms: normalizeMatrix(perms), scope, flags, brandIds, clientIds };
+  const allBrands = fd.get("all_brands") === "on";
+  return { perms: normalizeMatrix(perms), scope, flags, brandIds, clientIds, allBrands, cities };
 }

@@ -331,6 +331,8 @@ export const userScope = pgTable("user_scope", {
     .primaryKey()
     .references(() => users.id, { onDelete: "cascade" }),
   scope: userDataScopeEnum("scope").notNull().default("ALL"),
+  /** Toutes les marques, y compris celles créées plus tard (remplace la liste `user_brand_assignments`). */
+  allBrands: boolean("all_brands").notNull().default(false),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -346,6 +348,21 @@ export const userBrandAssignments = pgTable(
       .references(() => brands.id, { onDelete: "cascade" }),
   },
   (t) => [primaryKey({ columns: [t.userId, t.brandId] }), index("user_brand_assignments_brand_idx").on(t.brandId)],
+);
+
+/**
+ * Villes rattachées à la personne : tous les clients de la ville entrent dans sa portée,
+ * y compris ceux importés plus tard. Rapprochement par `cityKey()` (accents et alias ignorés).
+ */
+export const userCityAssignments = pgTable(
+  "user_city_assignments",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    city: text("city").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.city] })],
 );
 
 /** Clients rattachés à la personne — utilisés par la portée « assignés ». */

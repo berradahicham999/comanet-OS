@@ -57,7 +57,8 @@ export default async function RecapPage() {
                 </table>
                 <div className="text-[11.5px] space-y-1">
                   <div><b>Portée :</b> {SCOPE_LABELS[c.scope]}</div>
-                  {c.scope !== "ALL" && <div><b>Marques :</b> {c.brandIds.map((id) => brandName.get(id) ?? id).join(", ") || "aucune"}</div>}
+                  {c.scope !== "ALL" && <div><b>Marques :</b> {c.allBrands ? "toutes" : c.brandIds.map((id) => brandName.get(id) ?? id).join(", ") || "aucune"}</div>}
+                  {c.scope !== "ALL" && c.cities.length > 0 && <div><b>Villes :</b> {c.cities.join(", ")} (tous leurs clients)</div>}
                   {c.scope !== "ALL" && <div><b>Clients :</b> {c.clientIds.length > 8 ? `${c.clientIds.length} clients` : c.clientIds.map((id) => clientName.get(id) ?? id).join(", ") || "aucun"}</div>}
                   <div><b>Transverses :</b> {FLAG_KEYS.filter((f) => c.flags[f]).map((f) => FLAG_LABELS[f]).join(" · ") || "aucun"}</div>
                 </div>

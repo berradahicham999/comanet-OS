@@ -8,7 +8,7 @@ import { createPreviewToken, resolveAccessFor } from "@/lib/permissions";
 import { PREVIEW_COOKIE } from "@/lib/access-shared";
 import { readConfig } from "@/lib/permissions-form";
 import {
-  AdminGuardError, createUser, duplicateUser, saveUserConfig, setUserActive, updateProfile,
+  AdminGuardError, applyCityScopeToAnimatrices, createUser, duplicateUser, saveUserConfig, setUserActive, updateProfile,
 } from "@/lib/admin-users";
 
 function templatesOf(fd: FormData) {
@@ -97,6 +97,22 @@ export async function duplicateUserAction(fd: FormData) {
   }
   refresh(id);
   redirect(`/parametres/utilisateurs/${id}?ok=duplique`);
+}
+
+/** Raccourci : chaque animatrice reçoit sa ville (tous ses clients) et toutes les marques. */
+export async function cityScopeAnimatricesAction() {
+  const actor = await requireAdmin();
+  let res: Awaited<ReturnType<typeof applyCityScopeToAnimatrices>>;
+  try {
+    res = await applyCityScopeToAnimatrices(actor);
+  } catch (e) {
+    fail("/parametres/utilisateurs", e);
+  }
+  refresh();
+  const skipped = res.skipped.filter((s) => s.reason !== "déjà configurée").map((s) => `${s.name} (${s.reason})`);
+  const msg = `${res.updated.length} animatrice${res.updated.length > 1 ? "s" : ""} configurée${res.updated.length > 1 ? "s" : ""}${res.updated.length ? ` : ${res.updated.join(", ")}` : ""}.`
+    + (skipped.length ? ` Non modifiées : ${skipped.join(", ")}.` : "");
+  redirect(`/parametres/utilisateurs?ok=${encodeURIComponent(msg)}`);
 }
 
 /**
