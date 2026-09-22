@@ -11,6 +11,7 @@ import { AnimationForm } from "@/components/animation-form";
 import { saveAnimation, deleteAnimation } from "../actions";
 import { fmtMAD, fmtNum, fmtDate, iso, delta } from "@/lib/format";
 import { ANIMATION_ERRORS, ANIMATION_WARNINGS } from "@/lib/animations-shared";
+import { pointsOfSale } from "@/lib/terrain/points-of-sale";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,7 @@ export default async function AnimationPage(props: { params: Promise<{ id: strin
   if (ownOnly && anim.animatriceId !== user.id) notFound();
   const [impact, clients, products, brands] = await Promise.all([
     animationImpact(id),
-    db.execute(sql`select id, name, city from clients where active and type <> 'GROSSISTE' order by name`),
+    pointsOfSale({ include: [anim.clientId] }),
     db.execute(sql`select id, name, brand_id from products where active order by name`),
     listBrands(),
   ]);
@@ -62,7 +63,7 @@ export default async function AnimationPage(props: { params: Promise<{ id: strin
         <Card title="Modifier">
           <AnimationForm
             action={saveAnimation}
-            clients={(clients.rows as { id: string; name: string; city: string | null }[])}
+            clients={clients}
             products={(products.rows as { id: string; name: string; brand_id: string | null }[]).map((p) => ({ id: p.id, name: p.name, brandId: p.brand_id }))}
             brands={brands.filter((b) => b.active).map((b) => ({ id: b.id, name: b.name }))}
             animatrices={animatriceUsers.map((u) => ({ id: u.id, name: u.name }))}

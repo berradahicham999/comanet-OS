@@ -18,7 +18,8 @@ import { normKey } from "@/lib/import/normalize";
  */
 
 export type QuickProduct = { id: string; name: string; brandId: string | null; brandName: string | null };
-export type QuickClient = { id: string; name: string; city: string | null };
+/** `mine` : dans le périmètre de l'animatrice (assigné ou dans sa ville) — affiché en tête. */
+export type QuickClient = { id: string; name: string; city: string | null; mine?: boolean };
 
 type Row = { productId: string; name: string; qty: string; stock: string };
 type LastStock = Record<string, { quantity: number; readAt: string }>;
@@ -125,14 +126,18 @@ export function AnimationQuickForm({
             />
             <div className="max-h-56 overflow-y-auto rounded-xl border border-line divide-y divide-line">
               {filteredClients.length === 0 && <div className="px-3 py-2.5 text-[13px] text-muted">Aucun résultat.</div>}
-              {filteredClients.map((c) => (
+              {filteredClients.map((c, i) => (
+                <div key={c.id}>
+                {i === 0 && c.mine && <div className="px-3 py-1.5 text-[11px] uppercase tracking-wider text-muted bg-sunk/60">Vos points de vente</div>}
+                {c.mine === false && i > 0 && filteredClients[i - 1].mine && <div className="px-3 py-1.5 text-[11px] uppercase tracking-wider text-muted bg-sunk/60">Autres points de vente</div>}
                 <button
-                  key={c.id} type="button"
+                  type="button"
                   onClick={() => { setClientId(c.id); setClientQuery(""); setClientSearchOpen(false); }}
                   className="w-full text-left px-3 py-2.5 text-[14px] hover:bg-sunk"
                 >
                   {c.name}{c.city ? <span className="text-muted"> — {c.city}</span> : null}
                 </button>
+                </div>
               ))}
             </div>
           </>

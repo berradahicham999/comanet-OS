@@ -9,6 +9,7 @@ import { AnimationQuickForm } from "@/components/animation-quick-form";
 import { saveAnimation } from "../actions";
 import { iso, fmtDateShort } from "@/lib/format";
 import { ANIMATION_ERRORS, ANIMATION_WARNINGS } from "@/lib/animations-shared";
+import { pointsOfSale } from "@/lib/terrain/points-of-sale";
 import { animatedProductCatalog, lastClientForAnimatrice } from "@/lib/terrain/usual-products";
 
 export const dynamic = "force-dynamic";
@@ -35,7 +36,7 @@ export default async function SaisiePage(props: { searchParams: Promise<{ client
 
   if (isAnimatrice) {
     const [clients, catalog, lastClient, recent] = await Promise.all([
-      db.execute(sql`select id, name, city from clients where active and type <> 'GROSSISTE' order by name`),
+      pointsOfSale(),
       animatedProductCatalog(),
       lastClientForAnimatrice(user.id),
       recentP,
@@ -48,7 +49,7 @@ export default async function SaisiePage(props: { searchParams: Promise<{ client
           <Card>
             <AnimationQuickForm
               action={saveAnimation}
-              clients={(clients.rows as { id: string; name: string; city: string | null }[])}
+              clients={clients}
               catalog={catalog}
               defaultClientId={sp.client ?? lastClient?.id ?? null}
               today={iso(new Date())}
@@ -68,7 +69,7 @@ export default async function SaisiePage(props: { searchParams: Promise<{ client
 
   // Rôles non-animatrice : saisie de correction, référentiel complet (produits, marques, animatrices).
   const [clients, products, brands, recent] = await Promise.all([
-    db.execute(sql`select id, name, city from clients where active and type <> 'GROSSISTE' order by name`),
+    pointsOfSale(),
     db.execute(sql`select id, name, brand_id from products where active order by name`),
     listBrands(),
     recentP,
@@ -81,7 +82,7 @@ export default async function SaisiePage(props: { searchParams: Promise<{ client
         <Card>
           <AnimationForm
             action={saveAnimation}
-            clients={(clients.rows as { id: string; name: string; city: string | null }[])}
+            clients={clients}
             products={(products.rows as { id: string; name: string; brand_id: string | null }[]).map((p) => ({ id: p.id, name: p.name, brandId: p.brand_id }))}
             brands={brands.filter((b) => b.active).map((b) => ({ id: b.id, name: b.name }))}
             animatrices={animatriceUsers.map((u) => ({ id: u.id, name: u.name }))}
