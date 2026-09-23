@@ -1,10 +1,9 @@
 import Link from "next/link";
 import { requireAccess, canDo } from "@/lib/access";
-import { getRefDate } from "@/lib/ref-date";
 import { resolvePeriod, PERIOD_OPTIONS, type PeriodParam } from "@/lib/periods";
 import { animatriceScores, animationMonthly, type ActionPlanItem } from "@/lib/animations";
 import { PageHeader, Card, Badge, Delta, Progress, Empty } from "@/components/ui";
-import { fmtMAD, fmtNum } from "@/lib/format";
+import { fmtMAD, fmtNum, today } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Plan d'action animatrices" };
@@ -19,7 +18,9 @@ const SEV: Record<ActionPlanItem["severity"], { tone: "red" | "orange" | "blue" 
 export default async function AnimatricesPage(props: { searchParams: Promise<{ period?: PeriodParam; start?: string; end?: string; focus?: string }> }) {
   await requireAccess("terrain");
   const sp = await props.searchParams;
-  const { ref } = await getRefDate();
+  // Les animations sont saisies au jour le jour : la période se cale sur aujourd'hui, pas sur la
+  // dernière vente Sage importée (getRefDate), sinon tout ce qui a été saisi depuis disparaît.
+  const ref = today();
   const period = resolvePeriod(sp.period, ref, { start: sp.start, end: sp.end });
   const year = Number(period.start.slice(0, 4));
   const scores = await animatriceScores(period, period.prev, year);
