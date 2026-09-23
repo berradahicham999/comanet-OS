@@ -1,14 +1,15 @@
 import "server-only";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { animations, animationLines } from "@/db/schema";
+import { animations, animationLines, animationRevisions } from "@/db/schema";
 import { normalizeCity } from "@/lib/animations-shared";
 import {
   animationDedupeKey, valueAnimationLines,
   type AnimationErrorCode, type ParsedAnimation,
 } from "./animation-input";
 import { EVENT_SOURCES, EVENT_TYPES, emitEvent, eventKey, obsoleteEvent } from "@/lib/events/emit";
-import { recordReadings, deleteReadingsOfAnimation } from "@/lib/client-stock";
+import { recordReadings, deleteReadingsOfAnimation, type Executor } from "@/lib/client-stock";
+import { diffAnimation, snapshotSummary, type AnimationSnapshot, type RevisionAction, type RevisionChange } from "./revisions";
 
 /**
  * ENREGISTREMENT D'UNE ANIMATION — service métier transactionnel.
@@ -29,15 +30,19 @@ export type SaveAnimationOutcome =
   | { ok: false; error: "doublon"; existingId: string }
   | { ok: true; animationId: string; eventId: string | null; missingPrice: boolean; overlaps: number };
 
+/** Qui écrit : sert à l'historique du rapport. */
+export type Actor = { id: string; name: string };
+
 export type SaveAnimationContext = {
   /** `null` pour une création. */
   id: string | null;
   parsed: ParsedAnimation;
+  actor: Actor;
 };
 
 type ClientRow = { client_name: string; client_city: string | null; animatrice_name: string | null };
 
-export async function saveAnimation({ id, parsed }: SaveAnimationContext): Promise<SaveAnimationOutcome> {
+export async function saveAnimation({ id, parsed, actor }: SaveAnimationContext): Promise<SaveAnimationOutcome> {
   /* -- 1) Point de vente, animatrice, ville normalisée, clé de déduplication -------- */
   const ctx = await db.execute(sql`
     select c.name as client_name, c.city as client_city,
@@ -94,6 +99,7 @@ export async function saveAnimation({ id, parsed }: SaveAnimationContext): Promi
 
   const result = await db.transaction(async (tx) => {
     let animationId = id ?? "";
+    const before = id ? await loadSnapshot(tx, id) : null;
     if (id) {
       await tx.update(animations).set(values).where(eq(animations.id, id));
       await tx.delete(animationLines).where(eq(animationLines.animationId, id));
@@ -113,6 +119,14 @@ export async function saveAnimation({ id, parsed }: SaveAnimationContext): Promi
           amount: l.amount === null ? null : l.amount.toFixed(2),
         })),
       );
+    }
+
+    // Historique : photo après écriture, comparée à celle d'avant. Une correction sans effet
+    // (formulaire renvoyé tel quel) n'écrit rien.
+    const after = await loadSnapshot(tx, animationId);
+    if (after) {
+      const changes = before ? diffAnimation(before, after) : [];
+      if (!before || changes.length) await logRevision(tx, animationId, actor, before ? "MODIFICATION" : "CREATION", snapshotSummary(after), changes);
     }
 
     // Stock constaté en rayon : relevé daté du jour de l'animation, dans la table commune aux
@@ -189,11 +203,58 @@ async function countOverlaps(animationId: string, parsed: ParsedAnimation): Prom
   return Number((r.rows[0] as { n: number }).n);
 }
 
-/** Suppression : les lignes suivent par cascade, le fait devient caduc. */
-export async function deleteAnimation(id: string): Promise<void> {
+/**
+ * Suppression : les lignes suivent par cascade, le fait devient caduc. L'historique garde
+ * le contenu effacé (une ligne par champ renseigné), pour pouvoir le ressaisir au besoin.
+ */
+export async function deleteAnimation(id: string, actor: Actor): Promise<void> {
   await db.transaction(async (tx) => {
+    const before = await loadSnapshot(tx, id);
+    if (before) {
+      const empty: AnimationSnapshot = { ...before, cost: 0, durationHours: null, customersAdvised: 0, samples: 0, comment: null, photoUrl: null, lines: {} };
+      const erased = diffAnimation(before, empty).map((c) => ({ ...c, after: null }));
+      await logRevision(tx, id, actor, "SUPPRESSION", snapshotSummary(before), erased);
+    }
     await obsoleteEvent(tx, eventKey(EVENT_TYPES.ANIMATION_COMPLETED, id));
     await deleteReadingsOfAnimation(id, tx);
     await tx.delete(animations).where(eq(animations.id, id));
   });
+}
+
+/** Photo d'un rapport, noms résolus, lue dans la transaction en cours. */
+async function loadSnapshot(ex: Executor, id: string): Promise<AnimationSnapshot | null> {
+  const r = await ex.execute(sql`
+    select a.start_date::text as start_date, a.date::text as date, a.days, a.status::text as status,
+           c.name as client_name, u.name as animatrice_name, b.name as brand_name,
+           a.cost::float8 as cost, a.duration_hours::float8 as duration_hours,
+           a.customers_advised, a.samples, a.comment, a.photo_url,
+           coalesce((select json_agg(json_build_object('name', p.name, 'sold', al.quantity_sold, 'stock', al.stock_observed))
+                     from animation_lines al join products p on p.id = al.product_id where al.animation_id = a.id), '[]'::json) as lines
+    from animations a join clients c on c.id = a.client_id
+    left join users u on u.id = a.animatrice_id left join brands b on b.id = a.brand_id
+    where a.id = ${id}::uuid`);
+  const x = r.rows[0] as Record<string, unknown> | undefined;
+  if (!x) return null;
+  const lines: AnimationSnapshot["lines"] = {};
+  for (const l of x.lines as { name: string; sold: number; stock: number | null }[]) lines[l.name] = { sold: Number(l.sold), stock: l.stock === null ? null : Number(l.stock) };
+  return {
+    startDate: (x.start_date as string | null) ?? null,
+    date: String(x.date),
+    days: Number(x.days),
+    status: String(x.status),
+    clientName: String(x.client_name),
+    animatriceName: (x.animatrice_name as string | null) ?? null,
+    brandName: (x.brand_name as string | null) ?? null,
+    cost: Number(x.cost),
+    durationHours: x.duration_hours === null ? null : Number(x.duration_hours),
+    customersAdvised: Number(x.customers_advised),
+    samples: Number(x.samples),
+    comment: (x.comment as string | null) ?? null,
+    photoUrl: (x.photo_url as string | null) ?? null,
+    lines,
+  };
+}
+
+async function logRevision(ex: Executor, animationId: string, actor: Actor, action: RevisionAction, summary: string, changes: RevisionChange[]) {
+  await ex.insert(animationRevisions).values({ animationId, actorId: actor.id, actorName: actor.name, action, summary, changes });
 }

@@ -12,10 +12,12 @@ import { saveAnimation, deleteAnimation } from "../actions";
 import { fmtMAD, fmtNum, fmtDate, iso, delta } from "@/lib/format";
 import { ANIMATION_ERRORS, ANIMATION_WARNINGS } from "@/lib/animations-shared";
 import { pointsOfSale } from "@/lib/terrain/points-of-sale";
+import { animationHistory } from "@/lib/terrain/reports";
+import { AnimationHistory } from "@/components/animation-history";
 
 export const dynamic = "force-dynamic";
 
-export default async function AnimationPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; warn?: string }> }) {
+export default async function AnimationPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; warn?: string; back?: string; supprimer?: string }> }) {
   const user = await requireAccess("terrain");
   const [ownOnly, canValidate, animatriceUsers, seeCosts] = await Promise.all([isOwnOnly(), canDo("terrain", "validate"), listAnimatrices(), hasFlag("seeInternalCosts")]);
   const { id } = await props.params;
@@ -23,12 +25,16 @@ export default async function AnimationPage(props: { params: Promise<{ id: strin
   const anim = await db.query.animations.findFirst({ where: eq(animationsTable.id, id), with: { client: true, animatrice: true, brand: true, lines: { with: { product: true } } } });
   if (!anim) notFound();
   if (ownOnly && anim.animatriceId !== user.id) notFound();
-  const [impact, clients, products, brands] = await Promise.all([
+  const [impact, clients, products, brands, history] = await Promise.all([
     animationImpact(id),
     pointsOfSale({ include: [anim.clientId] }),
     db.execute(sql`select id, name, brand_id from products where active order by name`),
     listBrands(),
+    animationHistory(id),
   ]);
+  // Liste d'où l'on vient (filtres conservés) ; jamais une URL extérieure.
+  const back = sp.back?.startsWith("/terrain/rapports") ? sp.back : "/terrain/rapports";
+  const self = `/terrain/${id}${sp.back ? `?back=${encodeURIComponent(sp.back)}` : ""}`;
   const sold = anim.lines.reduce((a, l) => a + l.quantitySold, 0);
   const cost = Number(anim.cost);
   const roi = cost ? impact.during_revenue / cost : null;
@@ -38,8 +44,26 @@ export default async function AnimationPage(props: { params: Promise<{ id: strin
     <>
       {sp.error && <div className="mb-4 rounded-2xl bg-red-soft border border-red/30 px-4 py-3 text-[13px] text-red font-medium">{ANIMATION_ERRORS[sp.error] ?? "Enregistrement impossible."}</div>}
       {sp.warn?.split(",").map((w) => <div key={w} className="mb-4 rounded-2xl bg-orange-soft border border-orange/30 px-4 py-3 text-[13px] text-orange font-medium">{ANIMATION_WARNINGS[w] ?? "Animation enregistrée avec des réserves."}</div>)}
-      <PageHeader eyebrow={<Link href="/terrain" className="hover:underline">Animations</Link>} title={`${anim.client.name} — ${anim.startDate && anim.startDate !== anim.date ? `du ${fmtDate(anim.startDate)} au ${fmtDate(anim.date)}` : fmtDate(anim.date)}`} subtitle={[anim.animatrice?.name, anim.brand?.name ?? "Multi-marques", anim.client.city, anim.days > 1 ? `${anim.days} jours d'animation` : null].filter(Boolean).join(" · ")}
-        actions={<>{anim.status === "PLANNED" && <Badge tone="blue">Prévue</Badge>}{canValidate && <form action={deleteAnimation}><input type="hidden" name="id" value={id} /><button className="btn-ghost btn-sm text-red" type="submit">Supprimer</button></form>}</>} />
+      <PageHeader eyebrow={<Link href={back} className="hover:underline">Rapports d&apos;animation</Link>} title={`${anim.client.name} — ${anim.startDate && anim.startDate !== anim.date ? `du ${fmtDate(anim.startDate)} au ${fmtDate(anim.date)}` : fmtDate(anim.date)}`} subtitle={[anim.animatrice?.name, anim.brand?.name ?? "Multi-marques", anim.client.city, anim.days > 1 ? `${anim.days} jours d'animation` : null].filter(Boolean).join(" · ")}
+        actions={<>{anim.status === "PLANNED" && <Badge tone="blue">Prévue</Badge>}{canValidate && !sp.supprimer && <Link href={`${self}${self.includes("?") ? "&" : "?"}supprimer=1`} className="btn-ghost btn-sm text-red">Supprimer</Link>}</>} />
+
+      {canValidate && sp.supprimer && (
+        <div className="mb-4 rounded-2xl bg-red-soft border border-red/30 px-4 py-3 text-[13px]">
+          <div className="font-medium text-red">Supprimer ce rapport ?</div>
+          <p className="mt-1 text-ink-2">
+            Le rapport, ses {anim.lines.length} ligne{anim.lines.length > 1 ? "s" : ""} produit et les relevés de stock rayon qu&apos;il contient seront retirés des analyses.
+            Son contenu restera lisible dans l&apos;historique (« Rapports supprimés »), pour pouvoir le ressaisir au besoin.
+          </p>
+          <div className="mt-2 flex gap-2">
+            <form action={deleteAnimation}>
+              <input type="hidden" name="id" value={id} />
+              <input type="hidden" name="back" value={back} />
+              <button className="btn-primary btn-sm !bg-red !border-red" type="submit">Oui, supprimer</button>
+            </form>
+            <Link href={self} className="btn-secondary btn-sm">Annuler</Link>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <Card><div className="label">Vendu pendant l&apos;animation</div><div className="kpi mt-2">{sold} <span className="text-[14px] text-muted font-medium">u.</span></div><div className="mt-2 text-[12px] text-muted">{fmtMAD(impact.during_revenue, { compact: true })} PPH · {fmtMAD(impact.during_retail, { compact: true })} PPV</div></Card>
@@ -72,6 +96,16 @@ export default async function AnimationPage(props: { params: Promise<{ id: strin
             today={iso(new Date())}
             submitLabel="Enregistrer les modifications"
           />
+        </Card>
+      </div>
+
+      <div className="mt-4">
+        <Card title="Historique">
+          {history.length ? <AnimationHistory rows={history} /> : (
+            <p className="text-[13px] text-muted">
+              {anim.source === "import" ? "Rapport importé depuis le fichier quotidien, jamais corrigé depuis." : "Aucune modification enregistrée."} Chaque correction faite ici sera tracée : qui, quand, et chaque valeur avant → après.
+            </p>
+          )}
         </Card>
       </div>
     </>

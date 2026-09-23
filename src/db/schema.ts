@@ -775,6 +775,33 @@ export const animationLines = pgTable(
   (t) => [index("animation_lines_animation_idx").on(t.animationId)],
 );
 
+/**
+ * Historique d'un rapport d'animation : qui l'a créé, corrigé ou supprimé, et quoi exactement.
+ * Pas de clé étrangère sur `animation_id` : l'historique survit à la suppression du rapport
+ * (la ligne SUPPRESSION garde le contenu effacé). Noms dénormalisés, lisibles après coup.
+ * Seule écriture : `src/lib/terrain/save-animation.ts`.
+ */
+export const animationRevisions = pgTable(
+  "animation_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    animationId: uuid("animation_id").notNull(),
+    actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorName: text("actor_name").notNull(),
+    /** CREATION, MODIFICATION ou SUPPRESSION. */
+    action: text("action").notNull(),
+    /** Rappel du rapport (point de vente, période, animatrice) — sert surtout après suppression. */
+    summary: text("summary").notNull(),
+    /** Champs modifiés : `{ label, before, after }`, valeurs déjà mises en forme pour l'écran. */
+    changes: jsonb("changes").$type<{ label: string; before: string | null; after: string | null }[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("animation_revisions_animation_idx").on(t.animationId, t.createdAt),
+    index("animation_revisions_created_idx").on(t.createdAt.desc()),
+  ],
+);
+
 /* ------------------------------------------------------------------ */
 /* Stock chez le client (relevés terrain)                              */
 /* ------------------------------------------------------------------ */
