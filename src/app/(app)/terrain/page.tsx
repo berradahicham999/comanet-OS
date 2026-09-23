@@ -2,13 +2,12 @@ import Link from "next/link";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { requireAccess, isOwnOnly } from "@/lib/access";
-import { getRefDate } from "@/lib/ref-date";
 import { resolvePeriod, PERIOD_OPTIONS, type PeriodParam } from "@/lib/periods";
 import { animationTotals, animationsByDim, animationDaily, animationObjectives, objectiveForRange, bestOf, type DimRow } from "@/lib/animations";
 import { adoptionByWeek, adoptionByAnimatrice } from "@/lib/terrain/usual-products";
 import { PageHeader, Card, Tabs, Delta, Progress, Empty, BrandDot } from "@/components/ui";
 import { SimpleLine } from "@/components/charts";
-import { fmtMAD, fmtNum, fmtDateShort, delta } from "@/lib/format";
+import { fmtMAD, fmtNum, fmtDateShort, delta, today } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Animations" };
@@ -27,7 +26,9 @@ export default async function TerrainPage(props: {
   const user = await requireAccess("terrain");
   const isAnimatrice = await isOwnOnly();
   const sp = await props.searchParams;
-  const { ref } = await getRefDate();
+  // Les animations sont saisies au jour le jour : la période se cale sur aujourd'hui, pas sur la
+  // dernière vente Sage importée (getRefDate), sinon tout ce qui a été saisi depuis disparaît.
+  const ref = today();
   const period = resolvePeriod(sp.period, ref, { start: sp.start, end: sp.end });
   const dim = (DIMS.find((d) => d.key === sp.dim)?.key ?? "animatrice") as (typeof DIMS)[number]["key"];
   const mine = isAnimatrice ? user.id : sp.animatrice || undefined;

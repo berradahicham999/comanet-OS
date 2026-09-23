@@ -2,14 +2,13 @@ import Link from "next/link";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { requireAccess, isOwnOnly, canDo } from "@/lib/access";
-import { getRefDate } from "@/lib/ref-date";
 import { resolvePeriod, PERIOD_OPTIONS, type PeriodParam } from "@/lib/periods";
 import { listAnimatrices, listBrands } from "@/lib/users";
 import { listAnimationReports, deletedReports, REPORTS_LIMIT } from "@/lib/terrain/reports";
 import { fmtAnimationPeriod } from "@/lib/animations-shared";
 import { PageHeader, Card, Badge, Empty } from "@/components/ui";
 import { AnimationHistory } from "@/components/animation-history";
-import { fmtMAD, fmtNum, fmtDateShort } from "@/lib/format";
+import { fmtMAD, fmtNum, fmtDateShort, today } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Rapports d'animation" };
@@ -28,7 +27,9 @@ export default async function RapportsPage(props: { searchParams: Promise<SP> })
   const user = await requireAccess("terrain");
   const [ownOnly, canDelete] = await Promise.all([isOwnOnly(), canDo("terrain", "validate")]);
   const sp = await props.searchParams;
-  const { ref } = await getRefDate();
+  // Les animations sont saisies au jour le jour : la période se cale sur aujourd'hui, pas sur la
+  // dernière vente Sage importée (getRefDate), sinon tout ce qui a été saisi depuis disparaît.
+  const ref = today();
   const period = resolvePeriod(sp.period, ref, { start: sp.start, end: sp.end });
   const source = sp.source === "saisie" || sp.source === "import" ? sp.source : undefined;
 

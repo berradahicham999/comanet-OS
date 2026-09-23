@@ -7,7 +7,7 @@ import { PageHeader, Card } from "@/components/ui";
 import { AnimationForm } from "@/components/animation-form";
 import { AnimationQuickForm } from "@/components/animation-quick-form";
 import { saveAnimation } from "../actions";
-import { iso } from "@/lib/format";
+import { iso, today } from "@/lib/format";
 import { fmtAnimationPeriod, ANIMATION_ERRORS, ANIMATION_WARNINGS } from "@/lib/animations-shared";
 import { pointsOfSale } from "@/lib/terrain/points-of-sale";
 import { animatedProductCatalog, lastClientForAnimatrice } from "@/lib/terrain/usual-products";
@@ -52,7 +52,7 @@ export default async function SaisiePage(props: { searchParams: Promise<{ client
               clients={clients}
               catalog={catalog}
               defaultClientId={sp.client ?? lastClient?.id ?? null}
-              today={iso(new Date())}
+              today={iso(today())}
             />
           </Card>
           <div>
@@ -88,7 +88,7 @@ export default async function SaisiePage(props: { searchParams: Promise<{ client
             animatrices={animatriceUsers.map((u) => ({ id: u.id, name: u.name }))}
             initial={{ clientId: sp.client ?? "" }}
             isAnimatrice={false}
-            today={iso(new Date())}
+            today={iso(today())}
           />
         </Card>
         <div>

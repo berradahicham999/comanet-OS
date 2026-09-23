@@ -9,7 +9,7 @@ import { listBrands, listAnimatrices } from "@/lib/users";
 import { PageHeader, Card, Badge, Delta } from "@/components/ui";
 import { AnimationForm } from "@/components/animation-form";
 import { saveAnimation, deleteAnimation } from "../actions";
-import { fmtMAD, fmtNum, fmtDate, iso, delta } from "@/lib/format";
+import { fmtMAD, fmtNum, fmtDate, iso, delta, today } from "@/lib/format";
 import { ANIMATION_ERRORS, ANIMATION_WARNINGS } from "@/lib/animations-shared";
 import { pointsOfSale } from "@/lib/terrain/points-of-sale";
 import { animationHistory } from "@/lib/terrain/reports";
@@ -93,7 +93,7 @@ export default async function AnimationPage(props: { params: Promise<{ id: strin
             animatrices={animatriceUsers.map((u) => ({ id: u.id, name: u.name }))}
             initial={{ id: anim.id, clientId: anim.clientId, date: anim.date, startDate: anim.startDate, days: anim.days, brandId: anim.brandId, animatriceId: anim.animatriceId, status: anim.status, cost: String(anim.cost), durationHours: anim.durationHours, customersAdvised: anim.customersAdvised, samples: anim.samples, comment: anim.comment, photoUrl: anim.photoUrl, lines: anim.lines.map((l) => ({ productId: l.productId, qty: String(l.quantitySold), stock: l.stockObserved === null ? "" : String(l.stockObserved) })) }}
             isAnimatrice={ownOnly || !seeCosts}
-            today={iso(new Date())}
+            today={iso(today())}
             submitLabel="Enregistrer les modifications"
           />
         </Card>
