@@ -162,6 +162,13 @@
       "when": 1789800200000,
       "tag": "0022_portee_ville",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1789800300000,
+      "tag": "0023_animation_start_date",
+      "breakpoints": true
     }
   ]
 }

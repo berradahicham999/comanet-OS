@@ -79,6 +79,33 @@ describe("refus explicites — jamais de zéro silencieux", () => {
   });
 });
 
+describe("période sur plusieurs jours (« Du … au … »)", () => {
+  test("sans date de début : animation d'une journée", () => {
+    const v = ok(parseAnimationInput(base()));
+    assert.equal(v.startDate, "2026-09-07");
+    assert.equal(v.days, 1);
+  });
+  test("les jours suivent la période, fin incluse", () => {
+    const v = ok(parseAnimationInput(base({ startDate: "2026-09-05", date: "2026-09-07" })));
+    assert.equal(v.startDate, "2026-09-05");
+    assert.equal(v.date, "2026-09-07");
+    assert.equal(v.days, 3);
+  });
+  test("un jour de repos se retire à la main", () => {
+    assert.equal(ok(parseAnimationInput(base({ startDate: "2026-09-05", date: "2026-09-07", days: "2" }))).days, 2);
+  });
+  test("début après la fin ou période trop longue : refusé", () => {
+    assert.deepEqual(parseAnimationInput(base({ startDate: "2026-09-08" })), { ok: false, error: "periode" });
+    assert.deepEqual(parseAnimationInput(base({ startDate: "2026-08-01" })), { ok: false, error: "periode" });
+    assert.deepEqual(parseAnimationInput(base({ startDate: "07/09/2026" })), { ok: false, error: "date" });
+  });
+  test("jours hors de la période ou illisibles : refusé, jamais corrigé en silence", () => {
+    for (const d of ["0", "4", "1.5", "deux", "-1"]) {
+      assert.deepEqual(parseAnimationInput(base({ startDate: "2026-09-05", days: d })), { ok: false, error: "jours" }, `jours « ${d} »`);
+    }
+  });
+});
+
 describe("lignes produit", () => {
   test("une ligne sans produit est ignorée", () => {
     assert.equal(ok(parseAnimationInput(base({ lines: [{ productId: "", qty: "5", stock: "2" }] }))).lines.length, 0);

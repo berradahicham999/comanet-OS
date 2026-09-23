@@ -31,6 +31,8 @@ function readForm(formData: FormData, forcedAnimatriceId: string | null): RawAni
   return {
     clientId: str(formData, "clientId"),
     date: str(formData, "date"),
+    startDate: str(formData, "startDate"),
+    days: str(formData, "days"),
     status: str(formData, "status") || "DONE",
     animatriceId: forcedAnimatriceId ?? str(formData, "animatriceId"),
     brandId: str(formData, "brandId"),
@@ -73,7 +75,8 @@ export async function saveAnimation(formData: FormData) {
   revalidatePath("/terrain/animatrices");
   revalidatePath(`/terrain/${saved.animationId}`);
   revalidatePath("/");
-  const params: Record<string, string> = saved.missingPrice ? { warn: "prix" } : {};
+  const warns = [saved.missingPrice && "prix", saved.overlaps > 0 && "chevauchement"].filter(Boolean);
+  const params: Record<string, string> = warns.length ? { warn: warns.join(",") } : {};
   if (ownOnly) back("/terrain/saisie", { ...params, done: "1" });
   back(`/terrain/${saved.animationId}`, params);
 }

@@ -1,6 +1,18 @@
 /**
  * Normalisations du domaine « animations POS » (partagé client / serveur / import).
  */
+import { fmtDateShort } from "@/lib/format";
+
+/**
+ * Période d'une animation pour l'affichage : « 18 sept. → 20 sept. · 3 j ».
+ * Sans date de début connue (import, historique), seul le dernier jour est affiché, suivi
+ * du nombre de jours s'il dépasse 1 — la période n'est jamais reconstituée.
+ */
+export function fmtAnimationPeriod(startDate: string | null | undefined, date: string, days: number): string {
+  const n = days > 1 ? ` · ${days} j` : "";
+  if (!startDate || startDate === date) return `${fmtDateShort(date)}${n}`;
+  return `${fmtDateShort(startDate)} → ${fmtDateShort(date)}${n}`;
+}
 
 const strip = (v: string) =>
   v.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
@@ -61,6 +73,8 @@ export function animatriceEmail(raw: string) {
 export const ANIMATION_ERRORS: Record<string, string> = {
   client: "Point de vente manquant ou inconnu.",
   date: "Date invalide.",
+  periode: "Période invalide : la date de début doit précéder la date de fin, sur 31 jours au plus.",
+  jours: "Nombre de jours invalide : entre 1 et le nombre de jours de la période.",
   nombre: "Une valeur numérique est invalide (coût, durée, clientes conseillées ou échantillons).",
   quantite: "Quantité vendue invalide : elle doit être un nombre entier positif ou nul.",
   stock: "Stock rayon invalide : il doit être un nombre entier positif ou nul.",
@@ -68,5 +82,6 @@ export const ANIMATION_ERRORS: Record<string, string> = {
 };
 
 export const ANIMATION_WARNINGS: Record<string, string> = {
+  chevauchement: "Animation enregistrée. Attention : cette animatrice a déjà une autre animation sur ces mêmes jours. Vérifiez qu'il ne s'agit pas d'un doublon ou d'une erreur de date.",
   prix: "Animation enregistrée. Attention : certains produits n'ont pas de prix public, leur chiffre d'affaires n'est donc pas mesurable. Renseignez le prix public sur la fiche produit.",
 };

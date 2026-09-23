@@ -707,7 +707,14 @@ export const animations = pgTable(
   "animations",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    /** Dernier jour de l'animation : celui du relevé des ventes. Porte la clé de déduplication. */
     date: date("date").notNull(),
+    /**
+     * Premier jour d'une animation sur plusieurs jours (saisie « Du … au … »). `null` = période
+     * inconnue : lignes importées (le fichier ne donne que le nombre de jours) et historique.
+     * Jamais déduite de `date - days`.
+     */
+    startDate: date("start_date"),
     clientId: uuid("client_id")
       .notNull()
       .references(() => clients.id, { onDelete: "cascade" }),
