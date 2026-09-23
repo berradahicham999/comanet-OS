@@ -134,7 +134,7 @@ export default async function AnimatricesPage(props: { searchParams: Promise<{ p
                 </div>
 
                 <div className="flex gap-2 mt-3">
-                  <Link href={`/terrain?animatrice=${a.id}${sp.period ? `&period=${sp.period}` : ""}`} className="btn-secondary btn-sm">Ses animations</Link>
+                  <Link href={`/terrain/rapports?animatrice=${a.id}${sp.period ? `&period=${sp.period}` : ""}`} className="btn-secondary btn-sm">Ses rapports</Link>
                   <Link href={qs({ focus: a.id })} className="btn-ghost btn-sm">Tendance & marques</Link>
                   <Link href={`/taches/nouvelle?title=${encodeURIComponent(`Point performance — ${a.name}`)}`} className="btn-ghost btn-sm">Créer une tâche</Link>
                 </div>

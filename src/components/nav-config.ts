@@ -55,6 +55,7 @@ export const NAV: NavGroup[] = [
     items: [
       { href: "/terrain", label: "Animations", icon: "Store", module: "terrain" },
       { href: "/terrain/saisie", label: "Saisie terrain", icon: "ClipboardList", module: "terrain" },
+      { href: "/terrain/rapports", label: "Rapports d'animation", icon: "ClipboardList", module: "terrain" },
       { href: "/terrain/animatrices", label: "Animatrices", icon: "Sparkles", module: "terrain", action: "validate" },
     ],
   },

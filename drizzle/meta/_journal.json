@@ -169,6 +169,13 @@
       "when": 1789800300000,
       "tag": "0023_animation_start_date",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1789800400000,
+      "tag": "0024_animation_revisions",
+      "breakpoints": true
     }
   ]
 }

@@ -56,7 +56,7 @@ export default async function SaisiePage(props: { searchParams: Promise<{ client
             />
           </Card>
           <div>
-            <Card title="Mes dernières saisies">
+            <Card title="Mes dernières saisies" action={<Link href="/terrain/rapports" className="text-[12px] text-accent hover:underline">Tout voir</Link>}>
               {recent.rows.length === 0 ? <div className="text-sm text-muted">Aucune saisie pour le moment.</div> : (
                 <ul className="text-[13px] space-y-2">{(recent.rows as { id: string; date: string; start_date: string | null; days: number; client: string; sold: number }[]).map((r) => <li key={r.id} className="flex justify-between gap-2"><Link href={`/terrain/${r.id}`} className="hover:underline truncate">{fmtAnimationPeriod(r.start_date, r.date, r.days)} · {r.client}</Link><span className="font-medium shrink-0">{r.sold} u.</span></li>)}</ul>
               )}
@@ -92,7 +92,7 @@ export default async function SaisiePage(props: { searchParams: Promise<{ client
           />
         </Card>
         <div>
-          <Card title="Dernières saisies">
+          <Card title="Dernières saisies" action={<Link href="/terrain/rapports" className="text-[12px] text-accent hover:underline">Tout voir</Link>}>
             {recent.rows.length === 0 ? <div className="text-sm text-muted">Aucune saisie pour le moment.</div> : (
               <ul className="text-[13px] space-y-2">{(recent.rows as { id: string; date: string; start_date: string | null; days: number; client: string; sold: number }[]).map((r) => <li key={r.id} className="flex justify-between gap-2"><Link href={`/terrain/${r.id}`} className="hover:underline truncate">{fmtAnimationPeriod(r.start_date, r.date, r.days)} · {r.client}</Link><span className="font-medium shrink-0">{r.sold} u.</span></li>)}</ul>
             )}

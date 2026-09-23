@@ -96,6 +96,7 @@ export default async function TerrainPage(props: {
         actions={<>
           <Link href="/imports?type=ANIMATIONS" className="btn-secondary btn-sm">Importer le jour</Link>
           <Link href="/terrain/saisie" className="btn-secondary btn-sm">+ Saisir</Link>
+          <Link href={`/terrain/rapports${mine ? `?animatrice=${mine}` : ""}`} className="btn-secondary btn-sm">Rapports</Link>
           {!isAnimatrice && <Link href="/terrain/animatrices" className="btn-primary btn-sm">Plan d&apos;action animatrices</Link>}
         </>}
       >

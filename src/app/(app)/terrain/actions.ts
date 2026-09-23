@@ -60,7 +60,7 @@ export async function saveAnimation(formData: FormData) {
   const parsed = parseAnimationInput(readForm(formData, ownOnly ? user.id : null));
   if (!parsed.ok) back(formTarget, { error: parsed.error });
 
-  const saved = await persistAnimation({ id, parsed: parsed.value });
+  const saved = await persistAnimation({ id, parsed: parsed.value, actor: { id: user.id, name: user.name } });
   if (!saved.ok) {
     if (saved.error === "doublon") back(`/terrain/${saved.existingId}`, { error: "doublon" });
     back(formTarget, { error: saved.error });
@@ -73,6 +73,7 @@ export async function saveAnimation(formData: FormData) {
 
   revalidatePath("/terrain");
   revalidatePath("/terrain/animatrices");
+  revalidatePath("/terrain/rapports");
   revalidatePath(`/terrain/${saved.animationId}`);
   revalidatePath("/");
   const warns = [saved.missingPrice && "prix", saved.overlaps > 0 && "chevauchement"].filter(Boolean);
@@ -82,12 +83,16 @@ export async function saveAnimation(formData: FormData) {
 }
 
 export async function deleteAnimation(formData: FormData) {
-  await requirePermission("terrain", "validate");
+  const user = await requirePermission("terrain", "validate");
   const id = str(formData, "id").trim();
   if (!id) return;
-  await removeAnimation(id);
+  await removeAnimation(id, { id: user.id, name: user.name });
   await refreshAfterWrite(["ANIMATION"]);
   revalidatePath("/terrain");
   revalidatePath("/terrain/animatrices");
-  redirect("/terrain");
+  revalidatePath("/terrain/rapports");
+  // Retour à la liste d'où l'on vient (filtres conservés), sinon à la liste complète.
+  const back = str(formData, "back");
+  const target = back.startsWith("/terrain/rapports") ? back : "/terrain/rapports";
+  redirect(`${target}${target.includes("?") ? "&" : "?"}deleted=1`);
 }
