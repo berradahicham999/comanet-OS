@@ -37,8 +37,8 @@ export default async function AnimationPage(props: { params: Promise<{ id: strin
   return (
     <>
       {sp.error && <div className="mb-4 rounded-2xl bg-red-soft border border-red/30 px-4 py-3 text-[13px] text-red font-medium">{ANIMATION_ERRORS[sp.error] ?? "Enregistrement impossible."}</div>}
-      {sp.warn && <div className="mb-4 rounded-2xl bg-orange-soft border border-orange/30 px-4 py-3 text-[13px] text-orange font-medium">{ANIMATION_WARNINGS[sp.warn] ?? "Animation enregistrée avec des réserves."}</div>}
-      <PageHeader eyebrow={<Link href="/terrain" className="hover:underline">Animations</Link>} title={`${anim.client.name} — ${fmtDate(anim.date)}`} subtitle={[anim.animatrice?.name, anim.brand?.name ?? "Multi-marques", anim.client.city].filter(Boolean).join(" · ")}
+      {sp.warn?.split(",").map((w) => <div key={w} className="mb-4 rounded-2xl bg-orange-soft border border-orange/30 px-4 py-3 text-[13px] text-orange font-medium">{ANIMATION_WARNINGS[w] ?? "Animation enregistrée avec des réserves."}</div>)}
+      <PageHeader eyebrow={<Link href="/terrain" className="hover:underline">Animations</Link>} title={`${anim.client.name} — ${anim.startDate && anim.startDate !== anim.date ? `du ${fmtDate(anim.startDate)} au ${fmtDate(anim.date)}` : fmtDate(anim.date)}`} subtitle={[anim.animatrice?.name, anim.brand?.name ?? "Multi-marques", anim.client.city, anim.days > 1 ? `${anim.days} jours d'animation` : null].filter(Boolean).join(" · ")}
         actions={<>{anim.status === "PLANNED" && <Badge tone="blue">Prévue</Badge>}{canValidate && <form action={deleteAnimation}><input type="hidden" name="id" value={id} /><button className="btn-ghost btn-sm text-red" type="submit">Supprimer</button></form>}</>} />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
@@ -67,7 +67,7 @@ export default async function AnimationPage(props: { params: Promise<{ id: strin
             products={(products.rows as { id: string; name: string; brand_id: string | null }[]).map((p) => ({ id: p.id, name: p.name, brandId: p.brand_id }))}
             brands={brands.filter((b) => b.active).map((b) => ({ id: b.id, name: b.name }))}
             animatrices={animatriceUsers.map((u) => ({ id: u.id, name: u.name }))}
-            initial={{ id: anim.id, clientId: anim.clientId, date: anim.date, brandId: anim.brandId, animatriceId: anim.animatriceId, status: anim.status, cost: String(anim.cost), durationHours: anim.durationHours, customersAdvised: anim.customersAdvised, samples: anim.samples, comment: anim.comment, photoUrl: anim.photoUrl, lines: anim.lines.map((l) => ({ productId: l.productId, qty: String(l.quantitySold), stock: l.stockObserved === null ? "" : String(l.stockObserved) })) }}
+            initial={{ id: anim.id, clientId: anim.clientId, date: anim.date, startDate: anim.startDate, days: anim.days, brandId: anim.brandId, animatriceId: anim.animatriceId, status: anim.status, cost: String(anim.cost), durationHours: anim.durationHours, customersAdvised: anim.customersAdvised, samples: anim.samples, comment: anim.comment, photoUrl: anim.photoUrl, lines: anim.lines.map((l) => ({ productId: l.productId, qty: String(l.quantitySold), stock: l.stockObserved === null ? "" : String(l.stockObserved) })) }}
             isAnimatrice={ownOnly || !seeCosts}
             today={iso(new Date())}
             submitLabel="Enregistrer les modifications"

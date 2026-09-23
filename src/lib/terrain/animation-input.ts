@@ -15,12 +15,17 @@ import { lineSellout, toFiniteNumber } from "@/lib/sellout";
 export type AnimationStatus = "PLANNED" | "DONE" | "CANCELLED";
 
 /** Codes rendus à l'écran — voir `ANIMATION_ERRORS` dans `animations-shared.ts`. */
-export type AnimationErrorCode = "client" | "date" | "nombre" | "quantite" | "stock";
+export type AnimationErrorCode = "client" | "date" | "periode" | "jours" | "nombre" | "quantite" | "stock";
 
 /** Ce que le formulaire envoie, en chaînes brutes. */
 export type RawAnimationInput = {
   clientId: string;
+  /** Date de fin : le jour du relevé des ventes. */
   date: string;
+  /** Date de début (« Du »). Vide ou absente → même jour que la fin. */
+  startDate?: string;
+  /** Jours réellement animés sur la période. Vide ou absent → tous les jours de la période. */
+  days?: string;
   status: string;
   animatriceId: string | null;
   brandId: string | null;
@@ -41,7 +46,12 @@ export type AnimationLineInput = {
 
 export type ParsedAnimation = {
   clientId: string;
+  /** Dernier jour (relevé des ventes). */
   date: string;
+  /** Premier jour, toujours renseigné à la saisie (= `date` pour une animation d'un jour). */
+  startDate: string;
+  /** Jours animés, entre 1 et la longueur de la période. */
+  days: number;
   status: AnimationStatus;
   animatriceId: string | null;
   brandId: string | null;
@@ -57,6 +67,16 @@ export type ParsedAnimation = {
 export type ParseResult = { ok: true; value: ParsedAnimation } | { ok: false; error: AnimationErrorCode };
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Période la plus longue acceptée pour une seule saisie. Au-delà, c'est une erreur de date. */
+export const MAX_ANIMATION_SPAN_DAYS = 31;
+
+const isIsoDate = (d: string) => ISO_DATE.test(d) && !Number.isNaN(Date.parse(`${d}T12:00:00Z`));
+
+/** Nombre de jours calendaires de `start` à `end` inclus (1 pour le même jour). */
+export function periodSpan(start: string, end: string): number {
+  return Math.round((Date.parse(`${end}T12:00:00Z`) - Date.parse(`${start}T12:00:00Z`)) / 86_400_000) + 1;
+}
 
 /**
  * Nombre d'en-tête : vide → `null` (absent), illisible ou négatif → `undefined` (refusé).
@@ -91,7 +111,21 @@ export function parseAnimationInput(raw: RawAnimationInput): ParseResult {
   if (!clientId) return { ok: false, error: "client" };
 
   const date = raw.date.trim();
-  if (!ISO_DATE.test(date) || Number.isNaN(Date.parse(`${date}T12:00:00Z`))) return { ok: false, error: "date" };
+  if (!isIsoDate(date)) return { ok: false, error: "date" };
+
+  // Période « Du … au … » : les ventes sont relevées le dernier jour, la date de fin reste `date`.
+  const startDate = raw.startDate?.trim() || date;
+  if (!isIsoDate(startDate)) return { ok: false, error: "date" };
+  const span = periodSpan(startDate, date);
+  if (span < 1 || span > MAX_ANIMATION_SPAN_DAYS) return { ok: false, error: "periode" };
+  // Jours animés : un jour de repos au milieu de la période se retire ici, jamais en devinant.
+  let days = span;
+  const rawDays = raw.days?.trim() ?? "";
+  if (rawDays !== "") {
+    const n = toFiniteNumber(rawDays);
+    if (n === null || !Number.isInteger(n) || n < 1 || n > span) return { ok: false, error: "jours" };
+    days = n;
+  }
 
   const status: AnimationStatus = (["PLANNED", "DONE", "CANCELLED"] as const).includes(raw.status as AnimationStatus)
     ? (raw.status as AnimationStatus)
@@ -134,7 +168,7 @@ export function parseAnimationInput(raw: RawAnimationInput): ParseResult {
   return {
     ok: true,
     value: {
-      clientId, date, status,
+      clientId, date, startDate, days, status,
       animatriceId: raw.animatriceId?.trim() || null,
       brandId: raw.brandId?.trim() || null,
       cost: cost ?? 0,

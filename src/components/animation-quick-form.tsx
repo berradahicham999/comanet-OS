@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { X, ChevronDown } from "lucide-react";
 import { normKey } from "@/lib/import/normalize";
+import { AnimationPeriodFields } from "@/components/animation-period-fields";
 
 /**
  * SAISIE RAPIDE — pour le rôle Animatrice uniquement.
@@ -99,10 +100,7 @@ export function AnimationQuickForm({
       {id && <input type="hidden" name="id" value={id} />}
       <input type="hidden" name="status" value="DONE" />
 
-      <label className="block text-[13px]">
-        <span className="label block mb-1">Date</span>
-        <input type="date" name="date" defaultValue={today} className="input h-12 text-[15px]" required />
-      </label>
+      <AnimationPeriodFields initialEnd={today} size="lg" />
 
       <div className="text-[13px]">
         <span className="label block mb-1">Point de vente</span>

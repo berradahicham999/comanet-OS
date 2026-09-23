@@ -7,8 +7,8 @@ import { PageHeader, Card } from "@/components/ui";
 import { AnimationForm } from "@/components/animation-form";
 import { AnimationQuickForm } from "@/components/animation-quick-form";
 import { saveAnimation } from "../actions";
-import { iso, fmtDateShort } from "@/lib/format";
-import { ANIMATION_ERRORS, ANIMATION_WARNINGS } from "@/lib/animations-shared";
+import { iso } from "@/lib/format";
+import { fmtAnimationPeriod, ANIMATION_ERRORS, ANIMATION_WARNINGS } from "@/lib/animations-shared";
 import { pointsOfSale } from "@/lib/terrain/points-of-sale";
 import { animatedProductCatalog, lastClientForAnimatrice } from "@/lib/terrain/usual-products";
 
@@ -22,14 +22,14 @@ export default async function SaisiePage(props: { searchParams: Promise<{ client
   const animatriceUsers = await listAnimatrices();
 
   const recentP = db.execute(sql`
-    select a.id, a.date::text as date, c.name as client, coalesce(sum(al.quantity_sold),0)::int as sold
+    select a.id, a.date::text as date, a.start_date::text as start_date, a.days, c.name as client, coalesce(sum(al.quantity_sold),0)::int as sold
     from animations a join clients c on c.id = a.client_id left join animation_lines al on al.animation_id = a.id
-    where a.animatrice_id = ${user.id}::uuid group by a.id, c.name order by a.date desc limit 5`);
+    where a.animatrice_id = ${user.id}::uuid group by a.id, c.name order by a.date desc, a.created_at desc limit 5`);
 
   const banners = (
     <>
       {sp.error && <div className="mb-4 rounded-2xl bg-red-soft border border-red/30 px-4 py-3 text-[13px] text-red font-medium">{ANIMATION_ERRORS[sp.error] ?? "Enregistrement impossible."}</div>}
-      {sp.warn && <div className="mb-4 rounded-2xl bg-orange-soft border border-orange/30 px-4 py-3 text-[13px] text-orange font-medium">{ANIMATION_WARNINGS[sp.warn] ?? "Animation enregistrée avec des réserves."}</div>}
+      {sp.warn?.split(",").map((w) => <div key={w} className="mb-4 rounded-2xl bg-orange-soft border border-orange/30 px-4 py-3 text-[13px] text-orange font-medium">{ANIMATION_WARNINGS[w] ?? "Animation enregistrée avec des réserves."}</div>)}
       {sp.done && !sp.warn && <div className="mb-4 rounded-2xl bg-green-soft border border-green/30 px-4 py-3 text-[13px] text-green font-medium">Animation enregistrée. Merci !</div>}
     </>
   );
@@ -58,7 +58,7 @@ export default async function SaisiePage(props: { searchParams: Promise<{ client
           <div>
             <Card title="Mes dernières saisies">
               {recent.rows.length === 0 ? <div className="text-sm text-muted">Aucune saisie pour le moment.</div> : (
-                <ul className="text-[13px] space-y-2">{(recent.rows as { id: string; date: string; client: string; sold: number }[]).map((r) => <li key={r.id} className="flex justify-between gap-2"><Link href={`/terrain/${r.id}`} className="hover:underline truncate">{fmtDateShort(r.date)} · {r.client}</Link><span className="font-medium shrink-0">{r.sold} u.</span></li>)}</ul>
+                <ul className="text-[13px] space-y-2">{(recent.rows as { id: string; date: string; start_date: string | null; days: number; client: string; sold: number }[]).map((r) => <li key={r.id} className="flex justify-between gap-2"><Link href={`/terrain/${r.id}`} className="hover:underline truncate">{fmtAnimationPeriod(r.start_date, r.date, r.days)} · {r.client}</Link><span className="font-medium shrink-0">{r.sold} u.</span></li>)}</ul>
               )}
             </Card>
           </div>
@@ -94,7 +94,7 @@ export default async function SaisiePage(props: { searchParams: Promise<{ client
         <div>
           <Card title="Dernières saisies">
             {recent.rows.length === 0 ? <div className="text-sm text-muted">Aucune saisie pour le moment.</div> : (
-              <ul className="text-[13px] space-y-2">{(recent.rows as { id: string; date: string; client: string; sold: number }[]).map((r) => <li key={r.id} className="flex justify-between gap-2"><Link href={`/terrain/${r.id}`} className="hover:underline truncate">{fmtDateShort(r.date)} · {r.client}</Link><span className="font-medium shrink-0">{r.sold} u.</span></li>)}</ul>
+              <ul className="text-[13px] space-y-2">{(recent.rows as { id: string; date: string; start_date: string | null; days: number; client: string; sold: number }[]).map((r) => <li key={r.id} className="flex justify-between gap-2"><Link href={`/terrain/${r.id}`} className="hover:underline truncate">{fmtAnimationPeriod(r.start_date, r.date, r.days)} · {r.client}</Link><span className="font-medium shrink-0">{r.sold} u.</span></li>)}</ul>
             )}
           </Card>
         </div>

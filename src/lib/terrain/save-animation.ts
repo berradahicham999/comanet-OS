@@ -27,7 +27,7 @@ import { recordReadings, deleteReadingsOfAnimation } from "@/lib/client-stock";
 export type SaveAnimationOutcome =
   | { ok: false; error: AnimationErrorCode }
   | { ok: false; error: "doublon"; existingId: string }
-  | { ok: true; animationId: string; eventId: string | null; missingPrice: boolean };
+  | { ok: true; animationId: string; eventId: string | null; missingPrice: boolean; overlaps: number };
 
 export type SaveAnimationContext = {
   /** `null` pour une création. */
@@ -76,6 +76,8 @@ export async function saveAnimation({ id, parsed }: SaveAnimationContext): Promi
   const values = {
     clientId: parsed.clientId,
     date: parsed.date,
+    startDate: parsed.startDate,
+    days: parsed.days,
     status: parsed.status,
     animatriceId: parsed.animatriceId,
     brandId: parsed.brandId,
@@ -90,7 +92,7 @@ export async function saveAnimation({ id, parsed }: SaveAnimationContext): Promi
     photoUrl: parsed.photoUrl,
   };
 
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     let animationId = id ?? "";
     if (id) {
       await tx.update(animations).set(values).where(eq(animations.id, id));
@@ -132,7 +134,7 @@ export async function saveAnimation({ id, parsed }: SaveAnimationContext): Promi
     const key = eventKey(EVENT_TYPES.ANIMATION_COMPLETED, animationId);
     if (parsed.status !== "DONE") {
       await obsoleteEvent(tx, key);
-      return { ok: true as const, animationId, eventId: null, missingPrice };
+      return { ok: true as const, animationId, eventId: null, missingPrice, overlaps: 0 };
     }
 
     const event = await emitEvent(tx, {
@@ -145,6 +147,8 @@ export async function saveAnimation({ id, parsed }: SaveAnimationContext): Promi
       payload: {
         animationId,
         date: parsed.date,
+        startDate: parsed.startDate,
+        days: parsed.days,
         city,
         clientId: parsed.clientId,
         clientName: row.client_name,
@@ -163,8 +167,26 @@ export async function saveAnimation({ id, parsed }: SaveAnimationContext): Promi
       },
     });
 
-    return { ok: true as const, animationId, eventId: event.id, missingPrice };
+    return { ok: true as const, animationId, eventId: event.id, missingPrice, overlaps: 0 };
   });
+
+  return { ...result, overlaps: await countOverlaps(result.animationId, parsed) };
+}
+
+/**
+ * Autres animations non annulées de la même animatrice dont la période croise celle-ci
+ * (même point de vente saisi deux fois, ou deux endroits les mêmes jours). Signalé, jamais
+ * bloquant : deux demi-journées dans deux points de vente restent possibles. Une période
+ * inconnue (import) se réduit à son dernier jour.
+ */
+async function countOverlaps(animationId: string, parsed: ParsedAnimation): Promise<number> {
+  if (!parsed.animatriceId || parsed.status === "CANCELLED") return 0;
+  const r = await db.execute(sql`
+    select count(*)::int as n from animations
+    where animatrice_id = ${parsed.animatriceId}::uuid and id <> ${animationId}::uuid
+      and status <> 'CANCELLED'
+      and coalesce(start_date, date) <= ${parsed.date}::date and date >= ${parsed.startDate}::date`);
+  return Number((r.rows[0] as { n: number }).n);
 }
 
 /** Suppression : les lignes suivent par cascade, le fait devient caduc. */

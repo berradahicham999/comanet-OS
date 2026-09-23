@@ -31,9 +31,9 @@ export async function animationImpact(animationId: string) {
   const r = await db.execute(sql`
     with a as (select * from animations where id = ${animationId}::uuid)
     select
-      (select coalesce(sum(s.quantity),0)::float8 from sales s join products p on p.id = s.product_id, a where s.client_id = a.client_id and (a.brand_id is null or p.brand_id = a.brand_id) and s.date >= a.date - 30 and s.date < a.date) as before_qty,
+      (select coalesce(sum(s.quantity),0)::float8 from sales s join products p on p.id = s.product_id, a where s.client_id = a.client_id and (a.brand_id is null or p.brand_id = a.brand_id) and s.date >= coalesce(a.start_date, a.date) - 30 and s.date < coalesce(a.start_date, a.date)) as before_qty,
       (select coalesce(sum(s.quantity),0)::float8 from sales s join products p on p.id = s.product_id, a where s.client_id = a.client_id and (a.brand_id is null or p.brand_id = a.brand_id) and s.date > a.date and s.date <= a.date + 30) as after_qty,
-      (select coalesce(sum(s.amount),0)::float8 from sales s join products p on p.id = s.product_id, a where s.client_id = a.client_id and (a.brand_id is null or p.brand_id = a.brand_id) and s.date >= a.date - 30 and s.date < a.date) as before_amount,
+      (select coalesce(sum(s.amount),0)::float8 from sales s join products p on p.id = s.product_id, a where s.client_id = a.client_id and (a.brand_id is null or p.brand_id = a.brand_id) and s.date >= coalesce(a.start_date, a.date) - 30 and s.date < coalesce(a.start_date, a.date)) as before_amount,
       (select coalesce(sum(s.amount),0)::float8 from sales s join products p on p.id = s.product_id, a where s.client_id = a.client_id and (a.brand_id is null or p.brand_id = a.brand_id) and s.date > a.date and s.date <= a.date + 30) as after_amount,
       (select coalesce(sum(al.quantity_sold),0)::float8 from animation_lines al where al.animation_id = ${animationId}::uuid) as during_qty,
       (select coalesce(sum(al.quantity_sold * coalesce(p.price_wholesale,0)),0)::float8 from animation_lines al join products p on p.id = al.product_id where al.animation_id = ${animationId}::uuid) as during_revenue,

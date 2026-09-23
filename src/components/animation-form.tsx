@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { normKey } from "@/lib/import/normalize";
+import { AnimationPeriodFields } from "@/components/animation-period-fields";
 
 export type FormProduct = { id: string; name: string; brandId: string | null };
 export type FormClient = { id: string; name: string; city: string | null };
@@ -17,7 +18,7 @@ export function AnimationForm({ action, clients, products, brands, animatrices, 
   products: FormProduct[];
   brands: FormBrand[];
   animatrices: FormUser[];
-  initial?: { id?: string; clientId?: string; date?: string; brandId?: string | null; animatriceId?: string | null; status?: string; cost?: string; durationHours?: string | null; customersAdvised?: number; samples?: number; comment?: string | null; photoUrl?: string | null; lines?: Line[] };
+  initial?: { id?: string; clientId?: string; date?: string; startDate?: string | null; days?: number; brandId?: string | null; animatriceId?: string | null; status?: string; cost?: string; durationHours?: string | null; customersAdvised?: number; samples?: number; comment?: string | null; photoUrl?: string | null; lines?: Line[] };
   isAnimatrice: boolean;
   today: string;
   submitLabel?: string;
@@ -39,9 +40,9 @@ export function AnimationForm({ action, clients, products, brands, animatrices, 
   return (
     <form action={action} className="space-y-4">
       {initial?.id && <input type="hidden" name="id" value={initial.id} />}
+      <AnimationPeriodFields initialStart={initial?.startDate} initialEnd={initial?.date ?? today} initialDays={initial?.days} />
       <div className="grid grid-cols-2 gap-2">
-        <label className="block text-[13px]"><span className="label block mb-1">Date</span><input type="date" name="date" defaultValue={initial?.date ?? today} className="input h-11" required /></label>
-        <label className="block text-[13px]"><span className="label block mb-1">Statut</span>
+        <label className="block text-[13px] col-span-2"><span className="label block mb-1">Statut</span>
           <select name="status" defaultValue={initial?.status ?? "DONE"} className="select h-11"><option value="DONE">Réalisée</option><option value="PLANNED">Prévue</option><option value="CANCELLED">Annulée</option></select>
         </label>
         {!isAnimatrice && (
