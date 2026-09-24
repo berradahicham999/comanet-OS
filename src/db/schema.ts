@@ -2,8 +2,10 @@
  * COMANET OS — modèle de données central.
  *
  * Principes :
- *  - Sage reste la source de vérité : les tables `sales`, `clients`, `products`,
- *    `stock_snapshots` sont ALIMENTÉES par import et jamais renvoyées vers Sage.
+ *  - Deux sources de pièces : les imports (Sage de COMANET jusqu'à la bascule, distributeurs
+ *    ensuite) alimentent `sales` et `stock_snapshots` ; la gestion commerciale de COMANET OS
+ *    (`src/lib/gestion/`) tient les référentiels étendus, le journal de stock `stock_movements`
+ *    et, à partir du lot 2, les pièces de vente. Rien n'est jamais renvoyé vers Sage.
  *  - Identifiants UUID stables sur toutes les entités.
  *  - Aucune règle métier ici : les seuils vivent dans `settings`,
  *    les règles dans `src/lib/rules`.
@@ -15,6 +17,7 @@ import {
   text,
   varchar,
   integer,
+  bigint,
   numeric,
   boolean,
   date,
@@ -73,6 +76,7 @@ export const importTypeEnum = pgEnum("import_type", [
   "MEDECINS",
   "INVENTORY",
   "INFLUENCERS",
+  "STOCK_INITIAL",
 ]);
 
 export const importStatusEnum = pgEnum("import_status", [
@@ -540,9 +544,30 @@ export const products = pgTable(
     target: text("target"),
     marketingAngle: text("marketing_angle"),
     imageUrl: text("image_url"),
+    /*
+     * Gestion commerciale (migration 0025). Le matériel marketing (PLV, goodies) n'est PAS un
+     * article : il reste dans `inventory_items` (module Activations).
+     */
+    /** Référence article du Sage de COMANET (ex. « CYG01 ») — distincte de `sku`, qui vient des fichiers distributeurs. */
+    code: text("code"),
+    ean: text("ean"),
+    /** PRODUIT (stocké) | SERVICE (jamais en stock). */
+    kind: text("kind").notNull().default("PRODUIT"),
+    /** Taux de TVA de l'article ; vide = taux par défaut de `settings.gestion`. */
+    taxRateKey: text("tax_rate_key").references((): AnyPgColumn => taxRates.key, { onUpdate: "cascade" }),
+    unit: text("unit").notNull().default("unité"),
+    /** Colisage (unités par carton). */
+    packSize: integer("pack_size"),
+    /** Suivi des lots et dates de péremption. */
+    trackLots: boolean("track_lots").notNull().default(false),
+    lastPurchasePrice: numeric("last_purchase_price", { precision: 12, scale: 2 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("products_brand_idx").on(t.brandId), uniqueIndex("products_sku_uq").on(t.sku).where(sql`sku is not null`)],
+  (t) => [
+    index("products_brand_idx").on(t.brandId), uniqueIndex("products_sku_uq").on(t.sku).where(sql`sku is not null`),
+    uniqueIndex("products_code_uq").on(t.code).where(sql`code is not null`),
+    uniqueIndex("products_ean_uq").on(t.ean).where(sql`ean is not null`),
+  ],
 );
 
 /** Variantes de désignation (ventes, stock, objectifs…) rattachées à un produit canonique. */
@@ -580,11 +605,43 @@ export const clients = pgTable(
     channel: text("channel"), // ex: pharmacie / parapharmacie / grossiste / e-commerce
     salesRep: text("sales_rep"), // commercial
     phone: text("phone"),
+    /** Archivage : un client archivé disparaît des listes et des sélecteurs, son historique reste. */
     active: boolean("active").notNull().default(true),
     needsReview: boolean("needs_review").notNull().default(false),
+    /*
+     * Gestion commerciale (migration 0025). Le client reste le point de vente fonctionnel ; ces
+     * colonnes portent son identité légale et ses conditions. Chaque pièce validée en garde une
+     * copie figée : modifier la fiche ne change jamais une facture émise.
+     */
+    /** Code client du Sage de COMANET (ex. « 056 ») — distinct de `code`, qui vient des fichiers distributeurs. */
+    accountCode: text("account_code"),
+    /** Raison sociale imprimée sur les pièces ; `name` reste le nom commercial. */
+    legalName: text("legal_name"),
+    ice: text("ice"),
+    ifNumber: text("if_number"),
+    rc: text("rc"),
+    patente: text("patente"),
+    billingAddress: text("billing_address"),
+    postalCode: text("postal_code"),
+    email: text("email"),
+    contactName: text("contact_name"),
+    /** Commercial COMANET attitré (compte utilisateur) ; `salesRep` reste le libellé venu des imports. */
+    accountManagerId: uuid("account_manager_id").references((): AnyPgColumn => users.id, { onDelete: "set null" }),
+    defaultDiscountPct: numeric("default_discount_pct", { precision: 5, scale: 2 }),
+    paymentModeKey: text("payment_mode_key").references((): AnyPgColumn => paymentModes.key, { onUpdate: "cascade" }),
+    paymentDays: integer("payment_days"),
+    creditLimit: numeric("credit_limit", { precision: 14, scale: 2 }),
+    blocked: boolean("blocked").notNull().default(false),
+    blockedReason: text("blocked_reason"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("clients_city_idx").on(t.city), index("clients_sector_idx").on(t.sector), index("clients_rep_idx").on(t.salesRep), index("clients_code_idx").on(t.code)],
+  (t) => [
+    index("clients_city_idx").on(t.city), index("clients_sector_idx").on(t.sector), index("clients_rep_idx").on(t.salesRep), index("clients_code_idx").on(t.code),
+    uniqueIndex("clients_account_code_uq").on(t.accountCode).where(sql`account_code is not null`),
+    index("clients_ice_idx").on(t.ice),
+    index("clients_account_manager_idx").on(t.accountManagerId),
+  ],
 );
 
 /** Raisons sociales / libellés bruts rattachés à un client fonctionnel. */
@@ -693,10 +750,203 @@ export const stockSnapshots = pgTable(
     onOrder: numeric("on_order", { precision: 12, scale: 2 }).notNull().default("0"), // commande fournisseur en cours
     date: date("date").notNull(),
     source: text("source").notNull().default("IMPORT"),
+    /** Dépôt photographié (dépôt externe d'un distributeur) ; vide = photo globale d'avant la bascule. */
+    warehouseKey: text("warehouse_key").references((): AnyPgColumn => warehouses.key, { onUpdate: "cascade" }),
     importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("stock_product_date_idx").on(t.productId, t.date), index("stock_snapshots_import_idx").on(t.importId)],
+);
+
+/* ------------------------------------------------------------------ */
+/* Gestion commerciale — référentiels, journal de stock, numérotation  */
+/* ------------------------------------------------------------------ */
+
+/** Taux de TVA (modifiables dans /parametres/gestion). Une pièce copie le taux sur chaque ligne. */
+export const taxRates = pgTable("tax_rates", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  rate: numeric("rate", { precision: 5, scale: 2 }).notNull(),
+  sort: integer("sort").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+});
+
+export const paymentModes = pgTable("payment_modes", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  /** Effet / LCN : le règlement porte sa propre échéance. */
+  requiresDueDate: boolean("requires_due_date").notNull().default(false),
+  sort: integer("sort").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+});
+
+/**
+ * Dépôts. INTERNE : stock suivi mouvement par mouvement dans `stock_movements`.
+ * EXTERNE : stock confié à un distributeur (Cospharma, Pharmafirst), connu seulement par les
+ * photos importées dans `stock_snapshots` — aucun mouvement n'y est écrit.
+ */
+export const warehouses = pgTable("warehouses", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  kind: text("kind").notNull().default("INTERNE"),
+  /** Faux pour le dépôt « non vendable » : son stock n'est pas disponible à la vente. */
+  sellable: boolean("sellable").notNull().default(true),
+  notes: text("notes"),
+  sort: integer("sort").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+});
+
+export const clientDeliveryAddresses = pgTable(
+  "client_delivery_addresses",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    clientId: uuid("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    address: text("address").notNull(),
+    city: text("city"),
+    isDefault: boolean("is_default").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("client_delivery_addresses_client_idx").on(t.clientId)],
+);
+
+/** Remise d'un client sur une marque : remplace sa remise par défaut pour les articles de cette marque. */
+export const clientBrandDiscounts = pgTable(
+  "client_brand_discounts",
+  {
+    clientId: uuid("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+    brandId: uuid("brand_id").notNull().references(() => brands.id, { onDelete: "cascade" }),
+    discountPct: numeric("discount_pct", { precision: 5, scale: 2 }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.clientId, t.brandId] })],
+);
+
+/**
+ * Fournisseurs. MARCHANDISES : laboratoires et marques, leurs réceptions entrent dans le journal
+ * de stock. HORS_STOCK : PLV, goodies, impression, transport, services — leurs achats alimentent
+ * l'inventaire marketing (`inventory_items`) ou restent de simples dépenses.
+ */
+export const suppliers = pgTable(
+  "suppliers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    code: text("code"),
+    legalName: text("legal_name").notNull(),
+    nameKey: text("name_key").notNull(),
+    nature: text("nature").notNull().default("MARCHANDISES"),
+    ice: text("ice"),
+    ifNumber: text("if_number"),
+    rc: text("rc"),
+    country: text("country").notNull().default("Maroc"),
+    currency: text("currency").notNull().default("MAD"),
+    address: text("address"),
+    city: text("city"),
+    contactName: text("contact_name"),
+    email: text("email"),
+    phone: text("phone"),
+    paymentDays: integer("payment_days"),
+    paymentModeKey: text("payment_mode_key").references(() => paymentModes.key, { onUpdate: "cascade" }),
+    notes: text("notes"),
+    active: boolean("active").notNull().default(true),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("suppliers_code_uq").on(t.code).where(sql`code is not null`), index("suppliers_name_key_idx").on(t.nameKey)],
+);
+
+export const supplierBrands = pgTable(
+  "supplier_brands",
+  {
+    supplierId: uuid("supplier_id").notNull().references(() => suppliers.id, { onDelete: "cascade" }),
+    brandId: uuid("brand_id").notNull().references(() => brands.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.supplierId, t.brandId] }), index("supplier_brands_brand_idx").on(t.brandId)],
+);
+
+export const stockLots = pgTable(
+  "stock_lots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    productId: uuid("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
+    lotNumber: text("lot_number").notNull(),
+    expiryDate: date("expiry_date"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("stock_lots_product_lot_uq").on(t.productId, t.lotNumber), index("stock_lots_expiry_idx").on(t.expiryDate)],
+);
+
+/**
+ * Journal de stock : stock d'un article = somme de ses mouvements, jamais un champ écrasé.
+ * Écriture seule (triggers de la migration 0025 : ni UPDATE, ni DELETE, ni TRUNCATE) ; une
+ * erreur se corrige par un contre-mouvement (`reversalOf`). Seul `src/lib/gestion/ledger.ts`
+ * y écrit. Chaque mouvement pointe vers ce qui l'a créé (`sourceType` + `sourceId`).
+ */
+export const stockMovements = pgTable(
+  "stock_movements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Ordre d'écriture : plusieurs mouvements d'une même transaction partagent leur horodatage. */
+    seq: bigint("seq", { mode: "number" }).notNull().generatedAlwaysAsIdentity(),
+    productId: uuid("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
+    lotId: uuid("lot_id").references(() => stockLots.id, { onDelete: "restrict" }),
+    warehouseKey: text("warehouse_key").notNull().default("PRINCIPAL").references(() => warehouses.key, { onDelete: "restrict" }),
+    /** Transfert : dépôt d'en face (un envoi vers un dépôt externe n'a qu'une ligne, la sortie). */
+    counterpartWarehouseKey: text("counterpart_warehouse_key").references(() => warehouses.key, { onDelete: "restrict" }),
+    type: text("type").notNull(),
+    /** Signée : positive = entrée, négative = sortie. */
+    quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
+    /** Coût unitaire du mouvement (achat, stock initial) ou CMUP du moment (sorties). */
+    unitCost: numeric("unit_cost", { precision: 14, scale: 4 }),
+    /** CMUP de l'article juste après ce mouvement (fait daté, jamais réécrit). */
+    cmupAfter: numeric("cmup_after", { precision: 14, scale: 4 }),
+    date: date("date").notNull(),
+    /** IMPORT | MANUEL | pièce (BL, RECEPTION, AVOIR, RETOUR, INVENTAIRE) — voir `ledger-shared.ts`. */
+    sourceType: text("source_type").notNull(),
+    sourceId: uuid("source_id"),
+    sourceLineId: uuid("source_line_id"),
+    reversalOf: uuid("reversal_of").references((): AnyPgColumn => stockMovements.id, { onDelete: "restrict" }),
+    comment: text("comment"),
+    importId: uuid("import_id").references(() => imports.id, { onDelete: "restrict" }),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("stock_movements_product_date_idx").on(t.productId, t.date),
+    index("stock_movements_product_seq_idx").on(t.productId, t.seq),
+    index("stock_movements_lot_idx").on(t.lotId),
+    index("stock_movements_source_idx").on(t.sourceType, t.sourceId),
+    index("stock_movements_import_idx").on(t.importId),
+    uniqueIndex("stock_movements_reversal_uq").on(t.reversalOf).where(sql`reversal_of is not null`),
+    check("stock_movements_quantity_ck", sql`${t.quantity} <> 0`),
+  ],
+);
+
+/** Série de numérotation d'un type de pièce : format réglable (ex. `FA{AAAA}{N:5}` → FA202600198). */
+export const documentSeries = pgTable("document_series", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  pattern: text("pattern").notNull(),
+  sort: integer("sort").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+});
+
+/**
+ * Compteur d'une série pour une année. Seul `src/lib/gestion/numbering.ts` y écrit : le numéro
+ * est pris dans la transaction de validation de la pièce, donc sans trou. `issuedMax` = plus
+ * haut numéro réellement attribué ; tant qu'il vaut 0, le « prochain numéro » reste réglable
+ * (reprise de la séquence Sage à la bascule).
+ */
+export const documentSequences = pgTable(
+  "document_sequences",
+  {
+    seriesKey: text("series_key").notNull().references(() => documentSeries.key, { onDelete: "restrict", onUpdate: "cascade" }),
+    year: integer("year").notNull(),
+    lastValue: integer("last_value").notNull().default(0),
+    issuedMax: integer("issued_max").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.seriesKey, t.year] })],
 );
 
 /* ------------------------------------------------------------------ */
@@ -2170,6 +2420,8 @@ export const contentAssets = pgTable(
     contentId: uuid("content_id").references(() => contentItems.id, { onDelete: "cascade" }),
     activationId: uuid("activation_id").references(() => activations.id, { onDelete: "cascade" }),
     inventoryItemId: uuid("inventory_item_id").references(() => inventoryItems.id, { onDelete: "cascade" }),
+    /** Fichier de la société (LOGO | CACHET), imprimé sur les pièces. */
+    companySlot: text("company_slot"),
     kind: text("kind").notNull().default("LIVRABLE"), // LIVRABLE | REFERENCE | DEVIS | FACTURE | VISUEL | PHOTO | COMPTE_RENDU
     name: text("name").notNull(),
     mime: text("mime").notNull().default("application/octet-stream"),
@@ -2184,7 +2436,8 @@ export const contentAssets = pgTable(
     index("content_assets_activation_idx").on(t.activationId, t.kind, t.version),
     index("content_assets_inventory_idx").on(t.inventoryItemId, t.kind, t.version),
     index("content_assets_user_idx").on(t.uploadedById),
-    check("content_assets_owner_ck", sql`((${t.contentId} is not null)::int + (${t.activationId} is not null)::int + (${t.inventoryItemId} is not null)::int) = 1`),
+    index("content_assets_company_idx").on(t.companySlot, t.kind, t.version),
+    check("content_assets_owner_ck", sql`((${t.contentId} is not null)::int + (${t.activationId} is not null)::int + (${t.inventoryItemId} is not null)::int + (${t.companySlot} is not null)::int) = 1`),
   ],
 );
 

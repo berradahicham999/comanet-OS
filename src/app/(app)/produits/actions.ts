@@ -5,15 +5,15 @@ import { redirect } from "next/navigation";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { products, productAliases, stockSnapshots } from "@/db/schema";
-import { requireAccess } from "@/lib/access";
+import { requirePermission } from "@/lib/access";
 import { normKey } from "@/lib/import/normalize";
 
 const numOrNull = (v: FormDataEntryValue | null) => { const s = String(v ?? "").replace(",", ".").trim(); return s === "" ? null : Number(s); };
 const money = (v: FormDataEntryValue | null) => { const n = numOrNull(v); return n === null || Number.isNaN(n) ? null : n.toFixed(2); };
 
 export async function saveProduct(formData: FormData) {
-  await requireAccess("produits");
   const id = String(formData.get("id") ?? "");
+  await requirePermission("produits", id ? "edit" : "create");
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return;
   const values = {
@@ -50,10 +50,13 @@ export async function saveProduct(formData: FormData) {
 
 /** Fusionne le produit source dans le produit cible : ventes, stock, alias, réglementaire, contenus, objectifs. */
 export async function mergeProduct(formData: FormData) {
-  await requireAccess("produits");
+  await requirePermission("produits", "validate");
   const sourceId = String(formData.get("sourceId") ?? "");
   const targetId = String(formData.get("targetId") ?? "");
   if (!sourceId || !targetId || sourceId === targetId) return;
+  // Le journal de stock et les lots ne se réécrivent pas : un article qui a des mouvements ne se fusionne plus.
+  const ledger = (await db.execute<{ n: number }>(sql`select (select count(*) from stock_movements where product_id = ${sourceId}::uuid)::int + (select count(*) from stock_lots where product_id = ${sourceId}::uuid)::int as n`)).rows[0]?.n ?? 0;
+  if (ledger > 0) redirect(`/produits/${sourceId}?error=${encodeURIComponent("Fusion impossible : cet article a des mouvements dans le journal de stock. Archivez-le plutôt (décochez « actif »).")}`);
   const source = await db.query.products.findFirst({ where: eq(products.id, sourceId) });
   if (!source) return;
   await db.transaction(async (tx) => {
@@ -77,7 +80,7 @@ export async function mergeProduct(formData: FormData) {
 }
 
 export async function addStockSnapshot(formData: FormData) {
-  await requireAccess("stock");
+  await requirePermission("stock", "create");
   const productId = String(formData.get("productId") ?? "");
   const quantity = numOrNull(formData.get("quantity"));
   if (!productId || quantity === null) return;

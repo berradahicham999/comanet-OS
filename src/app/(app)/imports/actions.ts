@@ -53,6 +53,7 @@ export async function runImportAction(formData: FormData) {
     options: {
       year: Number(formData.get("year")) || undefined,
       stockDate: String(formData.get("stockDate") ?? "") || undefined,
+      warehouseKey: String(formData.get("warehouseKey") ?? "") || undefined,
       adPlatform: String(formData.get("adPlatform") ?? "") || undefined,
       createUnknown: formData.get("createUnknown") !== "off",
       // Matrices (animations, objectifs par ville) : les colonnes non mappées portent les données.
@@ -72,7 +73,7 @@ export async function runImportAction(formData: FormData) {
  * saisie est conservée. Les marques créées sont toujours conservées.
  */
 export async function rollbackImport(formData: FormData) {
-  await requireAnyModule();
+  const user = await requireAnyModule();
   const id = String(formData.get("id") ?? "");
   if (!id) return;
   const imp = await db.query.imports.findFirst({ where: eq(imports.id, id) });
@@ -86,7 +87,7 @@ export async function rollbackImport(formData: FormData) {
   let removed = 0;
   let orphans = { products: 0, clients: 0, aliases: 0 };
   try {
-    removed = await rollbackRows(id, imp.type);
+    removed = await rollbackRows(id, imp.type, { id: user.id });
     orphans = await rollbackOrphans(id);
   } catch (e) {
     redirect(`/imports/${id}?error=` + encodeURIComponent(`Annulation impossible : ${(e as Error).message}`));
@@ -97,7 +98,9 @@ export async function rollbackImport(formData: FormData) {
       status: "FAILED",
       warnings: [
         ...imp.warnings,
-        `Import annulé le ${new Date().toLocaleDateString("fr-FR")} : ${removed} enregistrement(s) supprimé(s).`,
+        imp.type === "STOCK_INITIAL"
+          ? `Import annulé le ${new Date().toLocaleDateString("fr-FR")} : ${removed} mouvement(s) contrepassé(s) dans le journal de stock.`
+          : `Import annulé le ${new Date().toLocaleDateString("fr-FR")} : ${removed} enregistrement(s) supprimé(s).`,
         ...(orphans.products || orphans.clients || orphans.aliases
           ? [`Fiches créées par cet import et retirées : ${orphans.products} produit(s), ${orphans.clients} client(s), ${orphans.aliases} alias.`]
           : []),

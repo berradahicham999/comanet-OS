@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { sql, eq, desc } from "drizzle-orm";
 import { db } from "@/db";
 import { clients as clientsTable, tasks as tasksTable } from "@/db/schema";
-import { requireAccess } from "@/lib/access";
+import { requireAccess, canDo, clientInScope } from "@/lib/access";
 import { clientIntel, SEGMENT_META } from "@/lib/clients";
 import { getRefDate } from "@/lib/ref-date";
 import { monthlySeries, ORDER_KEY } from "@/lib/analytics";
@@ -14,6 +14,8 @@ import { fmtMAD, fmtNum, fmtDate, fmtDateShort, addDays, iso } from "@/lib/forma
 import { updateClient } from "../actions";
 import { readingsForClient } from "@/lib/client-stock";
 import { SECTORS, cityToSector } from "@/lib/sectors";
+import { ClientInfosTab } from "./infos-tab";
+import { billingReadiness } from "@/lib/gestion/clients-shared";
 
 export const dynamic = "force-dynamic";
 
@@ -23,12 +25,14 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
   await requireAccess("clients");
   const { id } = await props.params;
   const sp = await props.searchParams;
-  const tab = sp.tab === "stock" ? "stock" : "apercu";
+  const tab = sp.tab === "stock" ? "stock" : sp.tab === "infos" ? "infos" : "apercu";
+  if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const client = await db.query.clients.findFirst({ where: eq(clientsTable.id, id) });
   if (!client) notFound();
+  if (!(await clientInScope(id))) notFound();
   const { ref } = await getRefDate();
-  const [intelList, series, products, orders, animations, openTasks, aliases, stockReadings] = await Promise.all([
-    clientIntel({ clientId: id }, ref),
+  const [intelList, series, products, orders, animations, openTasks, aliases, stockReadings, canEdit] = await Promise.all([
+    clientIntel({ clientId: id, includeArchived: true }, ref),
     monthlySeries(13, { clientId: id }, ref),
     db.execute(sql`
       select p.id, p.name, b.name as brand, b.color,
@@ -47,25 +51,27 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
     db.select().from(tasksTable).where(sql`${tasksTable.entityId} = ${id}::uuid and ${tasksTable.status} in ('TODO','IN_PROGRESS')`).orderBy(desc(tasksTable.createdAt)),
     db.execute(sql`select alias from client_aliases where client_id = ${id}::uuid order by alias`),
     readingsForClient(id),
+    canDo("clients", "edit"),
   ]);
   const stockProducts = new Set(stockReadings.map((r) => r.productId)).size;
   const intel = intelList[0];
   if (!intel) notFound();
   const seg = SEGMENT_META[intel.segment];
   const rec = intel.recommendation;
+  const billing = billingReadiness({ legalName: client.legalName, ice: client.ice, billingAddress: client.billingAddress, city: client.city, accountCode: client.accountCode, paymentDays: client.paymentDays, paymentModeKey: client.paymentModeKey });
 
   return (
     <>
       <PageHeader
         eyebrow={<Link href="/clients" className="hover:underline">Clients</Link>}
-        title={<span className="flex items-center gap-2 flex-wrap">{client.name} {intel.highPotential && <span title="Fort potentiel">⭐</span>} <Badge tone={seg.tone}>{seg.label}</Badge></span>}
-        subtitle={[client.code, client.type, client.city, client.sector ? `Secteur : ${client.sector}` : null, client.salesRep ? `Commercial : ${client.salesRep}` : null].filter(Boolean).join(" · ")}
+        title={<span className="flex items-center gap-2 flex-wrap">{client.name} {intel.highPotential && <span title="Fort potentiel">⭐</span>} <Badge tone={seg.tone}>{seg.label}</Badge>{!client.active && <Badge tone="gray">archivé</Badge>}{client.blocked && <Badge tone="red">bloqué</Badge>}</span>}
+        subtitle={[client.legalName && client.legalName !== client.name ? client.legalName : null, client.accountCode ? `Code ${client.accountCode}` : client.code, client.type, client.city, client.sector ? `Secteur : ${client.sector}` : null, client.salesRep ? `Commercial : ${client.salesRep}` : null].filter(Boolean).join(" · ")}
         actions={<Link href={`/taches/nouvelle?entityType=client&entityId=${id}&title=${encodeURIComponent(rec.title + " — " + client.name)}`} className="btn-primary btn-sm">+ Tâche</Link>}
       >
-        <Tabs current={tab === "stock" ? `/clients/${id}?tab=stock` : `/clients/${id}`} tabs={[{ href: `/clients/${id}`, label: "Vue d'ensemble" }, { href: `/clients/${id}?tab=stock`, label: "Stock en point de vente", count: stockProducts }]} />
+        <Tabs current={tab === "stock" ? `/clients/${id}?tab=stock` : tab === "infos" ? `/clients/${id}?tab=infos` : `/clients/${id}`} tabs={[{ href: `/clients/${id}`, label: "Vue d'ensemble" }, { href: `/clients/${id}?tab=infos`, label: billing.ready ? "Identité & conditions" : "Identité & conditions ⚠︎" }, { href: `/clients/${id}?tab=stock`, label: "Stock en point de vente", count: stockProducts }]} />
       </PageHeader>
 
-      {tab === "stock" ? <ClientStockTab clientId={id} clientName={client.name} sp={sp} /> : (<>
+      {tab === "infos" ? <ClientInfosTab client={client} billing={billing} sp={sp} /> : tab === "stock" ? <ClientStockTab clientId={id} clientName={client.name} sp={sp} /> : (<>
       {/* Recommandation */}
       <div className={`card card-pad mb-4 border-l-4`} style={{ borderLeftColor: rec.kind === "NONE" ? "#d6d6d1" : rec.kind === "REACTIVATION" ? "#dc2626" : rec.kind === "ANALYSE" ? "#ea580c" : rec.kind === "RELANCE" ? "#2563eb" : "#0f766e" }}>
         <div className="flex flex-wrap items-center gap-2 mb-1"><span className="label">Plan d&apos;action</span><Badge tone={REC_TONE[rec.kind]}>{rec.title}</Badge></div>
@@ -85,6 +91,7 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
         </Card>
         <Card title="Fiche client">
           <form action={updateClient} className="space-y-2 text-[13px]">
+            <fieldset disabled={!canEdit} className="space-y-2">
             <input type="hidden" name="id" value={client.id} />
             <label className="block"><span className="label block mb-1">Nom</span><input name="name" defaultValue={client.name} className="input h-9" /></label>
             <div className="grid grid-cols-2 gap-2">
@@ -102,9 +109,10 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
               <label className="block"><span className="label block mb-1">Téléphone</span><input name="phone" defaultValue={client.phone ?? ""} className="input h-9" /></label>
             </div>
             <label className="block"><span className="label block mb-1">Canal</span><input name="channel" defaultValue={client.channel ?? ""} className="input h-9" placeholder="ex: Direct, Cospharma…" /></label>
-            <label className="flex items-center gap-2"><input type="checkbox" name="active" defaultChecked={client.active} /> Client actif</label>
-            <button className="btn-secondary btn-sm w-full" type="submit">{client.needsReview ? "Qualifier le client" : "Enregistrer"}</button>
+            {canEdit && <button className="btn-secondary btn-sm w-full" type="submit">{client.needsReview ? "Qualifier le client" : "Enregistrer"}</button>}
+            </fieldset>
           </form>
+          <Link href={`/clients/${id}?tab=infos`} className="mt-2 block text-[12px] text-accent font-medium">{billing.ready ? "Identité légale et conditions →" : `Pour facturer : ${billing.missing.join(", ")} →`}</Link>
           {aliases.rows.length > 1 && <div className="mt-3 text-[11px] text-faint">Alias : {(aliases.rows as { alias: string }[]).map((a) => a.alias).join(" · ")}</div>}
         </Card>
       </div>

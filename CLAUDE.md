@@ -2,7 +2,11 @@
 
 Plateforme de pilotage interne de **COMANET**, distributeur B2B casablancais de marques
 dermo-cosmétiques et de compléments alimentaires (pharmacies, parapharmacies, grossistes).
-Sage reste la source de vérité comptable ; COMANET OS lit ses exports et n'écrit jamais dedans.
+Jusqu'ici, Sage était la source de vérité et COMANET OS lisait ses exports sans jamais écrire dedans.
+**Ce principe change** : la gestion commerciale (`src/lib/gestion/`, plan dans `docs/plan-gestion-commerciale.md`)
+remplace progressivement Sage pour les pièces émises par COMANET (sites `COMANET` et `DESK DIGITAL`). Les autres
+sites du fichier de ventes (Cospharma : COS, CAS, CAG, DAG, CMR ; Pharmafirst) restent importés. Rien n'est
+jamais renvoyé vers Sage.
 
 Utilisateur : **Hicham**, co-gérant. Réponses et interface **en français**.
 Devise MAD, fuseau `Africa/Casablanca`.
@@ -24,6 +28,8 @@ npm run db:generate    # génère une migration depuis src/db/schema.ts
 npm run db:push        # pousse le schéma sans migration (dev uniquement)
 npm run db:studio
 npm run agent:tool -- <outil> '<json>'   # pont CLI de l'Agent marketing (lecture seule, données réelles)
+GESTION_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/gestion-integration.ts
+                                         # intégration gestion commerciale (journal, numérotation) — jamais sur la prod
 ```
 
 Variables d'environnement : `DATABASE_URL`, `DATABASE_SSL`, `SESSION_SECRET`, `SETUP_KEY`,
@@ -48,12 +54,14 @@ src/lib/rules/        moteur de recommandations (Action Center)
 src/lib/marketing-intel/ couche Marketing Intelligence de l'Agent marketing (vue marque, stock par SKU, performance produit, décisions)
 src/lib/content/      planning éditorial (référentiels, workflow, notifications, fichiers, démo)
 src/lib/activations/  activations marketing hors digital (référentiels, workflow, budget, inventaire, ROI, démo)
+src/lib/gestion/      gestion commerciale (montants exacts, numérotation, journal de stock, clients, fournisseurs, préparation de la bascule)
 drizzle/              migrations SQL + meta/_journal.json
 ```
 
 Modules : Cockpit, Action Center, Ventes, Clients, Produits, Marques, Stock,
 **Marketing** (vue d'ensemble, campagnes, Digital Ads, Influence, planning éditorial, activations, matériel, budgets, analytics, agent marketing),
-Terrain (animations, animatrices, saisie), Réglementaire, Tâches, Imports, Paramètres.
+Terrain (animations, animatrices, saisie), Réglementaire, Tâches, Imports, Paramètres,
+**Gestion commerciale** (préparation de la bascule, stock réel, fournisseurs ; BL, factures, achats, inventaires à venir).
 
 ---
 
@@ -97,6 +105,11 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Statut d'une activation, budget, retards, retour | `src/lib/activations/workflow.ts` + `shared.ts` + `budget.ts` + `roi.ts` | `transitionActivation()` (seule écriture du statut), `budgetTotals()`, `expenseRowsFor()`, `syncActivationExpenses()` (seul reflet dans `marketing_expenses`), `activationLateness()`, `compareSales()`, `roiVerdict()`, `canValidateActivation()` |
 | Stock d'un article d'inventaire | `src/lib/activations/inventory.ts` + `shared.ts` | `recordMovement()` (seule écriture du stock), `consumeMaterial()`, `inventoryStatus()` |
 | Lecture marketing d'une marque (statut de stock par SKU, profil / catégorie produit, objectifs et écart, contexte marketing, décisions) | `src/lib/marketing-intel/` | `buildBrandOverview()`, `buildInventory()`, `buildProductPerformance()`, `buildSalesTargets()`, `buildMarketingContext()`, `buildRecommendations()`, `stockStatusOf()`, `stockRiskOf()`, `salesProfileOf()`, `decide()` |
+| Montants, quantités, coûts exacts (jamais de float), CMUP, valeur de stock | `src/lib/gestion/money.ts` | `parseDecimal()`, `roundDiv()`, `formatScaled()`, `nextCmup()`, `valueOf()`, `fmtQty()`, `fmtMoney()` |
+| Numéro d'une pièce (séries, reprise Sage, sans trou) | `src/lib/gestion/numbering.ts` + `numbering-shared.ts` | `allocateNumber()` (seule écriture, dans la transaction de validation), `setNextNumber()`, `formatNumber()`, `patternError()`, `nextNumberError()` |
+| Stock réel de l'entrepôt (journal de mouvements, lots, péremption, dépôts externes par photo) | `src/lib/gestion/ledger.ts` + `ledger-shared.ts` | `recordStockMovements()` (seule écriture), `stockState()`, `listMovements()`, `reverseImportMovements()`, `movementError()`, `allocateFefo()`, `expiryStatus()` |
+| Journal d'audit (qui a créé, modifié, archivé quoi) | `src/lib/audit.ts` | `audit()` (seule écriture de `audit_logs`), `changedFields()`, `auditTrail()` |
+| Client prêt à facturer, doublons de clients | `src/lib/gestion/clients-shared.ts` + `clients.ts` | `billingReadiness()`, `duplicateCandidates()`, `createClient()`, `updateClientLegal()`, `clientLinks()` |
 
 `tests/definitions-uniques.test.ts` échoue si une seconde définition réapparaît.
 
@@ -159,8 +172,23 @@ serveur, « données à jour au … », recommandation du moteur, chat avec la m
 sous-agent Claude Code `comanet-marketing` via `npm run agent:tool -- <outil> '<json>'` (lecture seule). Aucune
 donnée de vente ou de stock n'entre dans un prompt : elle est lue par les outils à chaque question.
 
+**Gestion commerciale** (`docs/guide-gestion-commerciale.md`, plan `docs/plan-gestion-commerciale.md`). Lot 1 livré :
+fondations. On **étend** `clients` (identité légale : `account_code` = code Sage COMANET, distinct de `code` qui vient
+des fichiers distributeurs ; `legal_name`, `ice`, conditions) et `products` (`code` = réf. COMANET type CYG01,
+distincte de `sku` ; EAN, TVA, suivi des lots) — aucun second référentiel ; le matériel marketing reste dans
+`inventory_items`. Nouvelles tables : `suppliers`, `tax_rates`, `payment_modes`, `warehouses` (INTERNE = journal,
+EXTERNE = photo importée : Cospharma, Pharmafirst), `stock_lots`, `stock_movements` (écriture seule, triggers qui
+refusent UPDATE / DELETE / TRUNCATE ; une erreur se corrige par contre-mouvement), `document_series` +
+`document_sequences`. Les montants sont des entiers à échelle fixe (`money.ts`), un test interdit `parseFloat` et
+`toFixed` dans `src/lib/gestion/`. Toute écriture de référentiel laisse une trace `audit_logs` dans la même
+transaction. Réglages : `settings.gestion` (identité de la société — jamais dans le code, le dépôt est public —,
+TVA par défaut, délais, stock insuffisant, péremption, bascule : mode OFF → PARALLELE → ACTIF, date, sites).
+Logo et cachet dans `content_assets` (`company_slot`). Droits : modules `livraisons`, `facturation`, `achats` ;
+archiver / bloquer / supprimer = « Valider ». `productStocks()` lit encore les photos : il passera sur le journal
+à la bascule (un seul point de changement).
+
 **Permissions modulaires par utilisateur** (`docs/permissions-modulaires.md`). Chaque compte porte
-sa propre matrice `user_permissions` (14 modules × Voir / Créer / Modifier / Valider), une portée
+sa propre matrice `user_permissions` (17 modules × Voir / Créer / Modifier / Valider), une portée
 `user_scope` (OWN / ASSIGNED / ALL), des assignations de marques et de clients, et six interrupteurs
 transverses `user_flags`. Les modèles de rôle (`role_templates`) ne servent qu'à pré-remplir.
 Règles : aucune décision d'accès sur `users.role` (enum legacy recalculée, lecture seule — un test
@@ -196,11 +224,13 @@ Un seul moteur pour tous les types : `src/lib/import/`.
   (UTF-8 vs Windows-1252 ; sans elle les exports de régie accentués sont illisibles).
 - `fields.ts` — champs et synonymes par type, mapping automatique.
 - `run.ts` — un `import<Type>()` par type de données.
-- `rollback.ts` — annulation ; seuls les imports « par ligne » (SALES, STOCK, ANIMATIONS, ADS)
-  sont réversibles, les imports de référentiel expliquent pourquoi ils ne le sont pas.
+- `rollback.ts` — annulation ; seuls les imports « par ligne » (SALES, STOCK, ANIMATIONS, ADS,
+  STOCK_INITIAL) sont réversibles, les imports de référentiel expliquent pourquoi ils ne le sont pas.
+  Un stock initial ne s'efface pas : son annulation écrit des contre-mouvements dans le journal.
 
 Types : `SALES`, `CLIENTS`, `PRODUCTS`, `STOCK`, `OBJECTIVES`, `BUDGETS`, `REGULATORY`,
-`ANIMATIONS`, `ANIM_OBJECTIVES`, `ADS`.
+`ANIMATIONS`, `ANIM_OBJECTIVES`, `ADS`, `MEDECINS`, `INVENTORY`, `INFLUENCERS`, `STOCK_INITIAL`.
+`STOCK` (photo) porte un dépôt : Cospharma et Pharmafirst ne sont connus que par leurs photos.
 
 Pour les publicités, `src/lib/meta/` fait la même chose par API et suit les mêmes conventions
 (clé de dédoublonnage stable, lots, `import_id`/`source`). La synchro relit une **fenêtre

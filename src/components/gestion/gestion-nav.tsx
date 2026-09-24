@@ -1,0 +1,26 @@
+import { redirect } from "next/navigation";
+import { requireAccessContext, can } from "@/lib/access";
+import type { ModuleKey } from "@/lib/access-shared";
+import { Tabs } from "@/components/ui";
+
+/** Modules qui ouvrent l'espace « Gestion commerciale ». */
+export const GESTION_MODULES: ModuleKey[] = ["livraisons", "facturation", "achats", "stock", "clients", "produits", "administration"];
+
+/** Garde de page : au moins un module de la gestion commerciale en lecture. */
+export async function requireGestionView() {
+  const a = await requireAccessContext();
+  if (!GESTION_MODULES.some((m) => can(a.perms, m, "view"))) redirect(a.home);
+  return a;
+}
+
+/** Onglets de l'espace, filtrés par droits. */
+export async function GestionTabs({ current }: { current: string }) {
+  const a = await requireAccessContext();
+  const tabs = [
+    { href: "/gestion", label: "Préparation", ok: true },
+    { href: "/gestion/stock", label: "Stock réel", ok: can(a.perms, "stock", "view") },
+    { href: "/gestion/fournisseurs", label: "Fournisseurs", ok: can(a.perms, "achats", "view") },
+    { href: "/parametres/gestion", label: "Paramètres", ok: can(a.perms, "administration", "view") },
+  ].filter((t) => t.ok);
+  return <Tabs current={current} tabs={tabs.map(({ href, label }) => ({ href, label }))} />;
+}
