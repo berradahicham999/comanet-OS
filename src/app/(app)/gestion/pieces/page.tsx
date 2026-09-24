@@ -35,9 +35,10 @@ export default async function PiecesPage(props: { searchParams: Promise<{ type?:
         eyebrow="Gestion commerciale"
         title="Pièces de vente"
         subtitle={MODE_HINT[mode]}
-        actions={canCreate && type !== "AVOIR" ? (
-          <Link href={`/gestion/pieces/nouveau?type=${type}`} className="btn-primary btn-sm">+ {type === "BL" ? "Bon de livraison" : "Facture de services"}</Link>
-        ) : undefined}
+        actions={<span className="flex gap-2 flex-wrap">
+          <Link href={`/gestion/exports?types=${type}`} className="btn-secondary btn-sm">Sélectionner et exporter</Link>
+          {canCreate && <Link href={`/gestion/pieces/nouveau?type=${type}`} className="btn-primary btn-sm">+ {type === "BL" ? "Bon de livraison" : type === "AVOIR" ? "Avoir financier" : "Facture de services"}</Link>}
+        </span>}
       >
         <GestionTabs current="/gestion/pieces" />
       </PageHeader>
@@ -52,7 +53,7 @@ export default async function PiecesPage(props: { searchParams: Promise<{ type?:
             ? "Un bon de livraison sort le stock du dépôt principal (lot au plus proche de la péremption). Il se facture ensuite, seul ou regroupé avec d'autres BL du même client."
             : type === "FACTURE"
               ? "Une facture d'articles se crée depuis les BL (onglet « Facturer des BL ») ; une facture directe ne porte que des services ou des frais."
-              : "Un avoir se crée depuis une facture validée (bouton « Faire un avoir » sur la facture) : retour de marchandise, erreur de prix, remise après coup."}
+              : "Un avoir se crée depuis une facture validée (bouton « Faire un avoir » sur la facture) : retour de marchandise, erreur de prix. Une remise hors facture (objectifs atteints) se fait en « avoir financier », ventilé par marque."}
           action={canCreate && type === "BL" ? <Link href="/gestion/pieces/nouveau?type=BL" className="btn-primary btn-sm">Créer le premier BL</Link> : undefined}
         />
       ) : (

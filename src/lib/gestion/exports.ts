@@ -1,9 +1,8 @@
 import "server-only";
 import { sql } from "drizzle-orm";
-import { zipSync } from "fflate";
 import * as XLSX from "xlsx";
 import { db } from "@/db";
-import { storedPdf } from "./pdf";
+import { pgArray } from "@/lib/sql-array";
 import { openInvoices } from "./payments";
 import { AGING_BUCKETS, AGING_LABELS, agedBalance } from "./receivables-shared";
 import { SCALE, formatScaled, parseDecimal } from "./money";
@@ -14,9 +13,6 @@ import { SCALE, formatScaled, parseDecimal } from "./money";
  * (journal des ventes, TVA par taux, journal des achats, règlements, balance âgée). Rien n'est recalculé :
  * chaque chiffre vient de la pièce figée.
  */
-
-/** Pièces par ZIP : une réponse de fonction Vercel ne dépasse pas ~4,5 Mo. */
-export const PIECES_PER_ZIP = 20;
 
 const monthRange = (month: string) => {
   const from = `${month}-01`;
@@ -36,14 +32,20 @@ export async function exportPieces(month: string, simulation: boolean): Promise<
       and d.date between ${from}::date and ${to}::date order by d.type desc, d.number`)).rows;
 }
 
-/** ZIP des PDF figés d'un lot de pièces (rendus et stockés au besoin, jamais modifiés). */
-export async function zipPieces(ids: string[], userId: string): Promise<Uint8Array> {
-  const files: Record<string, [Uint8Array, { level: 0 }]> = {};
-  for (const id of ids) {
-    const pdf = await storedPdf(id, userId);
-    if (pdf) files[pdf.name] = [new Uint8Array(pdf.data), { level: 0 }];
-  }
-  return zipSync(files);
+export type SelectablePiece = ExportPiece & { status: string; site: string };
+
+/**
+ * Pièces validées d'une période, pour la sélection et l'export groupé (BL, factures, avoirs) : le ZIP
+ * est assemblé dans le navigateur à partir des PDF figés de chaque pièce (aucune limite de taille).
+ */
+export async function selectablePieces(opts: { from: string; to: string; types: string[]; simulation: boolean }): Promise<SelectablePiece[]> {
+  if (!opts.types.length) return [];
+  return (await db.execute<SelectablePiece>(sql`
+    select d.id, d.type, d.number, d.date::text as date, coalesce(d.client_snapshot->>'legalName', c.name) as client, d.client_snapshot->>'ice' as ice,
+      d.net_ht::text as "netHt", d.vat_total::text as "vatTotal", d.ttc::text as ttc, d.vat_breakdown as "vatBreakdown", d.status, d.site
+    from sales_documents d join clients c on c.id = d.client_id
+    where d.type = any(${pgArray(opts.types, "text")}) and d.status <> 'BROUILLON' and d.source = 'COMANET_OS' and d.is_simulation = ${opts.simulation}
+      and d.date between ${opts.from}::date and ${opts.to}::date order by d.date, d.number`)).rows;
 }
 
 /** Récapitulatif du mois pour le comptable, en Excel. */

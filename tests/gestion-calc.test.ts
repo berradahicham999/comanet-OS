@@ -181,7 +181,7 @@ describe("PDF — formats Sage, lignes imprimées, reports", () => {
     assert.equal(fmtSage(null), "");
   });
   const line = (over: Partial<PdfLine> = {}): PdfLine => ({
-    ref: "A1", designation: "Crème", quantity: "3.000", freeQuantity: "0.000", unitPriceHt: "165.83", publicPriceTtc: "199.00", discountPct: "10.00", grossHt: "447.74",
+    ref: "A1", designation: "Crème", quantity: "3.000", freeQuantity: "0.000", unitPriceHt: "165.83", publicPriceTtc: "199.00", discountPct: "10.00", grossHt: "447.74", taxRate: "20.00",
     netHt: "447.74", vatAmount: "89.55", ttc: "537.29", sourceNumber: null, sourceDate: null, lotAllocations: [], ...over,
   });
   test("facture regroupée : un en-tête par BL ; les UG ne s'impriment jamais sur une facture ni un avoir", () => {
@@ -196,6 +196,7 @@ describe("PDF — formats Sage, lignes imprimées, reports", () => {
     assert.deepEqual(avoir.map((r) => r.kind), ["line"]);
     assert.equal((avoir[0] as { free: string }).free, "");
     assert.equal((pdfRows("BL", [line({ freeQuantity: "2.000" })])[0] as { free: string }).free, "2,00");
+    assert.equal((pdfRows("BL", [line()])[0] as { unitPriceTtc: string }).unitPriceTtc, "199,00"); // 165,83 × 1,20 = 198,996
     assert.equal((rows[0] as { label: string }).label, "BL n° BL202600001 du 01/09/2026");
     const l = rows[1] as { netUnit: string };
     assert.equal(l.netUnit, "149,25"); // 447,74 ÷ 3

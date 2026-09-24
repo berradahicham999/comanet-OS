@@ -22,7 +22,7 @@ import { PageHeader, Card, Badge, Facts } from "@/components/ui";
 import { DocumentEditor } from "@/components/gestion/document-editor";
 import { AuditTrail } from "@/components/gestion/audit-trail";
 import {
-  cancelBLAction, creditNoteAction, deleteDraftAction, deliverAction, requestApprovalAction, saveDocumentAction, validateDocumentAction,
+  renameClientAction, cancelBLAction, creditNoteAction, deleteDraftAction, deliverAction, requestApprovalAction, saveDocumentAction, validateDocumentAction,
 } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -212,6 +212,17 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
         </div>
 
         <div className="space-y-4">
+          {!draft && can(a.perms, type === "BL" ? "livraisons" : "facturation", "validate") && (
+            <Card title="Nom du client imprimé">
+              <form action={renameClientAction} className="space-y-2 text-[13px]">
+                <input type="hidden" name="id" value={id} />
+                <input name="name" defaultValue={client.legalName ?? doc.client.legalName ?? doc.client.name} className="input h-9" required />
+                <input name="reason" className="input h-9" placeholder="Motif de la correction *" required />
+                <button className="btn-secondary btn-sm" type="submit">Corriger le nom</button>
+                <p className="text-[11.5px] text-faint">Seul le nom imprimé change : client, ICE, montants et numéro restent. Le PDF est régénéré ; l&apos;ancien reste archivé et la correction figure dans l&apos;historique.</p>
+              </form>
+            </Card>
+          )}
           {!draft && status !== "ANNULE" && (
             <Card title="Envoyer au client">
               <div className="space-y-2 text-[13px]">
