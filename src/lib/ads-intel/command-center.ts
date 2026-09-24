@@ -237,7 +237,7 @@ export async function buildCommandCenter(opts: { periodKey?: string; brandId?: s
     estimatedValue, contribution: estimatedValue !== null ? estimatedValue - spend : null,
     notes: [
       revenue > 0 ? "CA mesuré : valeur de conversion remontée par la régie." : "Aucun CA attribué : la régie ne remonte aucune valeur de conversion (pas de pixel d'achat).",
-      sellIn ? "Sell-in Sage de la marque sur la période : corrélation observée, jamais une attribution." : "Sell-in indisponible sur la période.",
+      sellIn ? "Sell-in de la marque sur la période : corrélation observée, jamais une attribution." : "Sell-in indisponible sur la période.",
       estimatedValue === null ? `Contribution non mesurable : aucune valeur par ${RESULT_LABELS[mainKind].one} saisie (Paramètres → adsIntel.valuePerResult).` : `Valeur estimée à ${valuePer} MAD par ${RESULT_LABELS[mainKind].one} (réglage saisi, pas une mesure).`,
     ],
   };

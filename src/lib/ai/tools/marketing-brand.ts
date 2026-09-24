@@ -69,10 +69,10 @@ export const getBrandOverview: AiTool<typeof overviewSchema> = {
     if (!brand) return unavailable("Préciser la marque.", "Indiquer le nom de la marque (search_entities si l'orthographe est incertaine).");
     const o = await buildBrandOverview(intelContext(ctx), { brandId: brand.id, brandName: brand.name, period: input.period, custom: { start: input.period_start, end: input.period_end } });
     if (o.sales.revenue === 0 && o.sales.revenuePrev === null && o.topProducts.length === 0) {
-      return unavailable(`Aucune vente Sage pour ${brand.name} sur ${o.period.label} ni sur la période précédente.`, "Importer l'export Sage de la période (Imports → Ventes) ou élargir la période.", "Sage — sell-in HT");
+      return unavailable(`Aucune vente (sell-in) pour ${brand.name} sur ${o.period.label} ni sur la période précédente.`, "Importer l'export Sage de la période (Imports → Ventes) ou élargir la période.", "Sage — sell-in HT");
     }
     const notes = freshnessNotes(ctx, o.stock ? o.stock.stockDate : undefined);
-    if (!o.sales.comparable) notes.push("Période précédente sans vente Sage : croissance « pas encore comparable ».");
+    if (!o.sales.comparable) notes.push("Période précédente sans vente sell-in : croissance « pas encore comparable ».");
     if (o.margin && o.margin.coveragePct !== null && o.margin.coveragePct < 100) notes.push(`Marge calculée sur ${round(o.margin.coveragePct, 0)} % du CA (produits avec prix d'achat et prix COMANET connus).`);
     if (o.notAccessible.length) notes.push(`Non accessible avec vos droits : ${o.notAccessible.join(" ; ")}.`);
     return {
@@ -170,7 +170,7 @@ export const getMarketingRecommendations: AiTool<typeof recoSchema> = {
     const ictx = intelContext(ctx);
     if (input.limit) ictx.settings = { ...ictx.settings, marketingIntel: { ...ictx.settings.marketingIntel, maxDecisions: limitOf(input.limit, 5) } };
     const r = await buildRecommendations(ictx, { brandId: brand.id, brandName: brand.name, period: input.period, custom: { start: input.period_start, end: input.period_end } });
-    if (r.performance.rows.length === 0) return unavailable(`Aucune vente Sage ni stock connu pour ${brand.name} sur ${r.period.label}.`, "Importer les ventes (Imports → Ventes) et une photo de stock (Imports → Stock).", "Sage — sell-in HT + photo de stock");
+    if (r.performance.rows.length === 0) return unavailable(`Aucune vente (sell-in) ni stock connu pour ${brand.name} sur ${r.period.label}.`, "Importer les ventes (Imports → Ventes) et une photo de stock (Imports → Stock).", "Sage — sell-in HT + photo de stock");
     const notes = [...freshnessNotes(ctx, r.performance.inventory ? r.performance.inventory.stockDate : undefined), ...r.set.notes];
     if (!ictx.gates.stock) notes.push("Stock non accessible avec vos droits : aucune décision ne peut vérifier la couverture, la confiance est abaissée.");
     if (r.adsSignal === "UNAVAILABLE") notes.push("Signal Ads indisponible (aucune donnée de régie sur la marque).");

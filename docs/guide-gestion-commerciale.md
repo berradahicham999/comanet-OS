@@ -215,6 +215,50 @@ sur le serveur Next : `/gestion/pieces/<id>/pdf`.
 - **Droits** : préparer, démarrer et compter = Créer sur Stock ; valider, annuler, motifs et « non comptés → 0 » =
   Valider sur Stock. À l'aveugle, seul qui valide voit le théorique.
 
-## À venir
+## Lot 5 — règlements et bascule (livré)
 
-Lot 5 (règlements, bascule, exports comptables) — voir le plan.
+### Ce que l'on trouve dans l'application
+
+| Écran | Rôle |
+|---|---|
+| **Règlements** (`/gestion/reglements`) | Indicateurs (reste à encaisser, échu, portefeuille, à remettre en banque) et quatre onglets : règlements, échéancier (factures ouvertes par échéance), balance âgée par client (non échu, 1-30, 31-60, 61-90, +90 j), à remettre en banque. |
+| **+ Règlement** | Client (ceux qui ont des factures ouvertes d'abord), date, mode, montant, n° de chèque / effet, banque, échéance d'un effet ; **imputation proposée** sur les factures les plus anciennes, modifiable ligne par ligne ; un reliquat reste « non imputé » sur le règlement. |
+| **Fiche règlement** | Imputations (désimputer, imputer le reste), suivi : remis en banque → encaissé, ou impayé (motif) ; annulé depuis le portefeuille. |
+| **Fiche facture / avoir** | Solde, règlements et avoirs imputés (un impayé est barré), « Encaisser ». Avoir : crédit restant et imputation sur une autre facture du client. |
+| **Relances** (`/gestion/relances`) | Clients avec des factures échues, niveau 1 / 2 / 3 selon le retard, message prêt (WhatsApp, e-mail) ; chaque relance est enregistrée. |
+| **Envoi au comptable** (`/gestion/exports`) | Les factures et avoirs du mois en PDF, **les mêmes que ceux des clients (sans UG)**, par ZIP de 20, et un récapitulatif Excel : journal des ventes (base et TVA par taux), TVA par taux, journal des achats, règlements, balance âgée. |
+| **Bascule** (`/gestion/bascule`) | Contrôles (bloquants et avertissements), mode (Sage fait foi → période parallèle → COMANET OS émet), reprise des factures ouvertes de Sage, rapport de contrôle mensuel (CA HT et nombre de pièces COMANET OS contre Sage, stock du journal contre la photo Sage). |
+| **Action Center** | Factures échues à relancer, effets à remettre en banque, impayés récents, rappel de bascule. |
+| **Paramètres** | Niveaux de relance (7 / 30 / 60 j), délai entre deux relances, remise des effets N jours avant échéance ; mode de paiement « encaissé à la réception ». |
+
+### Règles
+
+- **Règlement** (série RG, sans trou) : virement et espèces sont encaissés à l'enregistrement ; chèque et effet
+  entrent en portefeuille → remis → encaissé, ou impayé. Client, montant, date et mode sont figés par la base ;
+  un règlement ne se supprime pas. Seul `src/lib/gestion/payments.ts` écrit règlements, imputations et relances.
+- **Solde d'une facture** (`invoiceBalance()`) = TTC − déjà réglé à la reprise − imputations des règlements valides et
+  des avoirs. Un impayé ou un annulé ne solde plus rien : la facture se rouvre d'elle-même. Une imputation ne dépasse
+  jamais le solde de la facture ni le disponible du règlement ; réelle et simulation ne se mélangent pas.
+- **Avoir** : à sa validation, il solde d'abord sa facture d'origine ; le reste est un crédit client imputable
+  ailleurs. Les avoirs validés avant ce lot ont été imputés par la migration 0029.
+- **Encours de risque** (plafond d'encours) : soldes des factures moins les seuls règlements **encaissés** et les
+  avoirs, plus les BL non facturés ; un chèque en portefeuille reste un risque.
+- **Bascule.** `emitsReal()` : une pièce est légale (séries BL / FA / AV) seulement en mode ACTIF, datée du jour de
+  bascule ou après, sur un site qui bascule ; sinon simulation (SIM…). En mode ACTIF : projection des ventes,
+  **refus d'import** des lignes Sage de ces sites datées après la bascule (`importBlockedByCutover()`, C5), et
+  `productStocks()` lit le **journal** (dépôts internes vendables) plus les dernières photos des dépôts externes. Le
+  passage à ACTIF exige qu'aucun contrôle bloquant ne reste (date, identité, logo et cachet, stock de départ) et la
+  saisie de « BASCULER » ; il se fait depuis la page Bascule, jamais depuis les paramètres.
+- **Reprise Sage** : état des factures non soldées (code client ou nom, n° pièce, date, échéance, TTC, reste) →
+  pièces FACTURE figées, source `SAGE_REPRISE`, `reprise_paid` = TTC − reste, sans ligne ni projection (déjà dans
+  les ventes importées). Idempotente.
+- **Rapport de contrôle** : un écart d'un centime par pièce au plus est affiché comme arrondi.
+- **Libellés** : les messages parlent de « vente (sell-in) » et non plus de « vente Sage » (C22).
+- **Droits** : règlements = Facturation (Créer = saisir, Modifier = imputer / remettre / encaisser / relancer,
+  Valider = impayé / annulation) ; envoi au comptable = Voir sur Facturation + interrupteur « Exporter des données » ;
+  bascule = Administration.
+
+## Suite
+
+Le module est complet. Calendrier retenu : période parallèle en décembre 2026, bascule au 1ᵉʳ janvier 2027
+(date modifiable dans Paramètres).

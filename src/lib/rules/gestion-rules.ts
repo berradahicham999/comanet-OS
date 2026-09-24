@@ -256,4 +256,86 @@ export const recurringGapsRule: Rule = {
   },
 };
 
-export const gestionRules: Rule[] = [uninvoicedBLRule, approvalPendingRule, expiringLotsRule, lateOrdersRule, uninvoicedReceptionsRule, staleCountRule, noRecentCountRule, recurringGapsRule];
+/** Clients à relancer (factures réelles échues ; niveau et délai entre relances dans settings.gestion.receivables). */
+export const overdueInvoicesRule: Rule = {
+  id: "gestion-factures-echues",
+  label: "Factures échues à relancer",
+  description: "Client avec des factures échues non soldées, dont la relance est due (niveau atteint, délai depuis la dernière relance écoulé).",
+  async run() {
+    const { reminderCandidates } = await import("@/lib/gestion/payments");
+    const rows = (await reminderCandidates({ simulation: false })).filter((c) => c.due).slice(0, 20);
+    return rows.map((c): Recommendation => ({
+      key: `gestion-factures-echues:${c.clientId}:${c.level}`, rule: "gestion-factures-echues", category: "GESTION",
+      priority: c.level >= 3 ? "CRITICAL" : c.level === 2 ? "HIGH" : "MEDIUM",
+      title: `${c.client} — ${fmtMAD(c.overdue)} échus`,
+      subtitle: `Relance de niveau ${c.level} · ${c.oldestDays} j de retard au plus`,
+      facts: [{ label: "Factures", value: c.invoices.map((i) => i.number).join(", ") }, { label: "Dernière relance", value: c.lastReminder ? `niveau ${c.lastReminder.level}, ${fmtDate(c.lastReminder.sentAt)}` : "aucune" }],
+      why: `${c.invoices.length} facture(s) de ${c.client} ont dépassé leur échéance ; la plus ancienne de ${c.oldestDays} jours. Sans relance, le retard s'installe et l'encours de risque grossit.`,
+      action: "Envoyer la relance préparée (Gestion commerciale → Relances : WhatsApp ou e-mail en un clic), puis noter la date de règlement promise.",
+      task: { title: `Relancer ${c.client} (niveau ${c.level})`, dueInDays: 1, role: "TRADE", priority: c.level >= 3 ? "HIGH" : undefined },
+      entity: { type: "client", id: c.clientId, href: "/gestion/relances" },
+      score: Number(c.overdue),
+    }));
+  },
+};
+
+/** Chèques et effets à remettre à la banque, et impayés du mois à traiter. */
+export const portfolioRule: Rule = {
+  id: "gestion-portefeuille",
+  label: "Portefeuille : remises en banque et impayés",
+  description: "Effets et chèques en portefeuille dont l'échéance approche (settings.gestion.receivables.depositLeadDays) ; règlements déclarés impayés ces 30 derniers jours.",
+  async run({ settings, now }) {
+    const { toDeposit } = await import("@/lib/gestion/payments");
+    const dep = await toDeposit(settings.gestion.receivables.depositLeadDays);
+    const bounced = (await db.execute<{ id: string; number: string; client: string; client_id: string; amount: string; bounced_at: string; reason: string | null }>(sql`
+      select p.id, p.number, c.name as client, p.client_id, p.amount::text, p.bounced_at::text, p.status_reason as reason from payments p join clients c on c.id = p.client_id
+      where p.status = 'IMPAYE' and not p.is_simulation and p.bounced_at >= ${iso(new Date(now.getTime() - 30 * 86400000))}::date order by p.bounced_at desc limit 10`)).rows;
+    const recs: Recommendation[] = [];
+    if (dep.length) {
+      const total = dep.reduce((a, p) => a + Number(p.amount), 0);
+      recs.push({
+        key: `gestion-portefeuille:depot:${iso(now)}`, rule: "gestion-portefeuille", category: "GESTION", priority: "MEDIUM",
+        title: `${dep.length} chèque(s) / effet(s) à remettre en banque`, facts: [{ label: "Montant", value: fmtMAD(total) }, { label: "Plus proche échéance", value: dep[0].due_date ? fmtDate(dep[0].due_date) : "—" }],
+        why: "Un effet non remis à temps n'est pas présenté à l'échéance : l'argent arrive en retard et un éventuel impayé est découvert trop tard.",
+        action: "Préparer la remise en banque (Règlements → À remettre en banque), puis confirmer l'encaissement à réception du relevé.",
+        task: { title: "Remise en banque des effets", dueInDays: 1, role: "ADMIN" },
+        entity: { type: "document", id: "banque", href: "/gestion/reglements?tab=banque" }, score: total,
+      });
+    }
+    for (const b of bounced) recs.push({
+      key: `gestion-portefeuille:impaye:${b.id}`, rule: "gestion-portefeuille", category: "GESTION", priority: "HIGH",
+      title: `Impayé ${b.number} — ${b.client}`, subtitle: `Rejeté le ${fmtDate(b.bounced_at)}${b.reason ? ` · ${b.reason}` : ""}`,
+      facts: [{ label: "Montant", value: fmtMAD(b.amount) }],
+      why: "Le règlement est revenu impayé : les factures qu'il soldait sont rouvertes et l'encours du client remonte d'autant.",
+      action: "Appeler le client pour un règlement de remplacement ; envisager de le bloquer (fiche client) tant qu'il n'est pas régularisé.",
+      task: { title: `Régulariser l'impayé ${b.number} — ${b.client}`, dueInDays: 2, role: "ADMIN", priority: "HIGH" },
+      entity: { type: "client", id: b.client_id, href: `/gestion/reglements/${b.id}` }, score: Number(b.amount),
+    });
+    return recs;
+  },
+};
+
+/** Bascule : la date approche sans période parallèle, ou elle est passée sans activation. */
+export const cutoverReminderRule: Rule = {
+  id: "gestion-bascule",
+  label: "Bascule depuis Sage",
+  description: "Date de bascule dans moins de 45 jours sans période parallèle, ou dépassée sans que COMANET OS émette.",
+  async run({ settings, now }) {
+    const c = settings.gestion.cutover;
+    if (!c.date || c.mode === "ACTIF") return [];
+    const days = Math.round((new Date(`${c.date}T12:00:00Z`).getTime() - now.getTime()) / 86400000);
+    if (days > 45 || (days > 0 && c.mode === "PARALLELE")) return [];
+    const late = days <= 0;
+    return [{
+      key: `gestion-bascule:${c.date}:${c.mode}:${late ? "late" : "soon"}`, rule: "gestion-bascule", category: "GESTION", priority: late ? "HIGH" : "MEDIUM",
+      title: late ? `Bascule prévue le ${fmtDate(c.date)} : pas encore activée` : `Bascule dans ${days} jours : période parallèle à lancer`,
+      facts: [{ label: "Mode actuel", value: c.mode === "OFF" ? "Sage fait foi" : "Période parallèle" }, { label: "Sites", value: c.sites.join(", ") }],
+      why: late ? "La date de bascule est passée mais Sage émet toujours les pièces : les ventes COMANET OS restent des simulations." : "Un mois de saisie en parallèle permet de comparer COMANET OS à Sage (rapport de contrôle) avant d'arrêter Sage.",
+      action: late ? "Ouvrir Gestion commerciale → Bascule, lever les contrôles bloquants et activer — ou repousser la date dans Paramètres." : "Passer en période parallèle (Gestion commerciale → Bascule), importer le stock initial et saisir les pièces du mois en double.",
+      task: { title: late ? "Activer la bascule" : "Lancer la période parallèle", dueInDays: late ? 2 : 7, role: "ADMIN" },
+      entity: { type: "document", id: "bascule", href: "/gestion/bascule" },
+    }];
+  },
+};
+
+export const gestionRules: Rule[] = [overdueInvoicesRule, portfolioRule, cutoverReminderRule, uninvoicedBLRule, approvalPendingRule, expiringLotsRule, lateOrdersRule, uninvoicedReceptionsRule, staleCountRule, noRecentCountRule, recurringGapsRule];

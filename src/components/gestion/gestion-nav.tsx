@@ -20,10 +20,13 @@ export async function GestionTabs({ current }: { current: string }) {
     { href: "/gestion", label: "Préparation", ok: true },
     { href: "/gestion/pieces", label: "Pièces", ok: can(a.perms, "livraisons", "view") || can(a.perms, "facturation", "view") },
     { href: "/gestion/pieces/facturer", label: "Facturer des BL", ok: can(a.perms, "facturation", "create") },
+    { href: "/gestion/reglements", label: "Règlements", ok: can(a.perms, "facturation", "view") },
     { href: "/gestion/stock", label: "Stock réel", ok: can(a.perms, "stock", "view") },
     { href: "/gestion/inventaires", label: "Inventaires", ok: can(a.perms, "stock", "view") },
     { href: "/gestion/achats", label: "Achats", ok: can(a.perms, "achats", "view") || can(a.perms, "stock", "view") },
     { href: "/gestion/fournisseurs", label: "Fournisseurs", ok: can(a.perms, "achats", "view") },
+    { href: "/gestion/exports", label: "Envoi au comptable", ok: can(a.perms, "facturation", "view") },
+    { href: "/gestion/bascule", label: "Bascule", ok: can(a.perms, "administration", "view") },
     { href: "/parametres/gestion", label: "Paramètres", ok: can(a.perms, "administration", "view") },
   ].filter((t) => t.ok);
   return <Tabs current={current} tabs={tabs.map(({ href, label }) => ({ href, label }))} />;

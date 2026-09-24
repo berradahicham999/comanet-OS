@@ -36,7 +36,7 @@ async function inventoryFor(ctx: Parameters<typeof intelContext>[0], input: { br
     if (!p) return unavailable(`Produit « ${input.product} » introuvable.`, "Utiliser search_entities pour retrouver la référence exacte.");
     rows = rows.filter((r) => r.productId === p.id);
   }
-  if (!rows.length) return unavailable(`Aucun produit actif dans ce périmètre${brand ? ` (${brand.name})` : ""}.`, "Importer le référentiel produits (Imports → Produits) puis une photo de stock (Imports → Stock).", "Photo de stock + ventes Sage");
+  if (!rows.length) return unavailable(`Aucun produit actif dans ce périmètre${brand ? ` (${brand.name})` : ""}.`, "Importer le référentiel produits (Imports → Produits) puis une photo de stock (Imports → Stock).", "Photo de stock + ventes sell-in");
   if (!rows.some((r) => r.stockKnown)) return unavailable(`Aucune photo de stock importée pour ${brand ? brand.name : "ces produits"} : le statut de stock n'est pas calculable.`, "Importer l'état de stock (Imports → Stock). Sans lui, aucune couverture n'est estimée.", "Photo de stock");
   return { rows, brandName: brand?.name ?? null, brandId: brand?.id ?? null, stockDate: inv.stockDate, thresholds: inv.thresholds, summary: inv.summary };
 }
@@ -155,7 +155,7 @@ export const getTopSkus: AiTool<typeof topSchema> = {
     const ictx = intelContext(ctx);
     if (input.metric === "margin" && !ictx.gates.internalCosts) return unavailable("La marge n'est pas accessible avec vos droits (coûts internes masqués).", "Demander l'interrupteur « voir les coûts internes » à un administrateur, ou classer par CA / unités / croissance.");
     const perf = await buildProductPerformance(ictx, { brandId: brand?.id ?? null, period: input.period, custom: { start: input.period_start, end: input.period_end } });
-    if (!perf.rows.some((r) => r.revenue > 0)) return unavailable(`Aucune vente Sage sur ${perf.period.label}${brand ? ` pour ${brand.name}` : ""}.`, "Importer l'export Sage de la période (Imports → Ventes) ou élargir la période.", "Sage — sell-in HT");
+    if (!perf.rows.some((r) => r.revenue > 0)) return unavailable(`Aucune vente (sell-in) sur ${perf.period.label}${brand ? ` pour ${brand.name}` : ""}.`, "Importer l'export Sage de la période (Imports → Ventes) ou élargir la période.", "Sage — sell-in HT");
     const rows = topSkus(perf.rows, input.metric, limitOf(input.limit, 10));
     if (!rows.length) return unavailable(`Aucun produit classable par ${input.metric} sur ${perf.period.label} (croissance ou marge non mesurables).`, "Choisir un autre critère ou élargir la période.", "Sage — sell-in HT");
     return {
@@ -170,7 +170,7 @@ export const getTopSkus: AiTool<typeof topSchema> = {
       },
       rowCount: rows.length,
       links: [{ label: "Ouvrir Produits", href: `/produits${brand ? `?brand=${brand.id}` : ""}` }],
-      notes: [...freshnessNotes(ctx, perf.inventory ? perf.inventory.stockDate : undefined), ...(perf.comparable ? [] : ["Période précédente sans vente Sage : croissances non mesurables."]), ...(ictx.gates.stock ? [] : ["Stock non accessible avec vos droits : couverture et catégories de stock absentes."])],
+      notes: [...freshnessNotes(ctx, perf.inventory ? perf.inventory.stockDate : undefined), ...(perf.comparable ? [] : ["Période précédente sans vente sell-in : croissances non mesurables."]), ...(ictx.gates.stock ? [] : ["Stock non accessible avec vos droits : couverture et catégories de stock absentes."])],
     };
   },
 };
@@ -203,9 +203,9 @@ export const getProductPerformance: AiTool<typeof perfSchema> = {
       const p = await ctx.deps.findProduct(input.product);
       if (!p) return unavailable(`Produit « ${input.product} » introuvable.`, "Utiliser search_entities pour retrouver la référence exacte.");
       rows = rows.filter((r) => r.productId === p.id);
-      if (!rows.length) return unavailable(`Aucune vente Sage ni stock connu pour « ${p.name} » sur ${perf.period.label}.`, "Élargir la période ou vérifier l'import des ventes (Imports → Ventes).", "Sage — sell-in HT");
+      if (!rows.length) return unavailable(`Aucune vente (sell-in) ni stock connu pour « ${p.name} » sur ${perf.period.label}.`, "Élargir la période ou vérifier l'import des ventes (Imports → Ventes).", "Sage — sell-in HT");
     }
-    if (!rows.length) return unavailable(`Aucune vente Sage ni stock connu sur ${perf.period.label}${brand ? ` pour ${brand.name}` : ""}.`, "Importer l'export Sage de la période (Imports → Ventes).", "Sage — sell-in HT");
+    if (!rows.length) return unavailable(`Aucune vente (sell-in) ni stock connu sur ${perf.period.label}${brand ? ` pour ${brand.name}` : ""}.`, "Importer l'export Sage de la période (Imports → Ventes).", "Sage — sell-in HT");
     const counts: Partial<Record<ProductCategory, number>> = {};
     for (const r of rows) counts[r.category] = (counts[r.category] ?? 0) + 1;
     const shown = (input.category ? rows.filter((r) => r.category === input.category) : rows).slice(0, limitOf(input.limit, 20));
@@ -228,7 +228,7 @@ export const getProductPerformance: AiTool<typeof perfSchema> = {
       },
       rowCount: shown.length,
       links: [{ label: "Ouvrir Analytics par produit", href: `/marketing/analytics/produits${brand ? `?brand=${brand.id}` : ""}` }],
-      notes: [...freshnessNotes(ctx, perf.inventory ? perf.inventory.stockDate : undefined), ...(perf.comparable ? [] : ["Période précédente sans vente Sage : croissances non mesurables, catégories limitées à CASH_COW / STABLE."]), ...(ictx.gates.stock ? [] : ["Stock non accessible avec vos droits."])],
+      notes: [...freshnessNotes(ctx, perf.inventory ? perf.inventory.stockDate : undefined), ...(perf.comparable ? [] : ["Période précédente sans vente sell-in : croissances non mesurables, catégories limitées à CASH_COW / STABLE."]), ...(ictx.gates.stock ? [] : ["Stock non accessible avec vos droits."])],
     };
   },
 };

@@ -6,7 +6,7 @@ import { creditReasons, paymentModes, taxRates, warehouses } from "@/db/schema";
 /** Référentiels de la gestion commerciale (modifiables dans /parametres/gestion). */
 
 export type TaxRate = { key: string; label: string; rate: string; sort: number; active: boolean };
-export type PaymentMode = { key: string; label: string; requiresDueDate: boolean; sort: number; active: boolean };
+export type PaymentMode = { key: string; label: string; requiresDueDate: boolean; collectedOnReceipt: boolean; sort: number; active: boolean };
 export type Warehouse = { key: string; label: string; kind: string; sellable: boolean; notes: string | null; sort: number; active: boolean };
 
 export async function listTaxRates(): Promise<TaxRate[]> {

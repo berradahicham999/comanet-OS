@@ -110,7 +110,7 @@ export default async function SynthesePage(props: { params: Promise<{ id: string
             <div><div className="label mb-1">Hypothèses</div>{verdict.hypotheses.length ? <ul className="list-disc pl-4 space-y-0.5">{verdict.hypotheses.map((x, i) => <li key={i}>{x}</li>)}</ul> : <span className="text-muted">—</span>}</div>
             <div><div className="label mb-1">Recommandation</div><p className="font-medium">{verdict.recommendation}</p></div>
           </div>
-          <p className="text-[11px] text-muted mt-3">Chiffres issus des ventes Sage importées et des saisies de la fiche. Une donnée absente s&apos;affiche « — », jamais estimée. L&apos;écart avant / après est une corrélation observée, pas une causalité.</p>
+          <p className="text-[11px] text-muted mt-3">Chiffres issus des ventes sell-in (imports Sage et pièces COMANET OS) et des saisies de la fiche. Une donnée absente s&apos;affiche « — », jamais estimée. L&apos;écart avant / après est une corrélation observée, pas une causalité.</p>
         </Card>
       </div>
     </div>

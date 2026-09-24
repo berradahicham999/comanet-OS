@@ -345,7 +345,7 @@ export function roiVerdict(i: VerdictInput, s: Pick<ActivationSettings, "roiRepe
   let verdict: Verdict;
   if (!c || !c.comparable || c.increment === null || i.fullCost <= 0) {
     verdict = "PAS_ENCORE";
-    analysis.push(i.fullCost <= 0 ? "Sans coût, aucun retour ne peut être calculé." : c && c.comparable ? "Aucune vente Sage sur les points de vente et produits rattachés, avant comme après : rien à comparer. Vérifiez le rattachement ou l'import des ventes." : "La comparaison avant / après n'est pas encore complète.");
+    analysis.push(i.fullCost <= 0 ? "Sans coût, aucun retour ne peut être calculé." : c && c.comparable ? "Aucune vente (sell-in) sur les points de vente et produits rattachés, avant comme après : rien à comparer. Vérifiez le rattachement ou l'import des ventes." : "La comparaison avant / après n'est pas encore complète.");
   } else {
     hypotheses.push("L'écart avant / après est une corrélation observée : d'autres facteurs (saison, promotion, visite du délégué) peuvent l'expliquer.");
     if (roi !== null && roi >= s.roiRepeatMin && (c.upliftPct ?? 0) >= s.roiRepeatMinUpliftPct) {

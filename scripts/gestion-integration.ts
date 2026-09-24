@@ -287,6 +287,65 @@ async function main() {
   await refused("modifier une ligne d'inventaire validé", () => db.execute(sql`update stock_count_lines set counted_qty = 0 where count_id = ${cnt}::uuid`), /clos/);
   console.log(`✓ inventaire ${vinv.number} validé : 2 ajustements (lot L1 −3, lot L9 +4), non comptés non ajustés, motif exigé, inventaire figé`);
 
+
+  // Règlements et bascule (lot 5) : imputation partielle, dépassement refusé, virement encaissé d'emblée,
+  // impayé qui rouvre la facture, règlement figé, reprise Sage, bascule réelle (numéro légal, projection).
+  const RG = await import("@/lib/gestion/payments");
+  const { getSettings, saveSettings } = await import("@/lib/settings");
+  const blPay = await D.saveDraft({ type: "BL", clientId: client.id, date: day, site: "COMANET", deliveryAddress: null, salesRepId: null, paymentModeKey: null, globalDiscountPct: "0", notes: null,
+    lines: [{ productId: p2.id, quantity: "5", unitPriceHt: "100", discountPct: "0" }] }, who);
+  await D.validateDocument(blPay, who, { override: true });
+  const faPay = await D.createInvoiceFromBLs([blPay], who);
+  await D.validateDocument(faPay, who);
+  assert.equal((await RG.invoiceSettlement(faPay)).balance, "600.00");
+  const chq = await RG.createPayment({ clientId: client.id, date: day, modeKey: "CHEQUE", amount: "400", reference: "CHQ-" + tag, allocations: [{ invoiceId: faPay, amount: "400" }] }, who);
+  const chqDoc = (await RG.getPayment(chq))!;
+  assert.equal(chqDoc.status, "PORTEFEUILLE");
+  assert.equal(chqDoc.isSimulation, true);
+  assert.equal((await RG.invoiceSettlement(faPay)).balance, "200.00");
+  await refused("imputation au-delà du solde", () => RG.createPayment({ clientId: client.id, date: day, modeKey: "VIREMENT", amount: "300", allocations: [{ invoiceId: faPay, amount: "300" }] }, who), /dépasse son solde/);
+  const vir = await RG.createPayment({ clientId: client.id, date: day, modeKey: "VIREMENT", amount: "250", reference: "VIR", allocations: [{ invoiceId: faPay, amount: "200" }] }, who);
+  const virDoc = (await RG.getPayment(vir))!;
+  assert.equal(virDoc.status, "ENCAISSE");
+  assert.equal(virDoc.unallocated, "50.00");
+  assert.equal((await RG.invoiceSettlement(faPay)).balance, "0.00");
+  await RG.setPaymentStatus(chq, "REMIS", { date: day }, who);
+  await refused("impayé sans motif", () => RG.setPaymentStatus(chq, "IMPAYE", { date: day }, who), /motif/);
+  await RG.setPaymentStatus(chq, "IMPAYE", { date: day, reason: "Provision insuffisante" }, who);
+  assert.equal((await RG.invoiceSettlement(faPay)).balance, "400.00");
+  await refused("modifier le montant d'un règlement", () => db.execute(sql`update payments set amount = 1 where id = ${vir}::uuid`), /ne se modifient pas/);
+  await refused("supprimer un règlement", () => db.execute(sql`delete from payments where id = ${vir}::uuid`), /ne se supprime pas/);
+  await refused("revenir d'un impayé", () => RG.setPaymentStatus(chq, "ENCAISSE", { date: day }, who), /Passage impossible/);
+  console.log("✓ règlements : chèque imputé (solde 200), dépassement refusé, virement encaissé d'emblée (50 non imputés), impayé qui rouvre la facture (solde 400), règlement figé");
+
+  const repNo = "FAREP" + tag;
+  const rep = await D.importOpeningInvoices([{ clientId: client.id, number: repNo, date: "2026-12-15", dueDate: "2027-02-13", ttc: "1000.00", balance: "300.00", site: "COMANET" }], who);
+  assert.equal(rep.inserted, 1);
+  assert.equal((await D.importOpeningInvoices([{ clientId: client.id, number: repNo, date: "2026-12-15", dueDate: null, ttc: "1000.00", balance: "300.00", site: "COMANET" }], who)).inserted, 0);
+  const repDoc = await one<{ id: string; is_simulation: boolean; source: string }>(sql`select id, is_simulation, source from sales_documents where number = ${repNo}`);
+  assert.equal((await RG.invoiceSettlement(repDoc.id)).balance, "300.00");
+  assert.equal(repDoc.is_simulation, false);
+  await refused("règlement de simulation sur une facture reprise (réelle)", () => RG.createPayment({ clientId: client.id, date: day, modeKey: "VIREMENT", amount: "100", allocations: [{ invoiceId: repDoc.id, amount: "100" }] }, who), /simulation sur une facture réelle/);
+  console.log("✓ reprise Sage : facture ouverte reprise avec son reste (300), idempotente, jamais soldée par un règlement de simulation");
+
+  const before = await getSettings();
+  try {
+    await saveSettings({ ...before, gestion: { ...before.gestion, cutover: { mode: "ACTIF", date: day, sites: ["COMANET"] } } });
+    const blReal = await D.saveDraft({ type: "BL", clientId: client.id, date: day, site: "COMANET", deliveryAddress: null, salesRepId: null, paymentModeKey: null, globalDiscountPct: "0", notes: null,
+      lines: [{ productId: p2.id, quantity: "1", unitPriceHt: "200", discountPct: "0" }] }, who);
+    const vReal = await D.validateDocument(blReal, who, { override: true });
+    assert.ok(/^BL\d/.test(vReal.number) && !vReal.simulation, vReal.number);
+    assert.equal((await one<{ n: number }>(sql`select count(*)::int as n from sales where source = 'COMANET_OS' and lvc_ref = ${vReal.number}`)).n, 1);
+    const ledger = (await stockState({ productIds: [p2.id] }))[0].available;
+    assert.equal((await productStocks({ productId: p2.id }))[0].stock, Number(ledger));
+    const vr = await RG.createPayment({ clientId: client.id, date: day, modeKey: "VIREMENT", amount: "100", reference: "VIR2", allocations: [{ invoiceId: repDoc.id, amount: "100" }] }, who);
+    assert.equal((await RG.getPayment(vr))!.isSimulation, false);
+    assert.equal((await RG.invoiceSettlement(repDoc.id)).balance, "200.00");
+    console.log(`✓ bascule active : BL légal ${vReal.number} projeté dans les ventes, stock lu au journal, règlement réel imputé sur la facture reprise (solde 200)`);
+  } finally {
+    await saveSettings(before);
+  }
+
   console.log("Tous les contrôles d'intégration sont passés.");
   process.exit(0);
 }

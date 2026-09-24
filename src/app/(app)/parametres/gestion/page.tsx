@@ -93,8 +93,12 @@ export default async function GestionSettingsPage(props: { searchParams: Promise
           <label className="block"><span className="label block mb-1">Date de bascule prévue</span><input type="date" name="cutoverDate" defaultValue={g.cutover.date ?? ""} className="input h-9" /></label>
           <label className="block"><span className="label block mb-1">Sites qui basculent</span><input name="cutoverSites" defaultValue={g.cutover.sites.join(", ")} className="input h-9" /><span className="text-[11px] text-faint">Les autres sites restent importés</span></label>
           <label className="block"><span className="label block mb-1">Mode de bascule</span>
-            <select name="cutoverMode" defaultValue={g.cutover.mode === "ACTIF" ? "PARALLELE" : g.cutover.mode} className="select h-9"><option value="OFF">Sage fait foi</option><option value="PARALLELE">Période parallèle (simulation)</option></select>
-            <span className="text-[11px] text-faint">Pièces en séries SIMBL / SIMFA / SIMAV ; la bascule réelle arrive avec le lot 5</span></label>
+            {g.cutover.mode === "ACTIF" ? (
+              <div className="h-9 flex items-center gap-2"><span className="font-medium">COMANET OS émet</span><a href="/gestion/bascule" className="text-accent text-[12px] hover:underline">Page Bascule</a></div>
+            ) : (
+              <select name="cutoverMode" defaultValue={g.cutover.mode} className="select h-9"><option value="OFF">Sage fait foi</option><option value="PARALLELE">Période parallèle (simulation)</option></select>
+            )}
+            <span className="text-[11px] text-faint">La bascule réelle (mode actif) se fait depuis la page Bascule, après ses contrôles</span></label>
           <label className="block"><span className="label block mb-1">Modèle de facture</span>
             <select name="invoiceModel" defaultValue={g.invoiceModel} className="select h-9"><option value="PPH_REMISE">PPH TTC + remise (modèle Sage 1)</option><option value="NET">Prix net (modèle Sage 2)</option></select></label>
           <label className="block"><span className="label block mb-1">Tolérance de remise (points)</span><input name="discountTolerancePct" defaultValue={g.discountTolerancePct} className="input h-9" inputMode="decimal" /><span className="text-[11px] text-faint">Au-delà de la remise autorisée du client : blocage</span></label>
@@ -105,6 +109,9 @@ export default async function GestionSettingsPage(props: { searchParams: Promise
           <label className="block"><span className="label block mb-1">Commande en retard après (jours)</span><input name="lateOrderGraceDays" defaultValue={g.purchases.lateOrderGraceDays} className="input h-9" inputMode="numeric" /><span className="text-[11px] text-faint">Délai de grâce après la livraison attendue</span></label>
           <label className="block"><span className="label block mb-1">Réception sans facture (jours)</span><input name="uninvoicedReceptionDays" defaultValue={g.purchases.uninvoicedReceptionDays} className="input h-9" inputMode="numeric" /></label>
           <label className="block"><span className="label block mb-1">Écart de prix toléré, achats (%)</span><input name="priceGapTolerancePct" defaultValue={g.purchases.priceGapTolerancePct} className="input h-9" inputMode="decimal" /><span className="text-[11px] text-faint">Facture fournisseur ↔ réception</span></label>
+          <label className="block"><span className="label block mb-1">Relances : niveaux (jours de retard)</span><input name="reminderDays" defaultValue={g.receivables.reminderDays.join(", ")} className="input h-9" /><span className="text-[11px] text-faint">Niveau 1, 2, 3</span></label>
+          <label className="block"><span className="label block mb-1">Délai entre deux relances (jours)</span><input name="reminderCooldownDays" defaultValue={g.receivables.reminderCooldownDays} className="input h-9" inputMode="numeric" /></label>
+          <label className="block"><span className="label block mb-1">Remettre les effets N jours avant échéance</span><input name="depositLeadDays" defaultValue={g.receivables.depositLeadDays} className="input h-9" inputMode="numeric" /></label>
           <label className="block"><span className="label block mb-1">Comptage ouvert trop longtemps (jours)</span><input name="staleCountDays" defaultValue={g.inventory.staleCountDays} className="input h-9" inputMode="numeric" /></label>
           <label className="block"><span className="label block mb-1">Délai maximal sans inventaire (jours)</span><input name="maxDaysWithoutCount" defaultValue={g.inventory.maxDaysWithoutCount} className="input h-9" inputMode="numeric" /></label>
           <label className="block"><span className="label block mb-1">Écart récurrent à partir de (inventaires)</span><input name="recurringCount" defaultValue={g.inventory.recurringCount} className="input h-9" inputMode="numeric" /></label>
@@ -144,20 +151,22 @@ export default async function GestionSettingsPage(props: { searchParams: Promise
         <Card title="Modes de paiement">
           <div id="paiement" className="space-y-1 text-[12.5px] scroll-mt-20">
             {refs.paymentModes.map((m) => (
-              <form key={m.key} action={savePaymentModeAction} className="grid grid-cols-[50px_1fr_auto_40px_44px_auto] items-center gap-1">
+              <form key={m.key} action={savePaymentModeAction} className="grid grid-cols-[50px_1fr_auto_auto_40px_44px_auto] items-center gap-1">
                 <input type="hidden" name="key" value={m.key} />
                 <input name="sort" defaultValue={m.sort} className="input h-8 text-[12px]" />
                 <input name="label" defaultValue={m.label} className="input h-8 text-[12px]" />
                 <label className="flex items-center gap-1 text-[11px]" title="Le règlement porte sa propre échéance"><input type="checkbox" name="requiresDueDate" defaultChecked={m.requiresDueDate} /> échéance</label>
+                <label className="flex items-center gap-1 text-[11px]" title="Encaissé dès la réception (virement, espèces) ; sinon il passe par le portefeuille"><input type="checkbox" name="collectedOnReceipt" defaultChecked={m.collectedOnReceipt} /> encaissé</label>
                 <label className="text-center" title="Actif"><input type="checkbox" name="active" defaultChecked={m.active} /></label>
                 <button className="btn-ghost btn-sm text-[11px]" type="submit">OK</button>
                 <span className="text-[11px] text-muted">{used.get(`mode:${m.key}`) ? `${used.get(`mode:${m.key}`)} cl.` : ""}</span>
               </form>
             ))}
-            <form action={savePaymentModeAction} className="grid grid-cols-[50px_1fr_auto_40px_auto] items-center gap-1 pt-1">
+            <form action={savePaymentModeAction} className="grid grid-cols-[50px_1fr_auto_auto_40px_auto] items-center gap-1 pt-1">
               <input name="sort" defaultValue={refs.paymentModes.length * 10 + 10} className="input h-8 text-[12px]" />
               <input name="label" placeholder="Libellé" className="input h-8 text-[12px]" required />
               <label className="flex items-center gap-1 text-[11px]"><input type="checkbox" name="requiresDueDate" /> échéance</label>
+              <label className="flex items-center gap-1 text-[11px]"><input type="checkbox" name="collectedOnReceipt" /> encaissé</label>
               <label className="text-center"><input type="checkbox" name="active" defaultChecked /></label>
               <button className="btn-primary btn-sm text-[11px]" type="submit">Ajouter</button>
             </form>

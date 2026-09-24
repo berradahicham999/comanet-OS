@@ -116,7 +116,7 @@ export function staleDays(ctx: ToolContext): number {
 export function freshnessNotes(ctx: ToolContext, stockDate?: string | null): string[] {
   const d = ctx.refDate.toISOString().slice(0, 10);
   const stale = staleDays(ctx);
-  const notes = [stale > 0 ? `Données de vente Sage à jour au ${d} (${stale} jour(s) de retard sur aujourd'hui).` : `Données de vente Sage à jour au ${d}.`];
+  const notes = [stale > 0 ? `Données de vente (sell-in) à jour au ${d} (${stale} jour(s) de retard sur aujourd'hui).` : `Données de vente (sell-in) à jour au ${d}.`];
   if (stockDate !== undefined) notes.push(stockDate ? `Photo de stock du ${stockDate}.` : "Aucune photo de stock : couverture non mesurable.");
   return notes;
 }

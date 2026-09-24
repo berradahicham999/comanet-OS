@@ -13,6 +13,8 @@ import { editorData } from "@/lib/gestion/editor";
 import { listCreditReasons, listWarehouses } from "@/lib/gestion/refs";
 import { shareToken } from "@/lib/gestion/share";
 import { globalDiscountAmount } from "@/lib/gestion/pdf-model";
+import { invoiceSettlement, openCredits, openInvoices } from "@/lib/gestion/payments";
+import { allocateCreditAction } from "../../reglements/actions";
 import { SCALE, parseDecimal } from "@/lib/gestion/money";
 import { fmtDate, fmtNum } from "@/lib/format";
 import { fmtMoney } from "@/lib/gestion/money";
@@ -134,6 +136,10 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
   const message = `${label} ${doc.number} — ${g.company.legalName || "COMANET"}\nMontant TTC : ${fmtMoney(doc.ttc)} MAD\n${shareUrl ?? ""}`;
   const wa = waPhone(contact?.phone);
   const approvals = (doc.approvals ?? []) as { label: string; by: string; at: string }[];
+  // Règlements : solde et imputations d'une facture ; crédit restant d'un avoir.
+  const settlement = type === "FACTURE" && !draft ? await invoiceSettlement(id) : null;
+  const credit = type === "AVOIR" && !draft ? (await openCredits(doc.clientId)).find((x) => x.id === id) ?? null : null;
+  const creditTargets = credit ? await openInvoices({ clientId: doc.clientId, simulation: doc.isSimulation }) : [];
 
   return (
     <>
@@ -246,6 +252,40 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
             </Card>
           )}
 
+          {settlement && (
+            <Card title="Règlement">
+              <div className="text-[13px] space-y-2">
+                <div className="flex justify-between"><span className="text-muted">Solde</span><span className={`font-semibold tabular-nums ${Number(settlement.balance) > 0 ? "" : "text-green"}`}>{Number(settlement.balance) > 0 ? `${fmtMoney(settlement.balance)} MAD` : "Soldée"}</span></div>
+                {Number(settlement.reprisePaid) > 0 && <div className="flex justify-between text-muted"><span>Déjà réglé dans Sage</span><span className="tabular-nums">{fmtMoney(settlement.reprisePaid)}</span></div>}
+                {settlement.allocations.length > 0 && (
+                  <ul className="divide-y divide-line">
+                    {settlement.allocations.map((al) => (
+                      <li key={al.id} className="py-1.5 flex gap-2 items-center">
+                        {al.payment_id ? <Link href={`/gestion/reglements/${al.payment_id}`} className="font-mono hover:underline">{al.payment_number}</Link> : <Link href={`/gestion/pieces/${al.credit_id}`} className="font-mono hover:underline">{al.credit_number}</Link>}
+                        <span className="text-faint text-[12px]">{al.mode ?? "avoir"}{al.payment_status && al.payment_status !== "ENCAISSE" ? ` · ${al.payment_status === "IMPAYE" ? "impayé" : al.payment_status === "ANNULE" ? "annulé" : "pas encore encaissé"}` : ""}</span>
+                        <span className={`ml-auto tabular-nums ${al.payment_status === "IMPAYE" || al.payment_status === "ANNULE" ? "line-through text-faint" : ""}`}>{fmtMoney(al.amount)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {Number(settlement.balance) > 0 && can(a.perms, "facturation", "create") && <Link href={`/gestion/reglements/nouveau?client=${doc.clientId}`} className="btn-secondary btn-sm inline-flex">Encaisser</Link>}
+              </div>
+            </Card>
+          )}
+          {credit && Number(credit.left) > 0 && (
+            <Card title="Crédit client restant">
+              <div className="text-[13px] space-y-2">
+                <p><b className="tabular-nums">{fmtMoney(credit.left)} MAD</b> de cet avoir ne sont imputés sur aucune facture.</p>
+                {creditTargets.length > 0 && can(a.perms, "facturation", "edit") ? (
+                  <form action={allocateCreditAction} className="space-y-2">
+                    <input type="hidden" name="creditId" value={id} />
+                    <select name="invoiceId" className="select h-9">{creditTargets.map((i) => <option key={i.id} value={i.id}>{i.number} — solde {fmtMoney(i.balance)} MAD</option>)}</select>
+                    <div className="flex gap-2"><input name="amount" defaultValue={credit.left} className="input h-9 text-right" inputMode="decimal" /><button className="btn-secondary btn-sm" type="submit">Imputer</button></div>
+                  </form>
+                ) : <p className="text-muted text-[12px]">Aucune autre facture ouverte de ce client : le crédit reste disponible (remboursement ou prochaine facture).</p>}
+              </div>
+            </Card>
+          )}
           {(doc.children.length > 0 || doc.sources.length > 0) && (
             <Card title="Pièces liées">
               <ul className="text-[13px] space-y-1">

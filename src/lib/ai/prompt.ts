@@ -39,7 +39,7 @@ export type PromptContext = {
 export function dynamicBlock(ctx: PromptContext): string {
   const scope = ctx.access.brandIds ? `marques assignées uniquement (${ctx.access.brandIds.length})` : ctx.access.ownOnly ? "ses propres données uniquement" : "toutes marques, tous clients";
   return [
-    `Date du jour : ${fmtDateLong(ctx.now)}. Données de vente Sage arrêtées au ${fmtDateLong(ctx.refDate)} (dernier import) : « mois en cours » pour les ventes = le mois de cette date.`,
+    `Date du jour : ${fmtDateLong(ctx.now)}. Données de vente (sell-in : imports Sage et pièces COMANET OS) arrêtées au ${fmtDateLong(ctx.refDate)} (dernier import) : « mois en cours » pour les ventes = le mois de cette date.`,
     `Personne connectée : ${ctx.access.userName}. Portée des données : ${scope}. Nombre maximal d'appels d'outils pour cette question : ${ctx.maxToolCalls}.`,
     ctx.contextPath ? `Page d'où la question est posée : ${ctx.contextPath}.` : null,
     ctx.surfaceInstructions ? `\nConsigne de la surface :\n${ctx.surfaceInstructions}` : null,
