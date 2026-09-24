@@ -119,6 +119,8 @@ s'efface pas.
   projeter compterait deux fois. Le BL projette à sa date, l'avoir en négatif, la facture pose son numéro. Seul
   `src/lib/gestion/projection.ts` écrit ces ventes. `ORDER_KEY` compte une vente COMANET OS par BL ; la date de
   référence du cockpit se lit sur les seuls imports.
+- **UG** : imprimées sur le BL seulement (le magasin les livre). Jamais sur une facture ni un avoir, qui vont au
+  comptable tels quels ; elles restent enregistrées sur la pièce, dans le stock et dans les ventes.
 - **PDF** (`pdf.tsx`, @react-pdf/renderer, côté serveur) : mise en page Sage (logo, cartouches N° / Date / Client,
   bloc société, bloc client, tableau, Total HT / Remise / Net HT / TVA par taux / Total TTC / NET A PAYER, montant en
   lettres, échéance et règlement, cachet sur les pièces validées, RIB, « Page x / y », « À reporter » / « Report »
