@@ -1,19 +1,15 @@
 /** `get_action_center` et `get_tasks` — recommandations ouvertes (règles) et tâches. */
 import { z } from "zod";
-import { CATEGORY_META, type RecCategory } from "@/lib/rules/types";
-import type { ModuleKey } from "@/lib/access-shared";
+import { CATEGORY_META, CATEGORY_MODULES, type RecCategory } from "@/lib/rules/types";
+
+export { CATEGORY_MODULES };
 import { can } from "@/lib/permissions-shared";
 import type { AiTool, ToolResult } from "./types";
 import { fold, inBrandScope, limitOf, scopeLabel, unavailable } from "./shared";
 
-/** Modules donnant accès à chaque catégorie de recommandation — même table que la page /actions. */
-export const CATEGORY_MODULES: Record<RecCategory, ModuleKey[]> = {
-  STOCK: ["stock"], MARKETING: ["marketing", "influence"], REGLEMENTAIRE: ["reglementaire"], TERRAIN: ["terrain"], COMMERCIAL: ["ventes", "clients"],
-  BUDGET: ["budgets"], EXECUTION: ["taches"], DATA: ["administration"], MEDICAL: ["medical"],
-};
 
 const actionSchema = z.object({
-  category: z.enum(Object.keys(CATEGORY_META) as [RecCategory, ...RecCategory[]]).optional().describe("Catégorie : STOCK, MARKETING, REGLEMENTAIRE, TERRAIN, COMMERCIAL, BUDGET, EXECUTION, DATA, MEDICAL."),
+  category: z.enum(Object.keys(CATEGORY_META) as [RecCategory, ...RecCategory[]]).optional().describe("Catégorie : STOCK, MARKETING, REGLEMENTAIRE, TERRAIN, COMMERCIAL, BUDGET, EXECUTION, DATA, MEDICAL, GESTION."),
   priority: z.enum(["CRITICAL", "HIGH", "MEDIUM", "LOW"]).optional(),
   brand: z.string().optional().describe("Ne garder que les recommandations liées à cette marque (nom)."),
   include_with_task: z.boolean().default(false).describe("Inclure les recommandations déjà transformées en tâche ouverte."),

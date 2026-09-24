@@ -210,3 +210,22 @@ describe("Gestion commerciale — journal de stock, numérotation, audit, montan
     assert.deepEqual(hits(/export async function recordStockMovements\(/), ["src/lib/gestion/ledger.ts"]);
   });
 });
+
+describe("Gestion commerciale — pièces de vente", () => {
+  test("seul `src/lib/gestion/documents.ts` crée, valide ou fait évoluer une pièce", () => {
+    const found = codeHits(/(insert|update|delete)\(salesDocuments\)|(insert|update|delete)\(salesDocumentLines\)|(insert\s+into|update|delete\s+from)\s+sales_documents?\b|update\s+sales_document_lines/i, ["lib/gestion/documents.ts"]);
+    assert.deepEqual(found, [], `Écriture de pièce hors du module dans : ${found.join(", ")}`);
+  });
+  test("seul `src/lib/gestion/projection.ts` écrit les ventes émises par COMANET OS", () => {
+    assert.deepEqual(codeHits(/source:\s*"COMANET_OS"/), ["src/lib/gestion/documents-shared.ts"]);
+    const found = codeHits(/insert\(sales\)|insert\s+into\s+sales\b/i, ["lib/import/", "lib/gestion/projection.ts"]).filter((p) => p.includes("lib/gestion/"));
+    assert.deepEqual(found, [], `Projection concurrente dans : ${found.join(", ")}`);
+  });
+  test("montants d'une pièce, montant en lettres et PDF n'ont qu'une définition", () => {
+    assert.deepEqual(hits(/export function computeDocument\(/), ["src/lib/gestion/calc.ts"]);
+    assert.deepEqual(hits(/export function amountInWords\(/), ["src/lib/gestion/calc.ts"]);
+    assert.deepEqual(hits(/export function commercialIssues\(/), ["src/lib/gestion/documents-shared.ts"]);
+    assert.deepEqual(hits(/export async function validateDocument\(/), ["src/lib/gestion/documents.ts"]);
+    assert.deepEqual(hits(/export async function storedPdf\(/), ["src/lib/gestion/pdf.tsx"]);
+  });
+});

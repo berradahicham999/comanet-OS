@@ -122,9 +122,9 @@ async function resolveFromTables(userId: string): Promise<ResolvedAccess> {
       sql`select module, can_view, can_create, can_edit, can_validate from user_permissions where user_id = ${userId}::uuid`,
     ),
     db.execute<{ scope: ScopeKey }>(sql`select scope from user_scope where user_id = ${userId}::uuid`),
-    db.execute<Record<string, boolean>>(
-      sql`select see_margins, see_global_budgets, see_internal_costs, approve_spend, export_data, read_activity_log from user_flags where user_id = ${userId}::uuid`,
-    ),
+    // Lecture en JSON : une colonne d'interrupteur ajoutée par une migration pas encore appliquée
+    // ne doit jamais empêcher la connexion (elle vaut alors « faux »).
+    db.execute<{ j: Record<string, boolean> }>(sql`select to_jsonb(f) as j from user_flags f where user_id = ${userId}::uuid`),
     db.execute<{ brand_id: string }>(sql`select brand_id from user_brand_assignments where user_id = ${userId}::uuid`),
     db.execute<{ client_id: string }>(sql`select client_id from user_client_assignments where user_id = ${userId}::uuid`),
   ]);
@@ -133,7 +133,7 @@ async function resolveFromTables(userId: string): Promise<ResolvedAccess> {
     permRows.rows.map((r) => ({ module: r.module, canView: r.can_view, canCreate: r.can_create, canEdit: r.can_edit, canValidate: r.can_validate })),
   );
   const scope: ScopeKey = scopeRows.rows[0]?.scope ?? "ALL";
-  const f = flagRows.rows[0];
+  const f = flagRows.rows[0]?.j;
   const flags: FlagSet = f
     ? {
         seeMargins: !!f.see_margins,
@@ -142,6 +142,7 @@ async function resolveFromTables(userId: string): Promise<ResolvedAccess> {
         approveSpend: !!f.approve_spend,
         exportData: !!f.export_data,
         readActivityLog: !!f.read_activity_log,
+        overrideCommercial: !!f.override_commercial,
       }
     : noFlags();
   const explicit = { brandIds: brandRows.rows.map((r) => r.brand_id), clientIds: clientRows.rows.map((r) => r.client_id), allBrands, cities };

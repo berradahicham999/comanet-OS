@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "4mb",
     },
   },
-  serverExternalPackages: ["pg"],
+  serverExternalPackages: ["pg", "@react-pdf/renderer"],
   // Les migrations SQL (drizzle/) doivent être embarquées dans les fonctions serverless pour /installation.
   outputFileTracingIncludes: {
     "/installation": ["./drizzle/**/*"],

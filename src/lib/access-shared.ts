@@ -143,6 +143,7 @@ export const FLAG_KEYS = [
   "approveSpend",
   "exportData",
   "readActivityLog",
+  "overrideCommercial",
 ] as const;
 
 export type FlagKey = (typeof FLAG_KEYS)[number];
@@ -154,6 +155,7 @@ export const FLAG_LABELS: Record<FlagKey, string> = {
   approveSpend: "Valider une dépense",
   exportData: "Exporter des données",
   readActivityLog: "Consulter le journal d'activité",
+  overrideCommercial: "Lever un blocage commercial (remise hors plafond, client bloqué, encours, vente à perte)",
 };
 
 /* ------------------------------------------------------------------ */

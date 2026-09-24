@@ -47,8 +47,8 @@ export async function seedBase() {
     where u.role = 'ADMIN'
     on conflict do nothing`);
   await db.execute(sql`
-    insert into user_flags (user_id, see_margins, see_global_budgets, see_internal_costs, approve_spend, export_data, read_activity_log)
-    select id, true, true, true, true, true, true from users where role = 'ADMIN' on conflict do nothing`);
+    insert into user_flags (user_id, see_margins, see_global_budgets, see_internal_costs, approve_spend, export_data, read_activity_log, override_commercial)
+    select id, true, true, true, true, true, true, true from users where role = 'ADMIN' on conflict do nothing`);
   await db.execute(sql`insert into user_scope (user_id, scope) select id, 'ALL' from users where role = 'ADMIN' on conflict do nothing`);
   for (const b of BRAND_SEED) {
     await db.insert(s.brands).values(b).onConflictDoUpdate({ target: s.brands.slug, set: { aliases: b.aliases, color: b.color } });

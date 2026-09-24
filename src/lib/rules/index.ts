@@ -19,6 +19,7 @@ import { contentLateRule } from "./content-rules";
 import { activationRules } from "./activation-rules";
 import { analyticsRules } from "./analytics-rules";
 import { clientStockRules } from "./client-stock-rules";
+import { gestionRules } from "./gestion-rules";
 
 export * from "./types";
 
@@ -40,6 +41,7 @@ export const RULES: Rule[] = [
   ...activationRules,
   ...analyticsRules,
   ...clientStockRules,
+  ...gestionRules,
   dataQualityRule,
   ...medicalRules,
 ];

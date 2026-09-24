@@ -1,7 +1,7 @@
 import "server-only";
 import { asc } from "drizzle-orm";
 import { db } from "@/db";
-import { paymentModes, taxRates, warehouses } from "@/db/schema";
+import { creditReasons, paymentModes, taxRates, warehouses } from "@/db/schema";
 
 /** Référentiels de la gestion commerciale (modifiables dans /parametres/gestion). */
 
@@ -19,6 +19,11 @@ export async function listPaymentModes(): Promise<PaymentMode[]> {
 
 export async function listWarehouses(): Promise<Warehouse[]> {
   return db.select().from(warehouses).orderBy(asc(warehouses.sort), asc(warehouses.key));
+}
+
+export type CreditReason = { key: string; label: string; withReturn: boolean; sort: number; active: boolean };
+export async function listCreditReasons(): Promise<CreditReason[]> {
+  return db.select().from(creditReasons).orderBy(asc(creditReasons.sort), asc(creditReasons.key));
 }
 
 /** Les trois référentiels d'un coup, pour les formulaires. */

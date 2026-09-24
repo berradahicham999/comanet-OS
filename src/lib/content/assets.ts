@@ -17,50 +17,53 @@ import { contentAssets } from "@/db/schema";
  * du planning passent l'identifiant du contenu en chaîne : ils restent valides.
  */
 export const MAX_ASSET_BYTES = 25 * 1024 * 1024;
-export const ASSET_KINDS = ["LIVRABLE", "REFERENCE", "DEVIS", "FACTURE", "VISUEL", "PHOTO", "COMPTE_RENDU"] as const;
+export const ASSET_KINDS = ["LIVRABLE", "REFERENCE", "DEVIS", "FACTURE", "VISUEL", "PHOTO", "COMPTE_RENDU", "PIECE"] as const;
 export type AssetKind = (typeof ASSET_KINDS)[number];
 export const ASSET_KIND_LABELS: Record<AssetKind, string> = {
-  LIVRABLE: "Livrable", REFERENCE: "Référence", DEVIS: "Devis", FACTURE: "Facture", VISUEL: "Visuel", PHOTO: "Photo", COMPTE_RENDU: "Compte rendu",
+  LIVRABLE: "Livrable", REFERENCE: "Référence", DEVIS: "Devis", FACTURE: "Facture", VISUEL: "Visuel", PHOTO: "Photo", COMPTE_RENDU: "Compte rendu", PIECE: "PDF de la pièce",
 };
 
-export type AssetOwner = { contentId: string } | { activationId: string } | { inventoryItemId: string } | { companySlot: CompanySlot };
+export type AssetOwner = { contentId: string } | { activationId: string } | { inventoryItemId: string } | { companySlot: CompanySlot } | { salesDocumentId: string };
 
 /** Fichiers de la société imprimés sur les pièces (gestion commerciale). Jamais dans le dépôt de code : le cachet signé y serait public. */
 export const COMPANY_SLOTS = ["LOGO", "CACHET"] as const;
 export type CompanySlot = (typeof COMPANY_SLOTS)[number];
 
 export type AssetMeta = {
-  id: string; contentId: string | null; activationId: string | null; inventoryItemId: string | null; companySlot: string | null;
+  id: string; contentId: string | null; activationId: string | null; inventoryItemId: string | null; companySlot: string | null; salesDocumentId: string | null;
   kind: string; name: string; mime: string; size: number; version: number; uploadedById: string | null; uploadedBy: string | null; createdAt: Date;
 };
 
 function ownerOf(owner: AssetOwner | string): AssetOwner {
   return typeof owner === "string" ? { contentId: owner } : owner;
 }
-function ownerColumns(owner: AssetOwner): { contentId: string | null; activationId: string | null; inventoryItemId: string | null; companySlot: string | null } {
+function ownerColumns(owner: AssetOwner): { contentId: string | null; activationId: string | null; inventoryItemId: string | null; companySlot: string | null; salesDocumentId: string | null } {
   return {
     contentId: "contentId" in owner ? owner.contentId : null,
     activationId: "activationId" in owner ? owner.activationId : null,
     inventoryItemId: "inventoryItemId" in owner ? owner.inventoryItemId : null,
     companySlot: "companySlot" in owner ? owner.companySlot : null,
+    salesDocumentId: "salesDocumentId" in owner ? owner.salesDocumentId : null,
   };
 }
 function ownerWhere(owner: AssetOwner): SQL {
   if ("contentId" in owner) return sql`a.content_id = ${owner.contentId}::uuid`;
   if ("activationId" in owner) return sql`a.activation_id = ${owner.activationId}::uuid`;
   if ("companySlot" in owner) return sql`a.company_slot = ${owner.companySlot}`;
+  if ("salesDocumentId" in owner) return sql`a.sales_document_id = ${owner.salesDocumentId}::uuid`;
   return sql`a.inventory_item_id = ${owner.inventoryItemId}::uuid`;
 }
 function ownerCondition(owner: AssetOwner) {
   if ("contentId" in owner) return eq(contentAssets.contentId, owner.contentId);
   if ("activationId" in owner) return eq(contentAssets.activationId, owner.activationId);
   if ("companySlot" in owner) return eq(contentAssets.companySlot, owner.companySlot);
+  if ("salesDocumentId" in owner) return eq(contentAssets.salesDocumentId, owner.salesDocumentId);
   return eq(contentAssets.inventoryItemId, owner.inventoryItemId);
 }
 
 export async function listAssets(owner: AssetOwner | string): Promise<AssetMeta[]> {
   const r = await db.execute<AssetMeta>(sql`
-    select a.id, a.content_id as "contentId", a.activation_id as "activationId", a.inventory_item_id as "inventoryItemId", a.company_slot as "companySlot",
+    select a.id, a.content_id as "contentId", a.activation_id as "activationId", a.inventory_item_id as "inventoryItemId", a.company_slot as "companySlot", a.sales_document_id as "salesDocumentId",
       a.kind, a.name, a.mime, a.size, a.version, a.uploaded_by_id as "uploadedById", u.name as "uploadedBy", a.created_at as "createdAt"
     from content_assets a left join users u on u.id = a.uploaded_by_id
     where ${ownerWhere(ownerOf(owner))} order by a.kind, a.version desc, a.created_at desc`);
@@ -74,7 +77,7 @@ export async function nextVersion(owner: AssetOwner | string, kind: string): Pro
 }
 
 /** Ajoute une version complète (fichier déjà en mémoire). */
-export async function storeAsset(input: { owner: AssetOwner | string; kind: AssetKind; name: string; mime: string; data: Buffer; uploadedById: string }) {
+export async function storeAsset(input: { owner: AssetOwner | string; kind: AssetKind; name: string; mime: string; data: Buffer; uploadedById: string | null }) {
   if (input.data.byteLength > MAX_ASSET_BYTES) throw new Error(`Fichier trop volumineux (${Math.round(input.data.byteLength / 1048576)} Mo, maximum 25 Mo).`);
   const owner = ownerOf(input.owner);
   const [row] = await db.insert(contentAssets).values({
@@ -109,7 +112,7 @@ export async function appendChunk(id: string, buf: Buffer): Promise<{ received: 
 
 export async function assetMeta(id: string): Promise<AssetMeta | null> {
   const r = await db.execute<AssetMeta>(sql`
-    select a.id, a.content_id as "contentId", a.activation_id as "activationId", a.inventory_item_id as "inventoryItemId", a.company_slot as "companySlot",
+    select a.id, a.content_id as "contentId", a.activation_id as "activationId", a.inventory_item_id as "inventoryItemId", a.company_slot as "companySlot", a.sales_document_id as "salesDocumentId",
       a.kind, a.name, a.mime, a.size, a.version, a.uploaded_by_id as "uploadedById", u.name as "uploadedBy", a.created_at as "createdAt"
     from content_assets a left join users u on u.id = a.uploaded_by_id where a.id = ${id}::uuid`);
   return r.rows[0] ?? null;
