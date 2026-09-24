@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireAnyModule, getUserPermissions, can } from "@/lib/access";
+import { requireAnyModule, getUserPermissions, can, clientFilter } from "@/lib/access";
+import { searchEntities } from "@/lib/search";
 import { type ModuleKey } from "@/lib/access-shared";
 import { PageHeader, Card, Badge, BrandDot } from "@/components/ui";
 import { normKey } from "@/lib/import/normalize";
@@ -26,6 +27,11 @@ export default async function RecherchePage(props: { searchParams: Promise<{ q?:
     db.execute(sql`select c.id, c.name, c.status::text as status, b.name as brand, b.id as brand_id from campaigns c join brands b on b.id = c.brand_id where upper(c.name) like ${like} limit 10`),
     db.execute(sql`select c.id, c.title, c.date::text as date, c.status::text as status, b.name as brand from content_items c join brands b on b.id = c.brand_id where upper(c.title) like ${like} order by c.date desc limit 10`),
   ]);
+  // Pièces de vente par numéro : même requête que le copilote, filtrée par portée client.
+  const scope = await clientFilter();
+  const found = await searchEntities(q, 10);
+  const inScope = (hits: typeof found.invoices) => (hits ?? []).filter((h) => !scope || (!!h.clientId && scope.includes(h.clientId)));
+  const pieceRows = (hits: typeof found.invoices) => inScope(hits).map((h) => ({ id: h.id, label: h.label, sub: h.sub }));
   type R = Record<string, string | number | null>;
   type Section = { title: string; module: ModuleKey; rows: R[]; render: (r: R) => React.ReactNode };
   const sections: Section[] = ([
@@ -36,6 +42,8 @@ export default async function RecherchePage(props: { searchParams: Promise<{ q?:
     { title: "Tâches", module: "taches", rows: tasks.rows as R[], render: (r) => <Link href={`/taches/${r.id}`} className="card px-4 py-3 flex items-center gap-3 hover:border-line-2"><span className="font-medium flex-1 truncate">{r.title}</span><span className="text-[12px] text-muted">{r.assignee}</span><Badge tone="gray">{r.status}</Badge></Link> },
     { title: "Campagnes", module: "marketing", rows: campaigns.rows as R[], render: (r) => <Link href={`/marketing/campagnes/${r.id}`} className="card px-4 py-3 flex items-center gap-3 hover:border-line-2"><span className="font-medium flex-1 truncate">{r.name}</span><span className="text-[12px] text-muted">{r.brand}</span><Badge tone="gray">{r.status}</Badge></Link> },
     { title: "Contenus", module: "marketing", rows: contents.rows as R[], render: (r) => <Link href={`/marketing/planning?month=${String(r.date).slice(0, 7)}`} className="card px-4 py-3 flex items-center gap-3 hover:border-line-2"><span className="font-medium flex-1 truncate">{r.title}</span><span className="text-[12px] text-muted">{r.brand} · {fmtDateShort(r.date as string)}</span><Badge tone="gray">{r.status}</Badge></Link> },
+    { title: "Bons de livraison", module: "livraisons", rows: pieceRows(found.deliveries), render: (r) => <Link href={`/gestion/pieces/${r.id}`} className="card px-4 py-3 flex items-center gap-3 hover:border-line-2"><span className="font-medium font-mono">{r.label}</span><span className="text-[12px] text-muted flex-1 truncate">{r.sub}</span></Link> },
+    { title: "Factures et avoirs", module: "facturation", rows: pieceRows(found.invoices), render: (r) => <Link href={`/gestion/pieces/${r.id}`} className="card px-4 py-3 flex items-center gap-3 hover:border-line-2"><span className="font-medium font-mono">{r.label}</span><span className="text-[12px] text-muted flex-1 truncate">{r.sub}</span></Link> },
   ] as Section[]).filter((s) => can(perms, s.module, "view"));
   const total = sections.reduce((a, s) => a + s.rows.length, 0);
   return (

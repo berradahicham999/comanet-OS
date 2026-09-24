@@ -18,7 +18,8 @@ export type RefDate = {
  */
 export const getRefDate = cache(async (): Promise<RefDate> => {
   const t = today();
-  const r = await db.execute(sql`select max(date)::text as d from sales`);
+  // Les ventes projetées par COMANET OS sont à jour par construction : la fraîcheur se lit sur les imports.
+  const r = await db.execute(sql`select coalesce(max(date) filter (where source <> 'COMANET_OS'), max(date))::text as d from sales`);
   const d = (r.rows[0] as { d: string | null } | undefined)?.d;
   if (!d) return { ref: t, lastSale: null, staleDays: 0 };
   const last = new Date(d + "T12:00:00Z");

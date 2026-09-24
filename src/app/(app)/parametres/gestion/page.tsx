@@ -2,14 +2,14 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { requireAccess } from "@/lib/access";
 import { getSettings } from "@/lib/settings";
-import { gestionRefs } from "@/lib/gestion/refs";
+import { gestionRefs, listCreditReasons } from "@/lib/gestion/refs";
 import { listSeries } from "@/lib/gestion/numbering";
 import { COMPANY_FIELDS } from "@/lib/gestion/readiness";
 import { fmtMoney } from "@/lib/gestion/money";
 import { iso, today, fmtDate } from "@/lib/format";
 import { PageHeader, Card, Badge, Tabs } from "@/components/ui";
 import {
-  saveCompanyAction, uploadCompanyFileAction, savePoliciesAction, saveTaxRateAction, savePaymentModeAction, saveWarehouseAction, saveSeriesAction, setNextNumberAction,
+  saveCompanyAction, uploadCompanyFileAction, savePoliciesAction, saveTaxRateAction, savePaymentModeAction, saveWarehouseAction, saveSeriesAction, setNextNumberAction, saveCreditReasonAction,
 } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -20,13 +20,14 @@ export default async function GestionSettingsPage(props: { searchParams: Promise
   const sp = await props.searchParams;
   const thisYear = Number(iso(today()).slice(0, 4));
   const year = Number(sp.year) >= 2020 && Number(sp.year) <= 2100 ? Number(sp.year) : thisYear;
-  const [settings, refs, series, files, usage] = await Promise.all([
+  const [settings, refs, series, files, usage, reasons] = await Promise.all([
     getSettings(), gestionRefs(), listSeries(year),
     db.execute<{ slot: string; version: number; created_at: Date }>(sql`select distinct on (company_slot) company_slot as slot, version, created_at from content_assets where company_slot is not null order by company_slot, version desc`),
     db.execute<{ kind: string; key: string; n: number }>(sql`
       select 'tax' as kind, tax_rate_key as key, count(*)::int as n from products where tax_rate_key is not null group by tax_rate_key
       union all select 'mode', payment_mode_key, count(*)::int from clients where payment_mode_key is not null group by payment_mode_key
       union all select 'wh', warehouse_key, count(*)::int from stock_movements group by warehouse_key`),
+    listCreditReasons(),
   ]);
   const g = settings.gestion;
   const used = new Map(usage.rows.map((u) => [`${u.kind}:${u.key}`, u.n]));
@@ -89,9 +90,21 @@ export default async function GestionSettingsPage(props: { searchParams: Promise
           <label className="block"><span className="label block mb-1">Fenêtre de préparation (jours)</span><input name="readinessWindowDays" defaultValue={g.readinessWindowDays} className="input h-9" inputMode="numeric" /><span className="text-[11px] text-faint">Clients et articles vendus à préparer</span></label>
           <label className="block"><span className="label block mb-1">Date de bascule prévue</span><input type="date" name="cutoverDate" defaultValue={g.cutover.date ?? ""} className="input h-9" /></label>
           <label className="block"><span className="label block mb-1">Sites qui basculent</span><input name="cutoverSites" defaultValue={g.cutover.sites.join(", ")} className="input h-9" /><span className="text-[11px] text-faint">Les autres sites restent importés</span></label>
+          <label className="block"><span className="label block mb-1">Mode de bascule</span>
+            <select name="cutoverMode" defaultValue={g.cutover.mode === "ACTIF" ? "PARALLELE" : g.cutover.mode} className="select h-9"><option value="OFF">Sage fait foi</option><option value="PARALLELE">Période parallèle (simulation)</option></select>
+            <span className="text-[11px] text-faint">Pièces en séries SIMBL / SIMFA / SIMAV ; la bascule réelle arrive avec le lot 5</span></label>
+          <label className="block"><span className="label block mb-1">Modèle de facture</span>
+            <select name="invoiceModel" defaultValue={g.invoiceModel} className="select h-9"><option value="PPH_REMISE">PPH TTC + remise (modèle Sage 1)</option><option value="NET">Prix net (modèle Sage 2)</option></select></label>
+          <label className="block"><span className="label block mb-1">Tolérance de remise (points)</span><input name="discountTolerancePct" defaultValue={g.discountTolerancePct} className="input h-9" inputMode="decimal" /><span className="text-[11px] text-faint">Au-delà de la remise autorisée du client : blocage</span></label>
+          <label className="block"><span className="label block mb-1">Alerte BL non facturés (jours)</span><input name="uninvoicedAlertDays" defaultValue={g.uninvoicedAlertDays} className="input h-9" inputMode="numeric" /></label>
+          <label className="block"><span className="label block mb-1">Liens de partage valables (jours)</span><input name="shareLinkDays" defaultValue={g.shareLinkDays} className="input h-9" inputMode="numeric" /></label>
+          <label className="block"><span className="label block mb-1">Montant en lettres : devise / centimes</span>
+            <span className="flex gap-1"><input name="wordsMajor" defaultValue={g.amountWords.major} className="input h-9" /><input name="wordsMinor" defaultValue={g.amountWords.minor} className="input h-9" /></span></label>
+          <label className="flex items-center gap-2 pt-5"><input type="checkbox" name="requireDelivered" defaultChecked={g.requireDelivered} /> Exiger « Livré » avant de facturer un BL</label>
+          <label className="flex items-center gap-2 pt-5"><input type="checkbox" name="checkCreditLimit" defaultChecked={g.checkCreditLimit} /> Contrôler le plafond d&apos;encours</label>
           <div className="sm:col-span-2 lg:col-span-4 flex flex-wrap items-center gap-3">
             <button className="btn-primary btn-sm" type="submit">Enregistrer</button>
-            <span className="text-[12px] text-muted">Mode actuel : <Badge tone="gray">Sage fait foi</Badge> — la période parallèle et la bascule s&apos;activeront avec les lots 2 et 5.</span>
+            <span className="text-[12px] text-muted">Mode actuel : <Badge tone={g.cutover.mode === "OFF" ? "gray" : "purple"}>{g.cutover.mode === "OFF" ? "Sage fait foi" : g.cutover.mode === "PARALLELE" ? "Période parallèle" : "COMANET OS émet"}</Badge> — tant que la bascule n&apos;est pas faite, les pièces saisies sont des simulations sans effet sur les ventes.</span>
           </div>
         </form>
       </Card>
@@ -143,6 +156,29 @@ export default async function GestionSettingsPage(props: { searchParams: Promise
           </div>
         </Card>
       </div>
+
+      <Card title="Motifs d'avoir" className="mb-4">
+        <div id="motifs" className="space-y-1 text-[12.5px] scroll-mt-20">
+          {reasons.map((r) => (
+            <form key={r.key} action={saveCreditReasonAction} className="grid grid-cols-[50px_1fr_auto_40px_44px] items-center gap-1">
+              <input type="hidden" name="key" value={r.key} />
+              <input name="sort" defaultValue={r.sort} className="input h-8 text-[12px]" />
+              <input name="label" defaultValue={r.label} className="input h-8 text-[12px]" />
+              <label className="flex items-center gap-1 text-[11px]" title="Le motif implique un retour physique en stock"><input type="checkbox" name="withReturn" defaultChecked={r.withReturn} /> retour en stock</label>
+              <label className="text-center" title="Actif"><input type="checkbox" name="active" defaultChecked={r.active} /></label>
+              <button className="btn-ghost btn-sm text-[11px]" type="submit">OK</button>
+            </form>
+          ))}
+          <form action={saveCreditReasonAction} className="grid grid-cols-[50px_1fr_auto_40px_auto] items-center gap-1 pt-1">
+            <input name="sort" defaultValue={reasons.length * 10 + 10} className="input h-8 text-[12px]" />
+            <input name="label" placeholder="Libellé du motif" className="input h-8 text-[12px]" required />
+            <label className="flex items-center gap-1 text-[11px]"><input type="checkbox" name="withReturn" /> retour en stock</label>
+            <label className="text-center"><input type="checkbox" name="active" defaultChecked /></label>
+            <button className="btn-primary btn-sm text-[11px]" type="submit">Ajouter</button>
+          </form>
+          <p className="text-[11px] text-faint pt-1">Un motif « retour en stock » fait rentrer la marchandise au dépôt choisi sur chaque ligne de l&apos;avoir.</p>
+        </div>
+      </Card>
 
       <Card title="Dépôts" className="mb-4">
         <div id="depots" className="space-y-1 text-[12.5px] scroll-mt-20">

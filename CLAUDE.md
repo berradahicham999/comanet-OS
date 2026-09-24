@@ -61,7 +61,7 @@ drizzle/              migrations SQL + meta/_journal.json
 Modules : Cockpit, Action Center, Ventes, Clients, Produits, Marques, Stock,
 **Marketing** (vue d'ensemble, campagnes, Digital Ads, Influence, planning éditorial, activations, matériel, budgets, analytics, agent marketing),
 Terrain (animations, animatrices, saisie), Réglementaire, Tâches, Imports, Paramètres,
-**Gestion commerciale** (préparation de la bascule, stock réel, fournisseurs ; BL, factures, achats, inventaires à venir).
+**Gestion commerciale** (préparation de la bascule, stock réel, fournisseurs, pièces de vente : BL, factures, avoirs, PDF ; achats, inventaires, règlements à venir).
 
 ---
 
@@ -104,6 +104,7 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Statut d'un contenu éditorial, transitions, retards | `src/lib/content/workflow.ts` + `src/lib/content/shared.ts` | `transition()` (seule écriture du statut), `checkTransition()`, `nextTransitions()`, `lateness()`, `canValidateBrand()` |
 | Statut d'une activation, budget, retards, retour | `src/lib/activations/workflow.ts` + `shared.ts` + `budget.ts` + `roi.ts` | `transitionActivation()` (seule écriture du statut), `budgetTotals()`, `expenseRowsFor()`, `syncActivationExpenses()` (seul reflet dans `marketing_expenses`), `activationLateness()`, `compareSales()`, `roiVerdict()`, `canValidateActivation()` |
 | Stock d'un article d'inventaire | `src/lib/activations/inventory.ts` + `shared.ts` | `recordMovement()` (seule écriture du stock), `consumeMaterial()`, `inventoryStatus()` |
+| Pièce de vente (montants, blocages, cycle, PDF, projection dans les ventes) | `src/lib/gestion/calc.ts` + `documents-shared.ts` + `documents.ts` + `pdf.tsx` + `projection.ts` | `computeDocument()`, `amountInWords()`, `commercialIssues()`, `validateDocument()` (seule validation), `storedPdf()`, `projectDocument()` (seule écriture des ventes COMANET_OS) |
 | Lecture marketing d'une marque (statut de stock par SKU, profil / catégorie produit, objectifs et écart, contexte marketing, décisions) | `src/lib/marketing-intel/` | `buildBrandOverview()`, `buildInventory()`, `buildProductPerformance()`, `buildSalesTargets()`, `buildMarketingContext()`, `buildRecommendations()`, `stockStatusOf()`, `stockRiskOf()`, `salesProfileOf()`, `decide()` |
 | Montants, quantités, coûts exacts (jamais de float), CMUP, valeur de stock | `src/lib/gestion/money.ts` | `parseDecimal()`, `roundDiv()`, `formatScaled()`, `nextCmup()`, `valueOf()`, `fmtQty()`, `fmtMoney()` |
 | Numéro d'une pièce (séries, reprise Sage, sans trou) | `src/lib/gestion/numbering.ts` + `numbering-shared.ts` | `allocateNumber()` (seule écriture, dans la transaction de validation), `setNextNumber()`, `formatNumber()`, `patternError()`, `nextNumberError()` |
@@ -186,10 +187,18 @@ TVA par défaut, délais, stock insuffisant, péremption, bascule : mode OFF →
 Logo et cachet dans `content_assets` (`company_slot`). Droits : modules `livraisons`, `facturation`, `achats` ;
 archiver / bloquer / supprimer = « Valider ». `productStocks()` lit encore les photos : il passera sur le journal
 à la bascule (un seul point de changement).
+Lot 2 livré : ventes. `sales_documents` + `sales_document_lines` (BL, FACTURE, AVOIR), figées par triggers dès la
+validation ; seul `src/lib/gestion/documents.ts` crée, valide, livre, annule ou facture (`validateDocument()` : blocages
+`commercialIssues()`, numéro, identités figées, sortie FEFO / retour, compteurs facturé / crédité). Montants :
+`calc.ts` (`computeDocument()`, `amountInWords()`), seule définition. Avant la bascule (mode OFF / PARALLELE) les pièces
+sont des simulations (séries SIMBL / SIMFA / SIMAV) ; en mode ACTIF seulement, `projection.ts` écrit `sales` (source
+`COMANET_OS`). PDF : `pdf.tsx` (@react-pdf/renderer, `serverExternalPackages`), stocké à la validation ; lien public
+`/d/<jeton>` (`share.ts`). Levée de blocage : interrupteur `overrideCommercial`. Règles Action Center : catégorie
+GESTION (`src/lib/rules/gestion-rules.ts`), table catégorie → modules unique : `CATEGORY_MODULES`.
 
 **Permissions modulaires par utilisateur** (`docs/permissions-modulaires.md`). Chaque compte porte
 sa propre matrice `user_permissions` (17 modules × Voir / Créer / Modifier / Valider), une portée
-`user_scope` (OWN / ASSIGNED / ALL), des assignations de marques et de clients, et six interrupteurs
+`user_scope` (OWN / ASSIGNED / ALL), des assignations de marques et de clients, et sept interrupteurs
 transverses `user_flags`. Les modèles de rôle (`role_templates`) ne servent qu'à pré-remplir.
 Règles : aucune décision d'accès sur `users.role` (enum legacy recalculée, lecture seule — un test
 l'interdit) ; une page garde avec `requireAccess(module)`, une action avec `requirePermission(module, action)` ;

@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { requireAnyModule, getUserPermissions } from "@/lib/access";
-import type { ModuleKey } from "@/lib/access-shared";
-import { getRecommendations, RULES, CATEGORY_META, type RecCategory } from "@/lib/rules";
+import { getRecommendations, RULES, CATEGORY_META, CATEGORY_MODULES, type RecCategory } from "@/lib/rules";
 import { listUsers } from "@/lib/users";
 import { PageHeader, Tabs, Card, Empty, Badge } from "@/components/ui";
 import { RecommendationCard } from "@/components/recommendation-card";
@@ -25,10 +24,7 @@ export default async function ActionCenterPage(props: { searchParams: Promise<{ 
   const cat = (sp.cat ?? "") as RecCategory | "";
   const base = recs.filter((r) => showAll || !r.existingTask);
   // Chaque catégorie de recommandation suit le module qu'elle concerne : on n'affiche que celles que la personne peut voir.
-  const catModules: Record<RecCategory, ModuleKey[]> = {
-    STOCK: ["stock"], MARKETING: ["marketing", "influence"], REGLEMENTAIRE: ["reglementaire"], TERRAIN: ["terrain"], COMMERCIAL: ["ventes", "clients"],
-    BUDGET: ["budgets"], EXECUTION: ["taches"], DATA: ["administration"], MEDICAL: ["medical"],
-  };
+  const catModules = CATEGORY_MODULES;
   const scoped = base.filter((r) => (catModules[r.category] ?? []).some((m) => perms[m].view));
   const list = scoped.filter((r) => !cat || r.category === cat).filter((r) => !sp.priority || r.priority === sp.priority);
   const counts = (Object.keys(CATEGORY_META) as RecCategory[]).map((c) => ({ c, n: scoped.filter((r) => r.category === c).length })).filter((x) => x.n > 0);

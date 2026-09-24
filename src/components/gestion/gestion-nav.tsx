@@ -18,6 +18,8 @@ export async function GestionTabs({ current }: { current: string }) {
   const a = await requireAccessContext();
   const tabs = [
     { href: "/gestion", label: "Préparation", ok: true },
+    { href: "/gestion/pieces", label: "Pièces", ok: can(a.perms, "livraisons", "view") || can(a.perms, "facturation", "view") },
+    { href: "/gestion/pieces/facturer", label: "Facturer des BL", ok: can(a.perms, "facturation", "create") },
     { href: "/gestion/stock", label: "Stock réel", ok: can(a.perms, "stock", "view") },
     { href: "/gestion/fournisseurs", label: "Fournisseurs", ok: can(a.perms, "achats", "view") },
     { href: "/parametres/gestion", label: "Paramètres", ok: can(a.perms, "administration", "view") },

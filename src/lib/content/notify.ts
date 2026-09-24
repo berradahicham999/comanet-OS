@@ -10,7 +10,9 @@ export type NotificationType =
   | "ACTIVATION_ASSIGNED" | "ACTIVATION_VALIDATED" | "ACTIVATION_REFUSED" | "ACTIVATION_CANCELLED"
   | "ACTIVATION_RESULTS_DUE" | "ACTIVATION_CHECKLIST_LATE" | "ACTIVATION_BUDGET_OVERRUN" | "INVENTORY_LOW"
   // Copilote IA
-  | "REPORT_DRAFT";
+  | "REPORT_DRAFT"
+  // Gestion commerciale
+  | "APPROVAL_REQUESTED";
 
 export type NotifyInput = { type: NotificationType; title: string; body?: string | null; href?: string | null; entityType?: string; entityId?: string | null };
 

@@ -20,11 +20,13 @@ const SECTIONS: { key: keyof SearchResult; module: ModuleKey | ModuleKey[]; labe
   { key: "contents", module: "marketing", label: "contenus" },
   { key: "regulatory", module: "reglementaire", label: "dossiers réglementaires" },
   { key: "tasks", module: "taches", label: "tâches" },
+  { key: "deliveries", module: "livraisons", label: "bons de livraison" },
+  { key: "invoices", module: "facturation", label: "factures et avoirs" },
 ];
 
 export const searchEntities: AiTool<typeof schema> = {
   name: "search_entities",
-  description: "Retrouve le nom exact et l'identifiant d'une marque, d'un produit, d'un client, d'une personne (animatrice, délégué), d'une campagne, d'un contenu, d'un dossier réglementaire ou d'une tâche à partir d'un mot-clé. À utiliser avant un autre outil quand l'orthographe est incertaine.",
+  description: "Retrouve le nom exact et l'identifiant d'une marque, d'un produit, d'un client, d'une personne (animatrice, délégué), d'une campagne, d'un contenu, d'un dossier réglementaire, d'une tâche ou d'une pièce de vente (numéro de BL, facture, avoir) à partir d'un mot-clé. À utiliser avant un autre outil quand l'orthographe est incertaine.",
   module: "any",
   action: "view",
   schema,
@@ -36,9 +38,10 @@ export const searchEntities: AiTool<typeof schema> = {
     const data: Record<string, { label: string; sub: string | null; href: string }[]> = {};
     let count = 0;
     for (const s of visible) {
-      let hits = res[s.key];
+      let hits = res[s.key] ?? [];
       if (s.key === "brands" && ctx.access.brandIds) hits = hits.filter((h) => ctx.access.brandIds!.includes(h.id));
       if (s.key === "clients" && ctx.access.clientIds) hits = hits.filter((h) => ctx.access.clientIds!.includes(h.id));
+      if ((s.key === "deliveries" || s.key === "invoices") && ctx.access.clientIds) hits = hits.filter((h) => !!h.clientId && ctx.access.clientIds!.includes(h.clientId));
       if (!hits.length) continue;
       data[s.label] = hits.slice(0, limit).map((h) => ({ label: h.label, sub: h.sub, href: h.href }));
       count += Math.min(hits.length, limit);

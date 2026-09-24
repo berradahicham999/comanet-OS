@@ -52,8 +52,10 @@ const FROM = sql`from sales s join products p on p.id = s.product_id join client
  * commande. La clé de repli était `sales.id` ici (chaque ligne comptait pour une commande,
  * ce qui gonflait le nombre de commandes de /ventes) et `sales.date` dans `clientIntel()`
  * (deux clients servis le même jour se confondaient dès qu'on sortait d'un périmètre client).
+ * Une vente émise par COMANET OS (source COMANET_OS) est comptée par bon de livraison
+ * (`lvc_ref`) : elle existe avant d'être facturée, et une facture peut regrouper plusieurs BL.
  */
-export const ORDER_KEY = sql`coalesce(s.invoice_ref, s.client_id::text || ':' || s.date::text)`;
+export const ORDER_KEY = sql`case when s.source = 'COMANET_OS' then 'COS:' || s.lvc_ref else coalesce(s.invoice_ref, s.client_id::text || ':' || s.date::text) end`;
 
 /**
  * COMMERCIAL ET CANAL — résolution officielle.

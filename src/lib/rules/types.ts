@@ -2,8 +2,9 @@ import type { ComanetSettings } from "@/lib/settings";
 import type { ProductStock } from "@/lib/stock";
 import type { ClientIntel } from "@/lib/clients";
 import type { TaskPriority, UserRole } from "@/db/schema";
+import type { ModuleKey } from "@/lib/access-shared";
 
-export type RecCategory = "STOCK" | "MARKETING" | "REGLEMENTAIRE" | "TERRAIN" | "COMMERCIAL" | "BUDGET" | "EXECUTION" | "DATA" | "MEDICAL";
+export type RecCategory = "STOCK" | "MARKETING" | "REGLEMENTAIRE" | "TERRAIN" | "COMMERCIAL" | "BUDGET" | "EXECUTION" | "DATA" | "MEDICAL" | "GESTION";
 
 export const CATEGORY_META: Record<RecCategory, { label: string; tone: "red" | "orange" | "yellow" | "green" | "blue" | "purple" | "gray" | "accent" }> = {
   STOCK: { label: "Stock & achats", tone: "orange" },
@@ -15,6 +16,13 @@ export const CATEGORY_META: Record<RecCategory, { label: string; tone: "red" | "
   EXECUTION: { label: "Exécution", tone: "gray" },
   DATA: { label: "Données", tone: "gray" },
   MEDICAL: { label: "Médical", tone: "green" },
+  GESTION: { label: "Gestion commerciale", tone: "blue" },
+};
+
+/** Modules donnant accès à chaque catégorie de recommandation (page /actions et copilote). */
+export const CATEGORY_MODULES: Record<RecCategory, ModuleKey[]> = {
+  STOCK: ["stock"], MARKETING: ["marketing", "influence"], REGLEMENTAIRE: ["reglementaire"], TERRAIN: ["terrain"], COMMERCIAL: ["ventes", "clients"],
+  BUDGET: ["budgets"], EXECUTION: ["taches"], DATA: ["administration"], MEDICAL: ["medical"], GESTION: ["livraisons", "facturation", "stock"],
 };
 
 export type Recommendation = {
@@ -38,7 +46,7 @@ export type Recommendation = {
   task: { title: string; dueInDays: number; role: UserRole; priority?: TaskPriority };
   /** Personne à proposer par défaut pour la tâche (ex. commercial en charge du client), avant le repli par rôle. */
   suggestedAssigneeId?: string | null;
-  entity?: { type: "product" | "client" | "brand" | "regulatory" | "campaign" | "task" | "user" | "doctor" | "content" | "activation" | "inventory"; id: string; href: string };
+  entity?: { type: "product" | "client" | "brand" | "regulatory" | "campaign" | "task" | "user" | "doctor" | "content" | "activation" | "inventory" | "document"; id: string; href: string };
   brandId?: string | null;
   /** Enjeu (MAD) pour ordonner les recommandations de même priorité. */
   score?: number;

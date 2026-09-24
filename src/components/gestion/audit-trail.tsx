@@ -5,6 +5,7 @@ const ACTION_LABELS: Record<string, string> = {
   CREATE: "Création", UPDATE: "Modification", ARCHIVE: "Archivage", RESTORE: "Restauration", DELETE: "Suppression",
   BLOCK: "Blocage", UNBLOCK: "Déblocage", ADD_ADDRESS: "Adresse de livraison ajoutée", REMOVE_ADDRESS: "Adresse de livraison retirée",
   BRAND_DISCOUNT: "Remise par marque", SET_NEXT_NUMBER: "Prochain numéro réglé", MOVEMENT: "Mouvement de stock", SETTINGS: "Paramètres",
+  VALIDATE: "Validation", DELIVER: "Livraison confirmée", CANCEL: "Annulation", APPROVAL_REQUESTED: "Déblocage demandé",
 };
 
 /** Libellés des champs pour un historique lisible. */

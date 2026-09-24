@@ -130,6 +130,20 @@ export type GestionSettings = {
    * émet les pièces des `sites` listés, à partir de `date` ; les autres sites restent importés.
    */
   cutover: { mode: "OFF" | "PARALLELE" | "ACTIF"; date: string | null; sites: string[] };
+  /** Modèle d'impression de la facture : PPH TTC + remise (modèle 1 de Sage) ou prix net (modèle 2). */
+  invoiceModel: "PPH_REMISE" | "NET";
+  /** Points de remise tolérés au-delà de la remise autorisée du client avant levée de blocage. */
+  discountTolerancePct: number;
+  /** Exiger l'étape « Livré » avant de pouvoir facturer un BL. */
+  requireDelivered: boolean;
+  /** Contrôler le plafond d'encours à la validation (utile une fois les règlements saisis, lot 5). */
+  checkCreditLimit: boolean;
+  /** Libellés du montant en lettres (Sage : « MAD » et « cents »). */
+  amountWords: { major: string; minor: string };
+  /** Durée de validité (jours) d'un lien de partage de PDF (WhatsApp, e-mail). */
+  shareLinkDays: number;
+  /** Alerte : BL validés et non facturés depuis plus de N jours. */
+  uninvoicedAlertDays: number;
 };
 
 export const EMPTY_COMPANY: CompanyIdentity = {
@@ -145,6 +159,13 @@ export const DEFAULT_GESTION: GestionSettings = {
   expiryAlertDays: 90,
   readinessWindowDays: 365,
   cutover: { mode: "OFF", date: null, sites: ["COMANET", "DESK DIGITAL"] },
+  invoiceModel: "PPH_REMISE",
+  discountTolerancePct: 0,
+  requireDelivered: false,
+  checkCreditLimit: false,
+  amountWords: { major: "MAD", minor: "cents" },
+  shareLinkDays: 30,
+  uninvoicedAlertDays: 15,
 };
 
 /**
@@ -493,6 +514,7 @@ export function mergeGestion(stored: Partial<GestionSettings> | null | undefined
     ...stored,
     company: { ...d.company, ...(stored.company ?? {}) },
     cutover: { ...d.cutover, ...(stored.cutover ?? {}) },
+    amountWords: { ...d.amountWords, ...(stored.amountWords ?? {}) },
   };
 }
 

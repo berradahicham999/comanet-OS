@@ -183,6 +183,13 @@
       "when": 1789800500000,
       "tag": "0025_gestion_fondations",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1789800600000,
+      "tag": "0026_gestion_ventes",
+      "breakpoints": true
     }
   ]
 }

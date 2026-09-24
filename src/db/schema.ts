@@ -404,6 +404,8 @@ export const userFlags = pgTable("user_flags", {
   exportData: boolean("export_data").notNull().default(false),
   /** Journal d'activité et journal des droits. */
   readActivityLog: boolean("read_activity_log").notNull().default(false),
+  /** Lever un blocage commercial : remise hors plafond, client bloqué, encours dépassé, vente à perte. */
+  overrideCommercial: boolean("override_commercial").notNull().default(false),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -723,10 +725,20 @@ export const sales = pgTable(
     rawProduct: text("raw_product"), // désignation d'origine
     lineHash: text("line_hash").notNull(), // détection des doublons
     importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
+    /**
+     * SAGE : ligne importée (Sage, fichiers distributeurs). COMANET_OS : ligne projetée d'une pièce
+     * validée par la gestion commerciale — seul `src/lib/gestion/projection.ts` les écrit.
+     */
+    source: text("source").notNull().default("SAGE"),
+    documentLineId: uuid("document_line_id").references((): AnyPgColumn => salesDocumentLines.id, { onDelete: "restrict" }),
+    /** Unités gratuites (UG) de la ligne : sorties du stock, à 0 MAD. */
+    freeQuantity: numeric("free_quantity", { precision: 12, scale: 3 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex("sales_line_hash_uq").on(t.lineHash),
+    uniqueIndex("sales_document_line_uq").on(t.documentLineId).where(sql`document_line_id is not null`),
+    index("sales_source_idx").on(t.source),
     index("sales_date_idx").on(t.date),
     index("sales_client_idx").on(t.clientId),
     index("sales_product_idx").on(t.productId),
@@ -947,6 +959,117 @@ export const documentSequences = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.seriesKey, t.year] })],
+);
+
+/** Motifs d'avoir (modifiables) ; `withReturn` : le motif implique un retour physique de marchandise. */
+export const creditReasons = pgTable("credit_reasons", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  withReturn: boolean("with_return").notNull().default(false),
+  sort: integer("sort").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+});
+
+/**
+ * Pièces de vente : BL, facture, avoir. Brouillon modifiable ; une fois validée, la pièce est
+ * numérotée, figée (triggers de la migration 0026) et son statut n'évolue que par
+ * `src/lib/gestion/documents.ts`. `isSimulation` : pièce de test ou de période parallèle, série
+ * SIM…, jamais projetée dans les ventes. Identité client et société copiées à la validation.
+ */
+export const salesDocuments = pgTable(
+  "sales_documents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    type: text("type").notNull(),
+    status: text("status").notNull().default("BROUILLON"),
+    number: text("number"),
+    seriesKey: text("series_key").references(() => documentSeries.key, { onDelete: "restrict", onUpdate: "cascade" }),
+    fiscalYear: integer("fiscal_year"),
+    isSimulation: boolean("is_simulation").notNull().default(true),
+    date: date("date").notNull(),
+    clientId: uuid("client_id").notNull().references(() => clients.id, { onDelete: "restrict" }),
+    clientSnapshot: jsonb("client_snapshot"),
+    companySnapshot: jsonb("company_snapshot"),
+    deliveryAddress: text("delivery_address"),
+    site: text("site").notNull().default("COMANET"),
+    salesRepId: uuid("sales_rep_id").references(() => users.id, { onDelete: "set null" }),
+    salesRepName: text("sales_rep_name"),
+    paymentModeKey: text("payment_mode_key").references(() => paymentModes.key, { onUpdate: "cascade" }),
+    paymentDays: integer("payment_days"),
+    dueDate: date("due_date"),
+    globalDiscountPct: numeric("global_discount_pct", { precision: 5, scale: 2 }).notNull().default("0"),
+    grossHt: numeric("gross_ht", { precision: 14, scale: 2 }).notNull().default("0"),
+    netHt: numeric("net_ht", { precision: 14, scale: 2 }).notNull().default("0"),
+    vatTotal: numeric("vat_total", { precision: 14, scale: 2 }).notNull().default("0"),
+    ttc: numeric("ttc", { precision: 14, scale: 2 }).notNull().default("0"),
+    vatBreakdown: jsonb("vat_breakdown").$type<{ rate: string; base: string; vat: string }[]>().notNull().default([]),
+    amountInWords: text("amount_in_words"),
+    reasonKey: text("reason_key").references(() => creditReasons.key, { onUpdate: "cascade" }),
+    originDocumentId: uuid("origin_document_id").references((): AnyPgColumn => salesDocuments.id, { onDelete: "restrict" }),
+    notes: text("notes"),
+    approvals: jsonb("approvals").$type<{ code: string; label: string; by: string; byId: string | null; at: string }[]>().notNull().default([]),
+    approvalRequestedAt: timestamp("approval_requested_at", { withTimezone: true }),
+    approvalRequestedById: uuid("approval_requested_by_id").references(() => users.id, { onDelete: "set null" }),
+    source: text("source").notNull().default("COMANET_OS"),
+    pdfAssetId: uuid("pdf_asset_id"),
+    contentHash: text("content_hash"),
+    /* Facturation électronique DGI : prévue, pas encore implémentée. */
+    einvoiceUid: text("einvoice_uid"),
+    einvoiceStatus: text("einvoice_status"),
+    einvoicePayload: jsonb("einvoice_payload"),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    validatedById: uuid("validated_by_id").references(() => users.id, { onDelete: "set null" }),
+    validatedAt: timestamp("validated_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    cancelledById: uuid("cancelled_by_id"),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelReason: text("cancel_reason"),
+  },
+  (t) => [
+    uniqueIndex("sales_documents_number_uq").on(t.number).where(sql`number is not null`),
+    index("sales_documents_client_idx").on(t.clientId, t.date),
+    index("sales_documents_type_status_idx").on(t.type, t.status, t.date),
+    index("sales_documents_origin_idx").on(t.originDocumentId),
+  ],
+);
+
+export const salesDocumentLines = pgTable(
+  "sales_document_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    documentId: uuid("document_id").notNull().references(() => salesDocuments.id, { onDelete: "cascade" }),
+    position: integer("position").notNull().default(0),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "restrict" }),
+    lotId: uuid("lot_id").references(() => stockLots.id, { onDelete: "restrict" }),
+    warehouseKey: text("warehouse_key").notNull().default("PRINCIPAL").references(() => warehouses.key, { onUpdate: "cascade" }),
+    ref: text("ref"),
+    designation: text("designation").notNull(),
+    unit: text("unit"),
+    quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
+    freeQuantity: numeric("free_quantity", { precision: 12, scale: 3 }).notNull().default("0"),
+    unitPriceHt: numeric("unit_price_ht", { precision: 12, scale: 2 }).notNull().default("0"),
+    publicPriceTtc: numeric("public_price_ttc", { precision: 12, scale: 2 }),
+    discountPct: numeric("discount_pct", { precision: 5, scale: 2 }).notNull().default("0"),
+    grossHt: numeric("gross_ht", { precision: 14, scale: 2 }).notNull().default("0"),
+    netHt: numeric("net_ht", { precision: 14, scale: 2 }).notNull().default("0"),
+    taxRate: numeric("tax_rate", { precision: 5, scale: 2 }).notNull().default("20"),
+    vatAmount: numeric("vat_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+    ttc: numeric("ttc", { precision: 14, scale: 2 }).notNull().default("0"),
+    sourceLineId: uuid("source_line_id").references((): AnyPgColumn => salesDocumentLines.id, { onDelete: "restrict" }),
+    sourceNumber: text("source_number"),
+    sourceDate: date("source_date"),
+    invoicedQty: numeric("invoiced_qty", { precision: 12, scale: 3 }).notNull().default("0"),
+    creditedQty: numeric("credited_qty", { precision: 12, scale: 3 }).notNull().default("0"),
+    returnWarehouseKey: text("return_warehouse_key").references(() => warehouses.key, { onUpdate: "cascade" }),
+    lotAllocations: jsonb("lot_allocations").$type<{ lotId: string; lotNumber: string; expiryDate: string | null; qty: string }[]>().notNull().default([]),
+  },
+  (t) => [
+    index("sales_document_lines_document_idx").on(t.documentId, t.position),
+    index("sales_document_lines_product_idx").on(t.productId),
+    index("sales_document_lines_source_idx").on(t.sourceLineId),
+  ],
 );
 
 /* ------------------------------------------------------------------ */
@@ -2422,6 +2545,8 @@ export const contentAssets = pgTable(
     inventoryItemId: uuid("inventory_item_id").references(() => inventoryItems.id, { onDelete: "cascade" }),
     /** Fichier de la société (LOGO | CACHET), imprimé sur les pièces. */
     companySlot: text("company_slot"),
+    /** PDF figé d'une pièce de vente validée. */
+    salesDocumentId: uuid("sales_document_id").references((): AnyPgColumn => salesDocuments.id, { onDelete: "cascade" }),
     kind: text("kind").notNull().default("LIVRABLE"), // LIVRABLE | REFERENCE | DEVIS | FACTURE | VISUEL | PHOTO | COMPTE_RENDU
     name: text("name").notNull(),
     mime: text("mime").notNull().default("application/octet-stream"),
@@ -2437,7 +2562,8 @@ export const contentAssets = pgTable(
     index("content_assets_inventory_idx").on(t.inventoryItemId, t.kind, t.version),
     index("content_assets_user_idx").on(t.uploadedById),
     index("content_assets_company_idx").on(t.companySlot, t.kind, t.version),
-    check("content_assets_owner_ck", sql`((${t.contentId} is not null)::int + (${t.activationId} is not null)::int + (${t.inventoryItemId} is not null)::int + (${t.companySlot} is not null)::int) = 1`),
+    index("content_assets_sales_document_idx").on(t.salesDocumentId, t.kind, t.version),
+    check("content_assets_owner_ck", sql`((${t.contentId} is not null)::int + (${t.activationId} is not null)::int + (${t.inventoryItemId} is not null)::int + (${t.companySlot} is not null)::int + (${t.salesDocumentId} is not null)::int) = 1`),
   ],
 );
 

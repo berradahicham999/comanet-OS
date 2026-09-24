@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { paymentModes, taxRates, warehouses } from "@/db/schema";
+import { creditReasons, paymentModes, taxRates, warehouses } from "@/db/schema";
 import { requireAdmin } from "@/lib/access";
 import { audit } from "@/lib/audit";
 import { getSettings, saveSettings, type CompanyIdentity, type GestionSettings } from "@/lib/settings";
@@ -73,8 +73,15 @@ export async function savePoliciesAction(fd: FormData) {
       insufficientStock: str(fd, "insufficientStock") === "WARN" ? "WARN" : "BLOCK",
       expiryAlertDays: intOrNull(fd, "expiryAlertDays", "Alerte péremption", 1, 730) ?? g.expiryAlertDays,
       readinessWindowDays: intOrNull(fd, "readinessWindowDays", "Fenêtre de préparation", 30, 1095) ?? g.readinessWindowDays,
-      // Le mode reste OFF tant que les pièces de vente (lot 2) et la bascule (lot 5) ne sont pas livrées.
-      cutover: { mode: "OFF", date, sites },
+      // ACTIF (pièces légales, projection dans les ventes) s'ouvrira avec les outils de bascule du lot 5.
+      cutover: { mode: str(fd, "cutoverMode") === "PARALLELE" ? "PARALLELE" : "OFF", date, sites },
+      invoiceModel: str(fd, "invoiceModel") === "NET" ? "NET" : "PPH_REMISE",
+      discountTolerancePct: Number(decimalOrNull(fd, "discountTolerancePct", "Tolérance de remise", 2, { min: 0, maxExclusive: 100 }) ?? g.discountTolerancePct),
+      requireDelivered: bool(fd, "requireDelivered"),
+      checkCreditLimit: bool(fd, "checkCreditLimit"),
+      amountWords: { major: str(fd, "wordsMajor") ?? g.amountWords.major, minor: str(fd, "wordsMinor") ?? g.amountWords.minor },
+      shareLinkDays: intOrNull(fd, "shareLinkDays", "Durée des liens de partage", 1, 365) ?? g.shareLinkDays,
+      uninvoicedAlertDays: intOrNull(fd, "uninvoicedAlertDays", "Alerte BL non facturés", 1, 365) ?? g.uninvoicedAlertDays,
     };
   } catch (e) {
     back("politiques", `error=${errorParam(e)}`);
@@ -119,6 +126,22 @@ export async function savePaymentModeAction(fd: FormData) {
   }
   revalidatePath(PAGE);
   back("paiement");
+}
+
+export async function saveCreditReasonAction(fd: FormData) {
+  const user = await requireAdmin();
+  try {
+    const label = str(fd, "label");
+    const key = str(fd, "key") ?? (label ? refKey(label) : null);
+    if (!key || !label) throw new Error("Libellé obligatoire.");
+    const values = { label, withReturn: bool(fd, "withReturn"), sort: intOrNull(fd, "sort", "Ordre", 0, 999) ?? 0, active: bool(fd, "active") };
+    await db.insert(creditReasons).values({ key, ...values }).onConflictDoUpdate({ target: creditReasons.key, set: values });
+    await audit({ actor: actorOf(user), action: "SETTINGS", module: "administration", entity: "credit_reason", label: key, after: values });
+  } catch (e) {
+    back("motifs", `error=${errorParam(e)}`);
+  }
+  revalidatePath(PAGE);
+  back("motifs");
 }
 
 export async function saveWarehouseAction(fd: FormData) {
