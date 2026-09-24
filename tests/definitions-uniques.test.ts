@@ -243,3 +243,15 @@ describe("Gestion commerciale — achats", () => {
   });
 });
 
+describe("Gestion commerciale — inventaires", () => {
+  test("seul `src/lib/gestion/counts.ts` écrit les inventaires", () => {
+    const found = codeHits(/(insert|update|delete)\((stockCounts|stockCountLines|stockCountEntries)\)|(insert\s+into|update|delete\s+from)\s+(stock_counts|stock_count_lines|stock_count_entries)\b/i, ["lib/gestion/counts.ts"]);
+    assert.deepEqual(found, [], `Écriture d'inventaire hors du module dans : ${found.join(", ")}`);
+  });
+  test("écart, fiabilité et pistes n'ont qu'une définition", () => {
+    assert.deepEqual(hits(/export function lineGap\(/), ["src/lib/gestion/counts-shared.ts"]);
+    assert.deepEqual(hits(/export function countStats\(/), ["src/lib/gestion/counts-shared.ts"]);
+    assert.deepEqual(hits(/export function gapLeads\(/), ["src/lib/gestion/counts-shared.ts"]);
+    assert.deepEqual(hits(/export async function validateCount\(/), ["src/lib/gestion/counts.ts"]);
+  });
+});
