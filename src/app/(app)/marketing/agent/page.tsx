@@ -101,7 +101,7 @@ export default async function MarketingAgentPage(props: { searchParams: Promise<
       ) : (
         <>
           <div className="text-[12px] text-muted mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span>Données à jour : ventes Sage au <b>{fmtDate(overview.freshness.salesRefDate)}</b>{refDate.staleDays > 0 && <span className="text-amber-800"> ({refDate.staleDays} j de retard d&apos;import)</span>}</span>
+            <span>Données à jour : ventes (sell-in) au <b>{fmtDate(overview.freshness.salesRefDate)}</b>{refDate.staleDays > 0 && <span className="text-amber-800"> ({refDate.staleDays} j de retard d&apos;import)</span>}</span>
             <span>· stock {overview.freshness.stockDate ? <>photo du <b>{fmtDate(overview.freshness.stockDate)}</b></> : <span className="text-amber-800">aucune photo importée</span>}</span>
             <span>· calculé à {fmtTime(overview.freshness.computedAt)}</span>
             <span>· période : {overview.period.label}</span>

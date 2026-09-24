@@ -67,10 +67,22 @@ export async function productStocks(
   const lastMonthStart = iso(addDays(t, -DAYS_PER_MONTH));
   const d30 = iso(addDays(t, -30));
 
+  // Après la bascule, le stock de l'entrepôt est le journal de mouvements (dépôts internes vendables) ; les
+  // dépôts externes (Cospharma, Pharmafirst) restent connus par leur dernière photo. Avant, la dernière photo.
+  const c = s.gestion.cutover;
+  const ledger = c.mode === "ACTIF" && !!c.date && iso(today()) >= c.date;
   const r = await db.execute(sql`
     with latest as (
+      ${ledger ? sql`
+      select coalesce(l.product_id, e.product_id) as product_id, (coalesce(l.q, 0) + coalesce(e.q, 0))::float8 as quantity, 0::float8 as on_order, ${iso(today())}::text as date
+      from (select m.product_id, sum(m.quantity) as q from stock_movements m join warehouses w on w.key = m.warehouse_key where w.kind = 'INTERNE' and w.sellable group by 1) l
+      full join (
+        select product_id, sum(quantity) as q from (
+          select distinct on (s2.product_id, s2.warehouse_key) s2.product_id, s2.quantity from stock_snapshots s2 join warehouses w on w.key = s2.warehouse_key
+          where w.kind = 'EXTERNE' order by s2.product_id, s2.warehouse_key, s2.date desc, s2.created_at desc) x group by 1
+      ) e on e.product_id = l.product_id` : sql`
       select distinct on (product_id) product_id, quantity::float8 as quantity, on_order::float8 as on_order, date::text as date
-      from stock_snapshots order by product_id, date desc, created_at desc
+      from stock_snapshots order by product_id, date desc, created_at desc`}
     ),
     avg_sales as (
       select product_id, sum(quantity)::float8 / ${s.avgSalesMonths} as avg_monthly

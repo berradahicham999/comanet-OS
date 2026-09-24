@@ -56,7 +56,7 @@ export const getSalesSummary: AiTool<typeof schema> = {
       input.top ? deps.salesByDim(input.top, p.start, p.end, f, limitOf(input.limit)) : Promise.resolve(null),
     ]);
     if (cur.lines === 0 && (!cmp || cmp.lines === 0)) {
-      return unavailable(`Aucune ligne de vente Sage sur ${p.label}${scopeParts.length ? ` (${scopeParts.join(", ")})` : ""}.`, "Importer l'export Sage de la période (Imports → Ventes) ou élargir la période.", "Sage — sell-in HT");
+      return unavailable(`Aucune ligne de vente (sell-in) sur ${p.label}${scopeParts.length ? ` (${scopeParts.join(", ")})` : ""}.`, "Importer l'export Sage de la période (Imports → Ventes) ou élargir la période.", "Sage — sell-in HT");
     }
     const refYear = ctx.refDate.getUTCFullYear(), refMonth = ctx.refDate.getUTCMonth() + 1;
     const objective = p.key === "month" && !input.client && !input.product && !input.city ? await deps.salesObjective(refYear, refMonth, brand?.id ?? null) : null;

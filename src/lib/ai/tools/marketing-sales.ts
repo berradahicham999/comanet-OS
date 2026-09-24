@@ -64,7 +64,7 @@ export const getSalesPerformance: AiTool<typeof perfSchema> = {
       deps.salesTotals(p.start, p.end, b.f), deps.salesTotals(p.prev.start, p.prev.end, b.f), deps.salesTotals(p.n1.start, p.n1.end, b.f),
       ...dims.flatMap((d) => [deps.salesByDim(d, p.start, p.end, b.f, 1000), deps.salesByDim(d, p.prev.start, p.prev.end, b.f, 1000)]),
     ]);
-    if (cur.lines === 0 && prev.lines === 0) return unavailable(`Aucune ligne de vente Sage sur ${p.label}${b.parts.length ? ` (${b.parts.join(", ")})` : ""}.`, "Importer l'export Sage de la période (Imports → Ventes) ou élargir la période.", "Sage — sell-in HT");
+    if (cur.lines === 0 && prev.lines === 0) return unavailable(`Aucune ligne de vente (sell-in) sur ${p.label}${b.parts.length ? ` (${b.parts.join(", ")})` : ""}.`, "Importer l'export Sage de la période (Imports → Ventes) ou élargir la période.", "Sage — sell-in HT");
     const comparable = prev.lines > 0, comparableN1 = n1.lines > 0;
     const data: Record<string, unknown> = {
       revenue_mad: round(cur.amount), units: round(cur.quantity), orders: cur.orders, active_clients: cur.clients,
@@ -85,7 +85,7 @@ export const getSalesPerformance: AiTool<typeof perfSchema> = {
       scope: scopeLabel(access, b.parts),
       data, rowCount,
       links: [{ label: "Ouvrir Ventes", href: `/ventes?period=${p.key}${b.brandId ? `&brand=${b.brandId}` : ""}` }],
-      notes: [...freshnessNotes(ctx), ...(comparable ? [] : ["Période précédente sans vente Sage : évolution non mesurable."]), ...(comparableN1 ? [] : ["Même période N-1 sans vente Sage : évolution N-1 non mesurable."])],
+      notes: [...freshnessNotes(ctx), ...(comparable ? [] : ["Période précédente sans vente sell-in : évolution non mesurable."]), ...(comparableN1 ? [] : ["Même période N-1 sans vente sell-in : évolution N-1 non mesurable."])],
     };
   },
 };
@@ -117,7 +117,7 @@ export const getSalesBreakdown: AiTool<typeof breakdownSchema> = {
     const p = marketingPeriod(input.period, ctx.refDate, { start: input.period_start, end: input.period_end });
     const dim = DIMENSIONS[input.dimension] as Dim;
     const [total, prevTotal, cur, prev] = await Promise.all([deps.salesTotals(p.start, p.end, b.f), deps.salesTotals(p.prev.start, p.prev.end, b.f), deps.salesByDim(dim, p.start, p.end, b.f, 1000), deps.salesByDim(dim, p.prev.start, p.prev.end, b.f, 1000)]);
-    if (total.lines === 0) return unavailable(`Aucune vente Sage sur ${p.label}${b.parts.length ? ` (${b.parts.join(", ")})` : ""}.`, "Importer l'export Sage de la période (Imports → Ventes) ou élargir la période.", "Sage — sell-in HT");
+    if (total.lines === 0) return unavailable(`Aucune vente (sell-in) sur ${p.label}${b.parts.length ? ` (${b.parts.join(", ")})` : ""}.`, "Importer l'export Sage de la période (Imports → Ventes) ou élargir la période.", "Sage — sell-in HT");
     const comparable = prevTotal.lines > 0;
     const rows = dimRows(cur, comparable ? prev : null, total.amount, limitOf(input.limit, 15));
     const unknown = cur.find((r) => r.id === "—" || r.name === "Non renseigné" || r.name === "Non affecté");
@@ -133,7 +133,7 @@ export const getSalesBreakdown: AiTool<typeof breakdownSchema> = {
       },
       rowCount: rows.length,
       links: [{ label: "Ouvrir Ventes", href: `/ventes?period=${p.key}${b.brandId ? `&brand=${b.brandId}` : ""}` }],
-      notes: [...freshnessNotes(ctx), ...(comparable ? [] : ["Période précédente sans vente Sage : croissances non mesurables."]), ...(unknown && unknown.amount > 0 ? [`Une part du CA n'a pas de ${input.dimension === "region" ? "secteur" : input.dimension === "rep" ? "commercial" : "canal"} renseigné (ligne « Non renseigné / Non affecté »).`] : [])],
+      notes: [...freshnessNotes(ctx), ...(comparable ? [] : ["Période précédente sans vente sell-in : croissances non mesurables."]), ...(unknown && unknown.amount > 0 ? [`Une part du CA n'a pas de ${input.dimension === "region" ? "secteur" : input.dimension === "rep" ? "commercial" : "canal"} renseigné (ligne « Non renseigné / Non affecté »).`] : [])],
     };
   },
 };

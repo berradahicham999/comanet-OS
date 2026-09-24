@@ -138,6 +138,23 @@ export function dueDateOf(dateIso: string, paymentDays: number | null, defaultDa
 export type CutoverLike = { mode: "OFF" | "PARALLELE" | "ACTIF"; date: string | null; sites: string[] };
 
 /**
+ * COMANET OS émet une pièce LÉGALE (séries BL / FA / AV) seulement en mode ACTIF, pour une pièce datée
+ * du jour de bascule ou après, et d'un site qui bascule. Sinon, c'est une simulation (SIMBL…).
+ */
+export function emitsReal(c: CutoverLike, doc: { date: string; site: string }): boolean {
+  return c.mode === "ACTIF" && !!c.date && doc.date >= c.date && c.sites.map((s) => s.toUpperCase()).includes(doc.site.toUpperCase());
+}
+
+/**
+ * Import des ventes Sage après la bascule : une ligne d'un site basculé, datée du jour de bascule ou
+ * après, est refusée — la même vente est déjà émise par COMANET OS et serait comptée deux fois.
+ */
+export function importBlockedByCutover(c: CutoverLike, date: string, site: string | null): string | null {
+  if (!site || !emitsReal(c, { date, site })) return null;
+  return `Ligne du site ${site.toUpperCase()} datée du ${date.split("-").reverse().join("/")} : depuis la bascule du ${c.date!.split("-").reverse().join("/")}, ce site facture dans COMANET OS. Ligne non importée (elle serait comptée deux fois).`;
+}
+
+/**
  * Une pièce alimente `sales` seulement si COMANET OS émet réellement les pièces (mode ACTIF), que
  * la pièce n'est pas une simulation, qu'elle date d'après la bascule et que son site bascule.
  * Avant cela, Sage fait foi : projeter compterait deux fois les mêmes ventes.

@@ -74,7 +74,8 @@ export async function savePoliciesAction(fd: FormData) {
       expiryAlertDays: intOrNull(fd, "expiryAlertDays", "Alerte péremption", 1, 730) ?? g.expiryAlertDays,
       readinessWindowDays: intOrNull(fd, "readinessWindowDays", "Fenêtre de préparation", 30, 1095) ?? g.readinessWindowDays,
       // ACTIF (pièces légales, projection dans les ventes) s'ouvrira avec les outils de bascule du lot 5.
-      cutover: { mode: str(fd, "cutoverMode") === "PARALLELE" ? "PARALLELE" : "OFF", date, sites },
+      // ACTIF se pose et se retire depuis la page Bascule (contrôles) : les paramètres ne le changent pas.
+      cutover: { mode: g.cutover.mode === "ACTIF" ? "ACTIF" : str(fd, "cutoverMode") === "PARALLELE" ? "PARALLELE" : "OFF", date, sites },
       invoiceModel: str(fd, "invoiceModel") === "NET" ? "NET" : "PPH_REMISE",
       discountTolerancePct: Number(decimalOrNull(fd, "discountTolerancePct", "Tolérance de remise", 2, { min: 0, maxExclusive: 100 }) ?? g.discountTolerancePct),
       requireDelivered: bool(fd, "requireDelivered"),
@@ -86,6 +87,15 @@ export async function savePoliciesAction(fd: FormData) {
         lateOrderGraceDays: intOrNull(fd, "lateOrderGraceDays", "Délai de grâce des commandes", 0, 180) ?? g.purchases.lateOrderGraceDays,
         uninvoicedReceptionDays: intOrNull(fd, "uninvoicedReceptionDays", "Alerte réceptions sans facture", 1, 365) ?? g.purchases.uninvoicedReceptionDays,
         priceGapTolerancePct: Number(decimalOrNull(fd, "priceGapTolerancePct", "Tolérance d'écart de prix", 2, { min: 0, maxExclusive: 100 }) ?? g.purchases.priceGapTolerancePct),
+      },
+      receivables: {
+        reminderDays: (() => {
+          const v = (str(fd, "reminderDays") ?? g.receivables.reminderDays.join(",")).split(/[,;\s]+/).filter(Boolean).map(Number);
+          if (!v.length || v.some((x) => !Number.isInteger(x) || x < 1 || x > 365) || v.some((x, i) => i && x <= v[i - 1])) throw new Error("Niveaux de relance : jours croissants, ex. « 7, 30, 60 ».");
+          return v;
+        })(),
+        reminderCooldownDays: intOrNull(fd, "reminderCooldownDays", "Délai entre deux relances", 1, 90) ?? g.receivables.reminderCooldownDays,
+        depositLeadDays: intOrNull(fd, "depositLeadDays", "Remise des effets", 0, 60) ?? g.receivables.depositLeadDays,
       },
       inventory: {
         ...g.inventory,
@@ -129,7 +139,7 @@ export async function savePaymentModeAction(fd: FormData) {
     const label = str(fd, "label");
     const key = str(fd, "key") ?? (label ? refKey(label) : null);
     if (!key || !label) throw new Error("Libellé obligatoire.");
-    const values = { label, requiresDueDate: bool(fd, "requiresDueDate"), sort: intOrNull(fd, "sort", "Ordre", 0, 999) ?? 0, active: bool(fd, "active") };
+    const values = { label, requiresDueDate: bool(fd, "requiresDueDate"), collectedOnReceipt: bool(fd, "collectedOnReceipt"), sort: intOrNull(fd, "sort", "Ordre", 0, 999) ?? 0, active: bool(fd, "active") };
     await db.insert(paymentModes).values({ key, ...values }).onConflictDoUpdate({ target: paymentModes.key, set: values });
     await audit({ actor: actorOf(user), action: "SETTINGS", module: "administration", entity: "payment_mode", label: key, after: values });
   } catch (e) {

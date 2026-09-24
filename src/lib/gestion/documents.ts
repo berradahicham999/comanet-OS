@@ -11,7 +11,7 @@ import { getSettings, type GestionSettings } from "@/lib/settings";
 import { amountInWords, computeDocument, netUnitPriceHt } from "./calc";
 import { billingReadiness } from "./clients-shared";
 import {
-  DOC_TYPE_LABELS, allowedActions, blStatusAfterInvoicing, commercialIssues, defaultDiscount, dueDateOf, remainingQty, shouldProject,
+  DOC_TYPE_LABELS, allowedActions, blStatusAfterInvoicing, commercialIssues, defaultDiscount, dueDateOf, emitsReal, remainingQty, shouldProject,
   type CommercialIssue, type DocStatus, type DocType,
 } from "./documents-shared";
 import { recordStockMovements, type LedgerInput } from "./ledger";
@@ -19,6 +19,7 @@ import { allocateFefo } from "./ledger-shared";
 import { SCALE, formatScaled, fromDb, parseDecimal } from "./money";
 import { allocateNumber } from "./numbering";
 import { attachInvoiceNumber, projectDocument, removeProjection } from "./projection";
+import { allocateCreditIn } from "./payments";
 
 /**
  * Pièces de vente — SEUL module qui crée, valide, livre, annule ou facture une pièce (garde-fou
@@ -301,12 +302,20 @@ export async function createCreditNote(invoiceId: string, actor: AuditActor): Pr
 /* Blocages commerciaux                                                */
 /* ------------------------------------------------------------------ */
 
-/** Encours TTC d'un client : factures validées − avoirs validés + BL non encore facturés (même nature réelle / simulation). */
+/**
+ * Encours de RISQUE d'un client (TTC, même nature réelle / simulation) : soldes des factures (TTC − déjà
+ * réglé à la reprise − avoirs imputés − règlements ENCAISSÉS imputés) − avoirs non imputés + BL pas encore
+ * facturés. Un chèque ou un effet non encaissé reste dans l'encours : le risque n'est levé qu'à l'encaissement.
+ */
 export async function clientOutstanding(t: Tx | typeof db, clientId: string, simulation: boolean): Promise<string> {
   const r = await t.execute<{ v: string }>(sql`
     select (
-      coalesce((select sum(ttc) from sales_documents where client_id = ${clientId}::uuid and type = 'FACTURE' and status <> 'BROUILLON' and is_simulation = ${simulation}), 0)
-      - coalesce((select sum(ttc) from sales_documents where client_id = ${clientId}::uuid and type = 'AVOIR' and status <> 'BROUILLON' and is_simulation = ${simulation}), 0)
+      coalesce((select sum(f.ttc - f.reprise_paid
+          - coalesce((select sum(a.amount) from payment_allocations a left join payments p on p.id = a.payment_id
+              where a.invoice_id = f.id and (a.credit_note_id is not null or p.status = 'ENCAISSE')), 0))
+        from sales_documents f where f.client_id = ${clientId}::uuid and f.type = 'FACTURE' and f.status <> 'BROUILLON' and f.is_simulation = ${simulation}), 0)
+      - coalesce((select sum(v.ttc - coalesce((select sum(a.amount) from payment_allocations a where a.credit_note_id = v.id), 0))
+        from sales_documents v where v.client_id = ${clientId}::uuid and v.type = 'AVOIR' and v.status <> 'BROUILLON' and v.is_simulation = ${simulation}), 0)
       + coalesce((select sum(round(l.ttc * (l.quantity - l.invoiced_qty) / nullif(l.quantity, 0), 2)) from sales_document_lines l join sales_documents d on d.id = l.document_id
           where d.client_id = ${clientId}::uuid and d.type = 'BL' and d.status in ('VALIDE', 'LIVRE', 'FACTURE_PARTIEL') and d.is_simulation = ${simulation}), 0)
     )::text as v`);
@@ -323,7 +332,7 @@ export async function documentIssues(doc: DocumentView, t: Tx | typeof db = db):
   const productIds = doc.lines.map((l) => l.productId).filter((x): x is string => !!x);
   const cmups = productIds.length ? new Map((await t.execute<{ product_id: string; cmup: string }>(sql`
     select distinct on (product_id) product_id, cmup_after::text as cmup from stock_movements where product_id = any(${pgArray(productIds)}) and cmup_after is not null order by product_id, seq desc`)).rows.map((r) => [r.product_id, r.cmup])) : new Map<string, string>();
-  const simulation = (await getSettings()).gestion.cutover.mode !== "ACTIF";
+  const simulation = !emitsReal(g.cutover, { date: doc.date, site: doc.site });
   return commercialIssues({
     clientBlocked: client.blocked, blockedReason: client.blocked_reason,
     creditLimit: g.checkCreditLimit ? client.credit_limit : null,
@@ -395,7 +404,7 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
     const approvals = opts.override ? issues.map((i) => ({ code: i.code, label: i.label, by: actor.name, byId: actor.id, at: new Date().toISOString() })) : [];
 
     // Numéro : série légale en mode ACTIF, série de simulation sinon.
-    const simulation = g.cutover.mode !== "ACTIF";
+    const simulation = !emitsReal(g.cutover, { date: doc.date, site: doc.site });
     const seriesKey = simulation ? DOC_TYPE_LABELS[type].simSeries : DOC_TYPE_LABELS[type].series;
     if (type === "FACTURE" && !simulation) {
       const last = (await tx.execute<{ d: string | null }>(sql`select max(date)::text as d from sales_documents where type = 'FACTURE' and series_key = ${seriesKey} and status <> 'BROUILLON'`)).rows[0]?.d;
@@ -502,6 +511,8 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
       const bls = await tx.select({ quantity: salesDocumentLines.quantity, invoicedQty: salesDocumentLines.invoicedQty }).from(salesDocumentLines).where(eq(salesDocumentLines.documentId, blId));
       await tx.update(salesDocuments).set({ status: blStatusAfterInvoicing(bl.status as DocStatus, bls), updatedAt: new Date() }).where(eq(salesDocuments.id, blId));
     }
+    // Un avoir solde d'abord sa facture d'origine (jusqu'à son solde) ; le reste est un crédit client à imputer.
+    if (type === "AVOIR" && doc.originDocumentId) await allocateCreditIn(tx, id, doc.originDocumentId, parseDecimal(doc.ttc, SCALE.money) ?? 0n, actor.id);
     if (type === "FACTURE") await attachInvoiceNumber(tx, doc.lines.map((l) => l.sourceLineId).filter((x): x is string => !!x), number);
     if ((type === "BL" || type === "AVOIR") && shouldProject(g.cutover, { isSimulation: simulation, date: doc.date, site: doc.site })) {
       await projectDocument(tx, { type, number, date: doc.date, clientId: doc.clientId, site: doc.site, salesRepName: doc.salesRepName, legalName: String(clientSnapshot.legalName) },
@@ -554,4 +565,40 @@ export async function cancelBL(id: string, reason: string, actor: AuditActor): P
 /** Le PDF figé est rattaché après coup (génération hors transaction) : seule colonne encore modifiable. */
 export async function attachPdf(id: string, assetId: string): Promise<void> {
   await db.update(salesDocuments).set({ pdfAssetId: assetId }).where(eq(salesDocuments.id, id));
+}
+
+/* ------------------------------------------------------------------ */
+/* Bascule : reprise des factures ouvertes de Sage                     */
+/* ------------------------------------------------------------------ */
+
+export type OpeningInvoice = { clientId: string; number: string; date: string; dueDate: string | null; ttc: string; balance: string; site: string };
+
+/**
+ * Reprend les factures Sage non soldées à la bascule : une pièce FACTURE validée, source SAGE_REPRISE,
+ * avec son numéro Sage, son TTC et ce qui en était déjà réglé (`reprise_paid` = TTC − reste). Sans ligne
+ * ni projection dans les ventes : elles sont déjà dans `sales` par l'import Sage. Idempotent : un numéro
+ * déjà présent est ignoré.
+ */
+export async function importOpeningInvoices(rows: OpeningInvoice[], actor: AuditActor): Promise<{ inserted: number; skipped: string[] }> {
+  return db.transaction(async (tx) => {
+    const existing = new Set((await tx.execute<{ number: string }>(sql`select number from sales_documents where number = any(${pgArray(rows.map((r) => r.number), "text")})`)).rows.map((r) => r.number));
+    const skipped: string[] = [];
+    let inserted = 0;
+    for (const r of rows) {
+      if (existing.has(r.number)) { skipped.push(`${r.number} : déjà présente`); continue; }
+      const ttc = parseDecimal(r.ttc, SCALE.money) ?? 0n, bal = parseDecimal(r.balance, SCALE.money) ?? 0n;
+      if (ttc <= 0n || bal <= 0n || bal > ttc) { skipped.push(`${r.number} : montants incohérents (TTC ${r.ttc}, reste ${r.balance})`); continue; }
+      const client = (await tx.execute<Record<string, string | null>>(sql`
+        select name, legal_name, coalesce(account_code, code) as account_code, ice, billing_address, postal_code, city from clients where id = ${r.clientId}::uuid`)).rows[0];
+      await tx.insert(salesDocuments).values({
+        type: "FACTURE", status: "VALIDE", number: r.number, isSimulation: false, date: r.date, dueDate: r.dueDate, clientId: r.clientId, site: r.site,
+        clientSnapshot: { name: client.name, legalName: client.legal_name ?? client.name, accountCode: client.account_code, ice: client.ice, address: client.billing_address, postalCode: client.postal_code, city: client.city },
+        grossHt: "0", netHt: "0", vatTotal: "0", ttc: formatScaled(ttc, SCALE.money), reprisePaid: formatScaled(ttc - bal, SCALE.money), source: "SAGE_REPRISE",
+        notes: "Facture Sage reprise à la bascule (solde repris, détail dans Sage).", createdById: actor.id, validatedById: actor.id, validatedAt: new Date(),
+      });
+      inserted++;
+    }
+    await audit({ actor, action: "IMPORT", module: "facturation", entity: "sales_document", label: "Reprise des factures ouvertes Sage", after: { inserted, skipped: skipped.length } }, tx);
+    return { inserted, skipped };
+  });
 }

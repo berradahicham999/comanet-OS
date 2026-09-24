@@ -166,6 +166,15 @@ export type GestionSettings = {
     /** Fenêtre (jours) de l'analyse des écarts quand il n'y a pas d'inventaire précédent. */
     analysisWindowDays: number;
   };
+  /** Recouvrement (lot 5) : relances et effets. */
+  receivables: {
+    /** Niveaux de relance : jours de retard à partir desquels on passe au niveau 1, 2, 3. */
+    reminderDays: number[];
+    /** Une relance du même niveau ne se refait pas avant N jours. */
+    reminderCooldownDays: number;
+    /** Effet en portefeuille à remettre à la banque N jours avant son échéance. */
+    depositLeadDays: number;
+  };
 };
 
 export const EMPTY_COMPANY: CompanyIdentity = {
@@ -190,6 +199,7 @@ export const DEFAULT_GESTION: GestionSettings = {
   uninvoicedAlertDays: 15,
   purchases: { lateOrderGraceDays: 7, uninvoicedReceptionDays: 30, priceGapTolerancePct: 0 },
   inventory: { staleCountDays: 7, maxDaysWithoutCount: 365, recurringCount: 2, lateEntryHours: 48, analysisWindowDays: 180 },
+  receivables: { reminderDays: [7, 30, 60], reminderCooldownDays: 10, depositLeadDays: 5 },
 };
 
 /**
@@ -541,6 +551,7 @@ export function mergeGestion(stored: Partial<GestionSettings> | null | undefined
     amountWords: { ...d.amountWords, ...(stored.amountWords ?? {}) },
     purchases: { ...d.purchases, ...(stored.purchases ?? {}) },
     inventory: { ...d.inventory, ...(stored.inventory ?? {}) },
+    receivables: { ...d.receivables, ...(stored.receivables ?? {}) },
   };
 }
 

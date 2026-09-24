@@ -204,6 +204,13 @@
       "when": 1789800800000,
       "tag": "0028_gestion_inventaire",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1789800900000,
+      "tag": "0029_gestion_reglements",
+      "breakpoints": true
     }
   ]
 }

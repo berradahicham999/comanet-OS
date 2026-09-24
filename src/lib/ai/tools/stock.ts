@@ -32,7 +32,7 @@ export const getStockCoverage: AiTool<typeof schema> = {
       if (!prod) return unavailable(`Produit « ${input.product} » introuvable.`, "Utiliser search_entities pour retrouver la référence.");
       list = list.filter((p) => p.productId === prod.id);
     }
-    if (!list.length) return unavailable("Aucun produit dans ce périmètre.", "Importer le référentiel produits puis une photo de stock (Imports → Stock).", "Photo de stock + ventes Sage");
+    if (!list.length) return unavailable("Aucun produit dans ce périmètre.", "Importer le référentiel produits puis une photo de stock (Imports → Stock).", "Photo de stock + ventes sell-in");
     const known = list.filter((p) => p.stockKnown);
     if (!known.length) return unavailable("Aucune photo de stock importée pour ces produits.", "Importer l'état de stock (Imports → Stock) : sans lui la couverture n'est pas calculable.", "Photo de stock");
     const counts: Record<string, number> = {};

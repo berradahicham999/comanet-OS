@@ -12,6 +12,8 @@ import { emitEvents, eventKey, EVENT_TYPES, EVENT_SOURCES, type EmitInput } from
 import { normalizePlatform } from "@/lib/marketing-shared";
 import { refreshMarketingFacts } from "@/lib/analytics-marketing/refresh";
 import { cityToSector } from "@/lib/sectors";
+import { getSettings } from "@/lib/settings";
+import { importBlockedByCutover } from "@/lib/gestion/documents-shared";
 import {
   VARIANT_TYPES, normalizeBool, normalizeDocumentType, normalizeObservation,
   normalizePackaging, normalizeSize, normalizeState, normalizeVariantType, regulatoryKey,
@@ -274,10 +276,14 @@ async function importSales(rows: Record<string, unknown>[], mapping: Mapping, op
   });
   const values: (typeof s.sales.$inferInsert)[] = [];
   const seenHash = new Set<string>();
+  const cutover = (await getSettings()).gestion.cutover;
   for (const { r, i } of ordered) {
     const rowNo = i + 2;
     const date = toISODate(get(r, mapping, "date"));
     if (!date) { out.errors.push({ row: rowNo, message: "Date invalide ou absente" }); continue; }
+    // Après la bascule, les sites basculés facturent dans COMANET OS : leurs lignes Sage seraient comptées deux fois.
+    const blocked = importBlockedByCutover(cutover, date, txt(r, mapping, "site") ?? null);
+    if (blocked) { out.errors.push({ row: rowNo, message: blocked }); continue; }
     const status = txt(r, mapping, "status");
     if (status && skip.has(normKey(status))) continue;
     const quantity = num(r, mapping, "quantity");

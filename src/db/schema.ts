@@ -788,6 +788,8 @@ export const paymentModes = pgTable("payment_modes", {
   label: text("label").notNull(),
   /** Effet / LCN : le règlement porte sa propre échéance. */
   requiresDueDate: boolean("requires_due_date").notNull().default(false),
+  /** Virement, espèces : encaissé dès la réception ; sinon le règlement passe par le portefeuille. */
+  collectedOnReceipt: boolean("collected_on_receipt").notNull().default(false),
   sort: integer("sort").notNull().default(0),
   active: boolean("active").notNull().default(true),
 });
@@ -1011,6 +1013,8 @@ export const salesDocuments = pgTable(
     approvalRequestedAt: timestamp("approval_requested_at", { withTimezone: true }),
     approvalRequestedById: uuid("approval_requested_by_id").references(() => users.id, { onDelete: "set null" }),
     source: text("source").notNull().default("COMANET_OS"),
+    /** Facture reprise de Sage à la bascule (source SAGE_REPRISE) : déjà réglée avant la reprise. */
+    reprisePaid: numeric("reprise_paid", { precision: 14, scale: 2 }).notNull().default("0"),
     pdfAssetId: uuid("pdf_asset_id"),
     contentHash: text("content_hash"),
     /* Facturation électronique DGI : prévue, pas encore implémentée. */
@@ -1267,6 +1271,77 @@ export const stockCountEntries = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("stock_count_entries_count_idx").on(t.countId, t.productId)],
+);
+
+/* ------------------------------------------------------------------ */
+/* Gestion commerciale — règlements (lot 5)                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Règlement client (RG) : chèque, effet / LCN, virement, espèces. Statut : portefeuille → remis →
+ * encaissé / impayé ; annulé depuis le portefeuille. Client, montant, date et mode sont figés par la
+ * base. Seul `src/lib/gestion/payments.ts` écrit règlements, imputations et relances.
+ */
+export const payments = pgTable(
+  "payments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    number: text("number").notNull(),
+    seriesKey: text("series_key").references(() => documentSeries.key, { onDelete: "restrict", onUpdate: "cascade" }),
+    fiscalYear: integer("fiscal_year"),
+    clientId: uuid("client_id").notNull().references(() => clients.id, { onDelete: "restrict" }),
+    date: date("date").notNull(),
+    modeKey: text("mode_key").notNull().references(() => paymentModes.key, { onUpdate: "cascade" }),
+    amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+    /** N° de chèque, d'effet ou de LCN, référence du virement. */
+    reference: text("reference"),
+    bank: text("bank"),
+    /** Échéance d'un effet / LCN. */
+    dueDate: date("due_date"),
+    status: text("status").notNull(),
+    isSimulation: boolean("is_simulation").notNull().default(true),
+    depositedAt: date("deposited_at"),
+    collectedAt: date("collected_at"),
+    bouncedAt: date("bounced_at"),
+    statusReason: text("status_reason"),
+    notes: text("notes"),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("payments_number_uq").on(t.number), index("payments_client_idx").on(t.clientId, t.date), index("payments_status_idx").on(t.status, t.dueDate)],
+);
+
+/** Imputation (lettrage) : un règlement ou un avoir solde tout ou partie d'une facture. */
+export const paymentAllocations = pgTable(
+  "payment_allocations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    invoiceId: uuid("invoice_id").notNull().references(() => salesDocuments.id, { onDelete: "restrict" }),
+    paymentId: uuid("payment_id").references(() => payments.id, { onDelete: "restrict" }),
+    creditNoteId: uuid("credit_note_id").references(() => salesDocuments.id, { onDelete: "restrict" }),
+    amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+    createdById: uuid("created_by_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("payment_allocations_invoice_idx").on(t.invoiceId), index("payment_allocations_payment_idx").on(t.paymentId), index("payment_allocations_credit_idx").on(t.creditNoteId)],
+);
+
+/** Relance d'un client : niveau, canal, factures et montant relancés. */
+export const paymentReminders = pgTable(
+  "payment_reminders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    clientId: uuid("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+    level: integer("level").notNull(),
+    channel: text("channel").notNull(),
+    amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+    invoices: jsonb("invoices").$type<{ id: string; number: string; dueDate: string | null; balance: string }[]>().notNull().default([]),
+    notes: text("notes"),
+    sentById: uuid("sent_by_id"),
+    sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("payment_reminders_client_idx").on(t.clientId, t.sentAt)],
 );
 
 /* ------------------------------------------------------------------ */

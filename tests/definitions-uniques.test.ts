@@ -255,3 +255,23 @@ describe("Gestion commerciale — inventaires", () => {
     assert.deepEqual(hits(/export async function validateCount\(/), ["src/lib/gestion/counts.ts"]);
   });
 });
+
+describe("Gestion commerciale — règlements et bascule", () => {
+  test("seul `src/lib/gestion/payments.ts` écrit règlements, imputations et relances", () => {
+    const found = codeHits(/(insert|update|delete)\((payments|paymentAllocations|paymentReminders)\)|(insert\s+into|update|delete\s+from)\s+(payments|payment_allocations|payment_reminders)\b/i, ["lib/gestion/payments.ts"]);
+    assert.deepEqual(found, [], `Écriture de règlement hors du module dans : ${found.join(", ")}`);
+  });
+  test("solde, balance âgée, relance et bascule n'ont qu'une définition", () => {
+    assert.deepEqual(hits(/export function invoiceBalance\(/), ["src/lib/gestion/receivables-shared.ts"]);
+    assert.deepEqual(hits(/export function agingBucket\(/), ["src/lib/gestion/receivables-shared.ts"]);
+    assert.deepEqual(hits(/export function reminderLevel\(/), ["src/lib/gestion/receivables-shared.ts"]);
+    assert.deepEqual(hits(/export function emitsReal\(/), ["src/lib/gestion/documents-shared.ts"]);
+    assert.deepEqual(hits(/export function importBlockedByCutover\(/), ["src/lib/gestion/documents-shared.ts"]);
+    assert.deepEqual(hits(/export async function setCutoverMode\(/), ["src/lib/gestion/cutover.ts"]);
+  });
+  test("le mode de bascule ne se lit que par `emitsReal()` (plus de `mode !== \"ACTIF\"` en dur dans les pièces)", () => {
+    const found = codeHits(/cutover\.mode\s*!==\s*"ACTIF"/).filter((p) => p.includes("lib/gestion/"));
+    assert.deepEqual(found, [], `Test du mode en dur dans : ${found.join(", ")}`);
+  });
+});
+

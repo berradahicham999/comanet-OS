@@ -29,7 +29,7 @@ npm run db:push        # pousse le schéma sans migration (dev uniquement)
 npm run db:studio
 npm run agent:tool -- <outil> '<json>'   # pont CLI de l'Agent marketing (lecture seule, données réelles)
 GESTION_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/gestion-integration.ts
-                                         # intégration gestion commerciale (journal, numérotation, ventes, achats, inventaires) — jamais sur la prod
+                                         # intégration gestion commerciale (journal, numérotation, ventes, achats, inventaires, règlements, bascule) — jamais sur la prod
 ```
 
 Variables d'environnement : `DATABASE_URL`, `DATABASE_SSL`, `SESSION_SECRET`, `SETUP_KEY`,
@@ -61,7 +61,7 @@ drizzle/              migrations SQL + meta/_journal.json
 Modules : Cockpit, Action Center, Ventes, Clients, Produits, Marques, Stock,
 **Marketing** (vue d'ensemble, campagnes, Digital Ads, Influence, planning éditorial, activations, matériel, budgets, analytics, agent marketing),
 Terrain (animations, animatrices, saisie), Réglementaire, Tâches, Imports, Paramètres,
-**Gestion commerciale** (préparation de la bascule, stock réel, fournisseurs, pièces de vente : BL, factures, avoirs, PDF ; achats : commandes, réceptions, factures fournisseurs, retours ; inventaires ; règlements à venir).
+**Gestion commerciale** (préparation de la bascule, stock réel, fournisseurs, pièces de vente : BL, factures, avoirs, PDF ; achats : commandes, réceptions, factures fournisseurs, retours ; inventaires ; règlements, relances, envoi au comptable ; bascule).
 
 ---
 
@@ -112,6 +112,7 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Journal d'audit (qui a créé, modifié, archivé quoi) | `src/lib/audit.ts` | `audit()` (seule écriture de `audit_logs`), `changedFields()`, `auditTrail()` |
 | Pièce d'achat (montants en devise et en MAD, frais d'approche, coût de revient, rapprochement, cycle) | `src/lib/gestion/purchases-shared.ts` + `purchases.ts` | `computePurchase()`, `allocateLandedCosts()`, `unitCostMad()`, `invoiceGaps()`, `validatePurchase()` (seule validation, seule entrée d'achat en stock) |
 | Inventaire (théorique figé, compté, écart, fiabilité, pistes d'explication) | `src/lib/gestion/counts-shared.ts` + `counts.ts` | `countedByLine()`, `lineGap()`, `countStats()`, `gapLeads()`, `recurringGaps()`, `validateCount()` (seule validation, seuls ajustements d'inventaire) |
+| Règlement, solde d'une facture, balance âgée, relance, bascule (réel ou simulation) | `src/lib/gestion/receivables-shared.ts` + `payments.ts` + `documents-shared.ts` + `cutover.ts` | `invoiceBalance()`, `agingBucket()`, `agedBalance()`, `reminderLevel()`, `planAllocation()`, `createPayment()` (seule écriture des règlements), `emitsReal()`, `importBlockedByCutover()`, `setCutoverMode()` |
 | Client prêt à facturer, doublons de clients | `src/lib/gestion/clients-shared.ts` + `clients.ts` | `billingReadiness()`, `duplicateCandidates()`, `createClient()`, `updateClientLegal()`, `clientLinks()` |
 
 `tests/definitions-uniques.test.ts` échoue si une seconde définition réapparaît.
@@ -210,6 +211,12 @@ Lot 4 livré : inventaires. `stock_counts` + `stock_count_lines` (théorique et 
 fiabilité et pistes (`counts-shared.ts` : `lineGap()`, `countStats()`, `gapLeads()` — donnée ≠ hypothèse). Comptage
 mobile avec scan (BarcodeDetector) ; à l'aveugle, le théorique ne quitte pas le serveur. Droits : `stock` (Créer =
 compter, Valider = valider).
+Lot 5 livré : règlements et bascule. `payments` (RG, figés par triggers) + `payment_allocations` (règlement ou avoir →
+facture) + `payment_reminders` ; seul `src/lib/gestion/payments.ts` les écrit. Solde, balance âgée, relances, imputation
+proposée : `receivables-shared.ts`. Un avoir s'impute sur sa facture à la validation. Bascule : `emitsReal()` (seule
+source du « réel ou simulation »), `importBlockedByCutover()` (C5), page `/gestion/bascule` (`cutover.ts` : contrôles,
+mode, rapport), reprise Sage (`importOpeningInvoices()`, source SAGE_REPRISE), `productStocks()` lit le journal en mode
+ACTIF. Envoi au comptable : les mêmes PDF que les clients (sans UG) + récapitulatif Excel (`exports.ts`, ZIP par 20).
 
 **Permissions modulaires par utilisateur** (`docs/permissions-modulaires.md`). Chaque compte porte
 sa propre matrice `user_permissions` (17 modules × Voir / Créer / Modifier / Valider), une portée

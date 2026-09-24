@@ -92,39 +92,39 @@ export const FORMULAS: Record<MetricKey, Formula> = {
   },
   MARKETING_INTENSITY: (a) => {
     if (noSpend(a)) return insufficient("aucune dépense enregistrée sur la période", OWNER_MARKETING);
-    if (!a.sales.rows) return insufficient("aucune vente Sage sur la période", OWNER_SALES, "/imports");
+    if (!a.sales.rows) return insufficient("aucune vente sell-in sur la période", OWNER_SALES, "/imports");
     const r = ratio(a.spend.spent, a.sales.sellIn);
     return r === null ? insufficient("CA nul sur la période", OWNER_SALES) : measured(r * 100, spendCompleteness(a));
   },
 
   /* ---- Ventes ---- */
-  SELL_IN: (a) => (a.sales.rows ? measured(a.sales.sellIn) : insufficient("aucune vente Sage importée sur la période", OWNER_SALES, "/imports")),
-  SELL_IN_UNITS: (a) => (a.sales.rows ? measured(a.sales.sellInUnits) : insufficient("aucune vente Sage importée sur la période", OWNER_SALES, "/imports")),
+  SELL_IN: (a) => (a.sales.rows ? measured(a.sales.sellIn) : insufficient("aucune vente sell-in sur la période", OWNER_SALES, "/imports")),
+  SELL_IN_UNITS: (a) => (a.sales.rows ? measured(a.sales.sellInUnits) : insufficient("aucune vente sell-in sur la période", OWNER_SALES, "/imports")),
   SELL_OUT: (a) => (a.sources.includes("ANIMATION") || a.sales.sellOut > 0 ? measured(a.sales.sellOut) : insufficient("aucune animation terrain sur la période", "Équipe terrain", "/terrain")),
   SELL_OUT_UNITS: (a) => (a.sources.includes("ANIMATION") || a.sales.sellOut > 0 ? measured(a.sales.sellOutUnits) : insufficient("aucune animation terrain sur la période", "Équipe terrain", "/terrain")),
   MARGIN: (a) => {
-    if (!a.sales.rows) return insufficient("aucune vente Sage importée sur la période", OWNER_SALES, "/imports");
+    if (!a.sales.rows) return insufficient("aucune vente sell-in sur la période", OWNER_SALES, "/imports");
     if (a.sales.margin === null || (a.sales.marginCoverage ?? 0) === 0) return insufficient("prix d'achat manquant sur les produits du périmètre", "Responsable produits", "/produits");
     return measured(a.sales.margin, a.sales.marginCoverage, (a.sales.marginCoverage ?? 1) < 1 ? "marge calculée sur les produits dont le prix d'achat est connu" : undefined);
   },
   SALES_SHARE: (a) => {
-    if (!a.sales.rows) return insufficient("aucune vente Sage importée sur la période", OWNER_SALES, "/imports");
+    if (!a.sales.rows) return insufficient("aucune vente sell-in sur la période", OWNER_SALES, "/imports");
     const r = ratio(a.sales.sellIn, a.portfolio.sellIn);
     return r === null ? insufficient("CA du portefeuille nul", OWNER_SALES) : measured(r * 100);
   },
   OBJECTIVE_ATTAINMENT: (a) => {
     if (a.objective === null || a.objective <= 0) return insufficient("pas d'objectif de vente sur la période", "Direction (objectifs)", "/imports/nouveau?type=OBJECTIVES");
-    if (!a.sales.rows) return insufficient("aucune vente Sage importée sur la période", OWNER_SALES, "/imports");
+    if (!a.sales.rows) return insufficient("aucune vente sell-in sur la période", OWNER_SALES, "/imports");
     return measured((a.sales.sellIn / a.objective) * 100);
   },
   SALES_GROWTH_PREV: (a) => {
-    if (!a.sales.rows) return insufficient("aucune vente Sage importée sur la période", OWNER_SALES, "/imports");
+    if (!a.sales.rows) return insufficient("aucune vente sell-in sur la période", OWNER_SALES, "/imports");
     if (a.compare.sellInPrev === null) return insufficient("période précédente non couverte par un import Sage", OWNER_SALES, "/imports");
     if (a.compare.sellInPrev <= 0) return insufficient("CA nul ou négatif (avoirs) sur la période précédente : pas comparable", OWNER_SALES);
     return measured(((a.sales.sellIn - a.compare.sellInPrev) / a.compare.sellInPrev) * 100);
   },
   SALES_GROWTH_N1: (a) => {
-    if (!a.sales.rows) return insufficient("aucune vente Sage importée sur la période", OWNER_SALES, "/imports");
+    if (!a.sales.rows) return insufficient("aucune vente sell-in sur la période", OWNER_SALES, "/imports");
     if (a.compare.sellInN1 === null) return insufficient("même période N-1 non couverte par un import Sage", OWNER_SALES, "/imports");
     if (a.compare.sellInN1 <= 0) return insufficient("CA nul ou négatif (avoirs) sur la période N-1 : pas comparable", OWNER_SALES);
     return measured(((a.sales.sellIn - a.compare.sellInN1) / a.compare.sellInN1) * 100);
@@ -169,7 +169,7 @@ export const FORMULAS: Record<MetricKey, Formula> = {
     return measured((a.attributed.revenue - a.attributed.spend) / a.attributed.spend, coverage, `basé sur ${Math.round((coverage ?? 0) * 100)} % des dépenses attribuées`);
   },
   SALES_LIFT_CORRELATED: (a) => {
-    if (!a.sales.rows) return insufficient("aucune vente Sage importée sur la période", OWNER_SALES, "/imports");
+    if (!a.sales.rows) return insufficient("aucune vente sell-in sur la période", OWNER_SALES, "/imports");
     if (a.compare.sellInPrev === null) return insufficient("fenêtre « avant » non couverte : pas encore comparable", OWNER_SALES, "/imports");
     return measured(a.sales.sellIn - a.compare.sellInPrev, null, "corrélation observée, pas une causalité");
   },
@@ -186,7 +186,7 @@ export const FORMULAS: Record<MetricKey, Formula> = {
     const spendShare = ratio(a.spend.spent, a.portfolio.spend);
     const salesShare = ratio(a.sales.sellIn, a.portfolio.sellIn);
     if (spendShare === null) return insufficient("aucune dépense sur le portefeuille", OWNER_MARKETING);
-    if (salesShare === null) return insufficient("aucune vente Sage sur le portefeuille", OWNER_SALES, "/imports");
+    if (salesShare === null) return insufficient("aucune vente sell-in sur le portefeuille", OWNER_SALES, "/imports");
     return measured((spendShare - salesShare) * 100);
   },
   DATA_COMPLETENESS: (a, ctx) => (ctx.health?.dataQuality === null || ctx.health?.dataQuality === undefined ? insufficient("complétude non calculée", OWNER_ADMIN) : measured(ctx.health.dataQuality * 100)),
