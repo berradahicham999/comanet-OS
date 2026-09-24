@@ -184,13 +184,18 @@ describe("PDF — formats Sage, lignes imprimées, reports", () => {
     ref: "A1", designation: "Crème", quantity: "3.000", freeQuantity: "0.000", unitPriceHt: "165.83", publicPriceTtc: "199.00", discountPct: "10.00", grossHt: "447.74",
     netHt: "447.74", vatAmount: "89.55", ttc: "537.29", sourceNumber: null, sourceDate: null, lotAllocations: [], ...over,
   });
-  test("facture regroupée : un en-tête par BL, une ligne d'UG sous l'article", () => {
+  test("facture regroupée : un en-tête par BL ; les UG ne s'impriment jamais sur une facture ni un avoir", () => {
     const rows = pdfRows("FACTURE", [
       line({ sourceNumber: "BL202600001", sourceDate: "2026-09-01", freeQuantity: "1.000" }),
       line({ sourceNumber: "BL202600001", sourceDate: "2026-09-01" }),
       line({ sourceNumber: "BL202600002", sourceDate: "2026-09-03" }),
     ]);
-    assert.deepEqual(rows.map((r) => r.kind), ["group", "line", "free", "line", "group", "line"]);
+    assert.deepEqual(rows.map((r) => r.kind), ["group", "line", "line", "group", "line"]);
+    assert.equal((rows[1] as { free: string }).free, "");
+    const avoir = pdfRows("AVOIR", [line({ freeQuantity: "3.000" })]);
+    assert.deepEqual(avoir.map((r) => r.kind), ["line"]);
+    assert.equal((avoir[0] as { free: string }).free, "");
+    assert.equal((pdfRows("BL", [line({ freeQuantity: "2.000" })])[0] as { free: string }).free, "2,00");
     assert.equal((rows[0] as { label: string }).label, "BL n° BL202600001 du 01/09/2026");
     const l = rows[1] as { netUnit: string };
     assert.equal(l.netUnit, "149,25"); // 447,74 ÷ 3

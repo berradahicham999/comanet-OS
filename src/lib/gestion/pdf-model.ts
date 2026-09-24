@@ -27,10 +27,13 @@ export type PdfLine = {
 
 export type PdfRow =
   | { kind: "group"; label: string }
-  | { kind: "line"; ref: string; designation: string; lot: string; quantity: string; free: string; unitPriceHt: string; publicPriceTtc: string; discount: string; netHt: string; netUnit: string; vat: string; ttc: string; amount: bigint; amountTtc: bigint }
-  | { kind: "free"; ref: string; designation: string; quantity: string };
+  | { kind: "line"; ref: string; designation: string; lot: string; quantity: string; free: string; unitPriceHt: string; publicPriceTtc: string; discount: string; netHt: string; netUnit: string; vat: string; ttc: string; amount: bigint; amountTtc: bigint };
 
-/** Lignes imprimées : en-tête « BL n° … du … » quand la facture regroupe des BL, une ligne d'UG sous l'article. */
+/**
+ * Lignes imprimées : en-tête « BL n° … du … » quand la facture regroupe des BL. Les UG ne s'impriment
+ * que sur le BL (le magasin doit les livrer) : jamais sur une facture ni un avoir, qui vont au
+ * comptable (décision d'Hicham). Elles restent enregistrées sur la pièce, dans le stock et les ventes.
+ */
 export function pdfRows(type: DocType, lines: PdfLine[]): PdfRow[] {
   const rows: PdfRow[] = [];
   const grouped = type === "FACTURE" && new Set(lines.map((l) => l.sourceNumber).filter(Boolean)).size > 0;
@@ -44,11 +47,10 @@ export function pdfRows(type: DocType, lines: PdfLine[]): PdfRow[] {
     const qty = parseDecimal(l.quantity, SCALE.qty) ?? 0n, gross = parseDecimal(l.grossHt, SCALE.money) ?? 0n;
     const lot = l.lotAllocations.map((a) => `${a.lotNumber}${a.expiryDate ? ` (${fmtDateFr(a.expiryDate)})` : ""}`).join(", ");
     rows.push({
-      kind: "line", ref: l.ref ?? "", designation: l.designation, lot, quantity: fmtSage(l.quantity), free: parseDecimal(l.freeQuantity, SCALE.qty) ? fmtSage(l.freeQuantity) : "",
+      kind: "line", ref: l.ref ?? "", designation: l.designation, lot, quantity: fmtSage(l.quantity), free: type === "BL" && parseDecimal(l.freeQuantity, SCALE.qty) ? fmtSage(l.freeQuantity) : "",
       unitPriceHt: fmtSage(l.unitPriceHt), publicPriceTtc: fmtSage(l.publicPriceTtc), discount: parseDecimal(l.discountPct, SCALE.pct) ? fmtSage(l.discountPct) : "",
       netHt: fmtSage(l.grossHt), netUnit: qty ? fmtSage(formatScaled(roundDiv(gross * 1000n, qty), 2)) : "", vat: fmtSage(l.vatAmount), ttc: fmtSage(l.ttc), amount: gross, amountTtc: parseDecimal(l.ttc, 2) ?? 0n,
     });
-    if (type !== "BL" && (parseDecimal(l.freeQuantity, SCALE.qty) ?? 0n) > 0n) rows.push({ kind: "free", ref: l.ref ?? "", designation: `${l.designation} (UG)`, quantity: fmtSage(l.freeQuantity) });
   }
   return rows;
 }

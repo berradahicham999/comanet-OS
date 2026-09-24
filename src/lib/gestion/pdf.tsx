@@ -133,7 +133,6 @@ export function DocumentPdf({ d }: { d: PdfInput }) {
               {p.report && <View style={s.row}><Text style={[s.td, s.bold, { width: tableWidth - 60 }]}>Report</Text><Text style={[s.td, s.bold, { width: 60, textAlign: "right" }]}>{p.report.ht}</Text></View>}
               {p.rows.map((r, i) => {
                 if (r.kind === "group") return <Text key={i} style={[s.td, s.bold, { marginTop: 3 }]}>{r.label}</Text>;
-                if (r.kind === "free") return <View key={i} style={s.row}>{cols.map((c) => cell({ ref: r.ref, designation: r.designation, quantity: r.quantity, unitPriceHt: "0,00", netHt: "0,00", netUnit: "0,00", vat: "0,00", ttc: "0,00" }, c))}</View>;
                 return <View key={i} style={s.row} wrap={false}>{cols.map((c) => cell(r as unknown as Record<string, string>, c))}</View>;
               })}
             </View>
