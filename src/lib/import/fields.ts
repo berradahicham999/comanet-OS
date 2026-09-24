@@ -5,7 +5,7 @@
 import { normKey } from "./normalize";
 import type { ModuleKey } from "@/lib/access-shared";
 
-export type ImportType = "SALES" | "CLIENTS" | "PRODUCTS" | "STOCK" | "OBJECTIVES" | "BUDGETS" | "REGULATORY" | "ANIMATIONS" | "ANIM_OBJECTIVES" | "ADS" | "MEDECINS" | "INVENTORY" | "INFLUENCERS";
+export type ImportType = "SALES" | "CLIENTS" | "PRODUCTS" | "STOCK" | "OBJECTIVES" | "BUDGETS" | "REGULATORY" | "ANIMATIONS" | "ANIM_OBJECTIVES" | "ADS" | "MEDECINS" | "INVENTORY" | "INFLUENCERS" | "STOCK_INITIAL";
 
 /**
  * Module dont relève chaque type d'import : importer = droit « Créer » sur ce module,
@@ -25,6 +25,7 @@ export const IMPORT_MODULE: Record<ImportType, ModuleKey> = {
   MEDECINS: "medical",
   INVENTORY: "marketing",
   INFLUENCERS: "influence",
+  STOCK_INITIAL: "stock",
 };
 
 export type FieldDef = { key: string; label: string; required?: boolean; synonyms: string[]; hint?: string };
@@ -33,7 +34,8 @@ export const IMPORT_TYPES: { key: ImportType; label: string; description: string
   { key: "SALES", label: "Ventes (lignes de facture Sage)", description: "Une ligne par article facturé : date, client, article, quantité, montant HT." },
   { key: "CLIENTS", label: "Clients / correspondances", description: "Référentiel clients ou table de correspondance raison sociale → client fonctionnel." },
   { key: "PRODUCTS", label: "Articles", description: "Référentiel articles : code, désignation, marque, prix." },
-  { key: "STOCK", label: "Stock", description: "Photo du stock par article (quantité, prix)." },
+  { key: "STOCK", label: "Stock (photo)", description: "Photo du stock par article (quantité, prix). Choisissez le dépôt photographié : Cospharma, Pharmafirst, ou photo globale." },
+  { key: "STOCK_INITIAL", label: "Stock initial (journal)", description: "Point de départ du journal de stock COMANET : une ligne par article et par lot, avec quantité et coût unitaire. Recharger le même fichier ne double rien ; l'annulation passe par des contre-mouvements." },
   { key: "OBJECTIVES", label: "Objectifs de CA", description: "Objectifs annuels ou mensuels par marque et/ou produit." },
   { key: "BUDGETS", label: "Budgets marketing", description: "Budget annuel par marque, avec répartition par catégorie." },
   { key: "REGULATORY", label: "Dossiers réglementaires", description: "Enregistrements DMP : une ligne par variante déposée (marque, référence, type, contenance, ATD, validité)." },
@@ -97,6 +99,18 @@ export const FIELDS: Record<ImportType, FieldDef[]> = {
     { key: "channel", label: "Canal", synonyms: ["canal", "channel"] },
     { key: "rep", label: "Commercial", synonyms: ["commercial", "representant", "vendeur"] },
     { key: "phone", label: "Téléphone", synonyms: ["telephone", "tel", "phone", "gsm"] },
+    { key: "accountCode", label: "Code client Sage COMANET", synonyms: ["code client sage", "code sage", "code tiers comanet", "numero client"], hint: "Ex. 056 — rapprochement prioritaire." },
+    { key: "legalName", label: "Raison sociale (facturation)", synonyms: ["raison sociale facturation", "ct intitule", "denomination", "raison sociale legale"] },
+    { key: "ice", label: "ICE", synonyms: ["ice", "identifiant commun", "ct identifiant", "n ice"] },
+    { key: "ifNumber", label: "Identifiant fiscal (IF)", synonyms: ["if", "identifiant fiscal", "i f"] },
+    { key: "rc", label: "RC", synonyms: ["rc", "registre de commerce", "registre du commerce"] },
+    { key: "patente", label: "Patente / TP", synonyms: ["patente", "tp", "taxe professionnelle"] },
+    { key: "address", label: "Adresse de facturation", synonyms: ["adresse", "adresse facturation", "ct adresse", "address"] },
+    { key: "postalCode", label: "Code postal", synonyms: ["code postal", "cp", "ct codepostal"] },
+    { key: "email", label: "E-mail", synonyms: ["email", "e mail", "mail", "courriel"] },
+    { key: "contact", label: "Contact", synonyms: ["contact", "interlocuteur", "ct contact"] },
+    { key: "paymentDays", label: "Délai de paiement (jours)", synonyms: ["delai de paiement", "delai paiement", "echeance jours", "jours"] },
+    { key: "discountPct", label: "Remise par défaut (%)", synonyms: ["remise", "remise %", "taux de remise", "remise client"] },
   ],
   PRODUCTS: [
     { key: "name", label: "Désignation", required: true, synonyms: ["designation", "nom produit", "produit", "article", "libelle", "nom"] },
@@ -108,6 +122,20 @@ export const FIELDS: Record<ImportType, FieldDef[]> = {
     { key: "costPrice", label: "Prix d'achat / coût", synonyms: ["cr", "cout de revient", "prix d achat", "prix d achat exwork", "exwork", "val achats", "cout"] },
     { key: "leadTime", label: "Lead time (jours)", synonyms: ["lead time", "delai", "delai fournisseur"] },
     { key: "moq", label: "MOQ", synonyms: ["moq", "minimum de commande"] },
+    { key: "code", label: "Réf. COMANET (Sage)", synonyms: ["ref comanet", "reference comanet", "ar ref comanet", "ref sage"], hint: "Ex. CYG01 — la référence imprimée sur les factures COMANET." },
+    { key: "ean", label: "Code-barres EAN", synonyms: ["ean", "code barre", "code barres", "gencod", "ean13", "code ean"] },
+    { key: "taxRate", label: "Taux de TVA (%)", synonyms: ["tva", "taux tva", "taux de tva", "tva %"] },
+    { key: "unit", label: "Unité", synonyms: ["unite", "unit", "unite de vente"] },
+    { key: "packSize", label: "Colisage", synonyms: ["colisage", "pcb", "unites par carton", "conditionnement"] },
+  ],
+  STOCK_INITIAL: [
+    { key: "productCode", label: "Réf. COMANET / EAN / code article", synonyms: ["ref comanet", "reference", "ref", "code article", "code", "ean", "code barre", "ar ref"], hint: "Rapprochement : réf. COMANET, puis EAN, puis code distributeur." },
+    { key: "productName", label: "Désignation", synonyms: ["designation", "produit", "article", "libelle", "nom produit"], hint: "Utilisée si le code manque." },
+    { key: "lot", label: "N° de lot", synonyms: ["lot", "n lot", "numero de lot", "batch"] },
+    { key: "expiry", label: "Date de péremption", synonyms: ["peremption", "date de peremption", "dlu", "dluo", "expiration", "date d expiration", "exp"] },
+    { key: "quantity", label: "Quantité", required: true, synonyms: ["quantite", "qte", "stock", "quantity", "unites"] },
+    { key: "unitCost", label: "Coût unitaire HT (MAD)", required: true, synonyms: ["cout unitaire", "cout de revient", "cr", "prix d achat", "pa", "cmup", "cump", "valeur unitaire"] },
+    { key: "warehouse", label: "Dépôt", synonyms: ["depot", "emplacement", "magasin", "entrepot"], hint: "Vide : dépôt choisi à l'import (Entrepôt COMANET par défaut)." },
   ],
   STOCK: [
     { key: "productName", label: "Nom produit", required: true, synonyms: ["nom produit", "designation", "produit", "article", "libelle"] },

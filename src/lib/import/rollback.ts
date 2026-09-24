@@ -20,7 +20,7 @@ export type RollbackPlan = {
   detail?: string;
 };
 
-const REVERSIBLE: ImportType[] = ["SALES", "STOCK", "ANIMATIONS", "ADS"];
+const REVERSIBLE: ImportType[] = ["SALES", "STOCK", "ANIMATIONS", "ADS", "STOCK_INITIAL"];
 
 export function isReversible(type: string): boolean {
   return REVERSIBLE.includes(type as ImportType);
@@ -54,6 +54,11 @@ export async function rollbackPlan(importId: string, type: string): Promise<Roll
     case "STOCK": {
       const count = await n(sql`select count(*)::int as n from stock_snapshots where import_id = ${importId}::uuid`);
       return { label: "photos de stock", count };
+    }
+    case "STOCK_INITIAL": {
+      // Le journal ne s'efface pas : l'annulation écrit un contre-mouvement par ligne encore active.
+      const count = await n(sql`select count(*)::int as n from stock_movements m where m.import_id = ${importId}::uuid and m.reversal_of is null and not exists (select 1 from stock_movements x where x.reversal_of = m.id)`);
+      return { label: "mouvements de stock initial à contrepasser", count, detail: count ? "Refusé si une partie de ce stock a déjà été vendue ou déplacée." : undefined };
     }
     case "ANIMATIONS": {
       const count = await n(sql`select count(*)::int as n from animations where import_id = ${importId}::uuid`);
@@ -96,14 +101,20 @@ const ORPHAN_PRODUCT_SQL = (importId: string) => sql`
     and not exists (select 1 from ad_creatives where product_id = p.id)
     and not exists (select 1 from collaborations where product_id = p.id)
     and not exists (select 1 from marketing_expenses where product_id = p.id)
-    and not exists (select 1 from activations where product_id = p.id)`;
+    and not exists (select 1 from activations where product_id = p.id)
+    and not exists (select 1 from stock_movements where product_id = p.id)
+    and not exists (select 1 from stock_lots where product_id = p.id)
+    and not exists (select 1 from client_stock_readings where product_id = p.id)`;
 
 const ORPHAN_CLIENT_SQL = (importId: string) => sql`
   from clients c where c.import_id = ${importId}::uuid
     and not exists (select 1 from sales where client_id = c.id)
     and not exists (select 1 from animations where client_id = c.id)
     and not exists (select 1 from activations where client_id = c.id)
-    and not exists (select 1 from user_client_assignments where client_id = c.id)`;
+    and not exists (select 1 from user_client_assignments where client_id = c.id)
+    and not exists (select 1 from client_stock_readings where client_id = c.id)
+    and not exists (select 1 from activation_clients where client_id = c.id)
+    and c.legal_name is null and c.ice is null and c.account_code is null`;
 
 /** Ce que le nettoyage des fiches retirerait, sans rien modifier. */
 export async function orphanPlan(importId: string): Promise<OrphanPlan> {
@@ -128,9 +139,13 @@ export async function rollbackOrphans(importId: string): Promise<OrphanPlan> {
   return { products, clients, aliases: aliases + clientAliases };
 }
 
-/** Exécute l'annulation des lignes. Renvoie le nombre d'enregistrements retirés. */
-export async function rollbackRows(importId: string, type: string): Promise<number> {
+/** Exécute l'annulation des lignes. Renvoie le nombre d'enregistrements retirés (ou contrepassés). */
+export async function rollbackRows(importId: string, type: string, actor: { id: string | null } = { id: null }): Promise<number> {
   switch (type) {
+    case "STOCK_INITIAL": {
+      const { reverseImportMovements } = await import("@/lib/gestion/ledger");
+      return reverseImportMovements(importId, actor, new Date().toISOString().slice(0, 10));
+    }
     case "SALES": {
       const r = await db.execute(sql`delete from sales where import_id = ${importId}::uuid`);
       return r.rowCount ?? 0;

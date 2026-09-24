@@ -5,30 +5,42 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { clients } from "@/db/schema";
 import { redirect } from "next/navigation";
-import { requireAccess, requirePermission, requireAccessContext } from "@/lib/access";
+import { requirePermission, requireAccessContext, clientInScope } from "@/lib/access";
+import { audit, changedFields } from "@/lib/audit";
 import { canRecordReading, parseReadingLines, recordReadings } from "@/lib/client-stock";
 import { iso, today } from "@/lib/format";
 import { asSector, cityToSector } from "@/lib/sectors";
 
+/**
+ * Fiche rapide de l'onglet « Vue d'ensemble ». L'archivage n'est plus une case à cocher ici :
+ * il relève du droit « Valider » et se fait depuis l'onglet « Identité & conditions ».
+ */
 export async function updateClient(formData: FormData) {
-  await requireAccess("clients");
+  const user = await requirePermission("clients", "edit");
   const id = String(formData.get("id") ?? "");
-  if (!id) return;
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return;
+  if (!(await clientInScope(id))) throw new Error("Ce client n'est pas dans votre portée.");
   const type = String(formData.get("type") ?? "AUTRE") as "PHARMACIE" | "PARAPHARMACIE" | "GROSSISTE" | "AUTRE";
   const city = String(formData.get("city") ?? "").trim() || null;
   // Secteur choisi à la main, sinon déduit de la ville.
   const sector = asSector(formData.get("sector")) ?? cityToSector(city);
-  await db.update(clients).set({
-    name: String(formData.get("name") ?? "").trim() || undefined,
+  const name = String(formData.get("name") ?? "").trim();
+  const next = {
+    ...(name ? { name } : {}),
     type,
     city,
     sector,
     channel: String(formData.get("channel") ?? "").trim() || null,
     salesRep: String(formData.get("salesRep") ?? "").trim() || null,
     phone: String(formData.get("phone") ?? "").trim() || null,
-    active: formData.get("active") === "on",
-    needsReview: false,
-  }).where(eq(clients.id, id));
+  };
+  await db.transaction(async (tx) => {
+    const [before] = await tx.select().from(clients).where(eq(clients.id, id)).for("update");
+    if (!before) return;
+    await tx.update(clients).set({ ...next, needsReview: false, updatedAt: new Date() }).where(eq(clients.id, id));
+    const diff = changedFields(before as unknown as Record<string, unknown>, next);
+    if (diff) await audit({ actor: { id: user.id, name: user.name }, action: "UPDATE", module: "clients", entity: "client", entityId: id, label: next.name ?? before.name, before: diff.before, after: diff.after }, tx);
+  });
   revalidatePath(`/clients/${id}`);
   revalidatePath("/clients");
 }

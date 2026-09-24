@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireAccess, brandFilter, clientFilter } from "@/lib/access";
+import { requireAccess, brandFilter, clientFilter, canDo } from "@/lib/access";
 import { clientIntel, segmentCounts, SEGMENT_META, type Segment } from "@/lib/clients";
 import { getRefDate } from "@/lib/ref-date";
 import { PageHeader, Card, Badge, Delta, Tabs } from "@/components/ui";
@@ -16,7 +16,7 @@ export default async function ClientsPage(props: { searchParams: Promise<{ seg?:
   const sp = await props.searchParams;
   const { ref } = await getRefDate();
   // Portée « assignés » : clients cochés, sinon clients ayant acheté une marque assignée.
-  const [scopeBrands, scopeClients] = await Promise.all([brandFilter(), clientFilter()]);
+  const [scopeBrands, scopeClients, canCreate] = await Promise.all([brandFilter(), clientFilter(), canDo("clients", "create")]);
   const all = await clientIntel({ clientIds: scopeClients, brandIds: scopeBrands }, ref);
   const counts = segmentCounts(all);
   const q = sp.q ? normKey(sp.q) : "";
@@ -38,7 +38,8 @@ export default async function ClientsPage(props: { searchParams: Promise<{ seg?:
 
   return (
     <>
-      <PageHeader eyebrow="Customer intelligence" title="Clients" subtitle={`${all.length} clients · ${active12} actifs sur 12 mois · segments recalculés au ${fmtDate(ref)}`}>
+      <PageHeader eyebrow="Customer intelligence" title="Clients" subtitle={`${all.length} clients · ${active12} actifs sur 12 mois · segments recalculés au ${fmtDate(ref)}`}
+        actions={canCreate ? <Link href="/clients/nouveau" className="btn-primary btn-sm">+ Client</Link> : undefined}>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-3">
           {(Object.keys(SEGMENT_META) as Segment[]).map((s) => (
             <Link key={s} href={qs({ seg: sp.seg === s ? "" : s, potential: "" })} className={`card px-3 py-2.5 hover:border-line-2 ${sp.seg === s ? "ring-2 ring-accent/40" : ""}`}>

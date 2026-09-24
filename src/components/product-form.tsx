@@ -11,7 +11,7 @@ export function ProductForm({ product, brands }: { product?: Product | null; bra
         <label className="block"><span className="label block mb-1">Marque</span>
           <select name="brandId" defaultValue={p?.brandId ?? ""} className="select h-9"><option value="">—</option>{brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>
         </label>
-        <label className="block"><span className="label block mb-1">Code article</span><input name="sku" defaultValue={p?.sku ?? ""} className="input h-9" /></label>
+        <label className="block"><span className="label block mb-1">Code distributeur</span><input name="sku" defaultValue={p?.sku ?? ""} className="input h-9" /></label>
         <label className="block"><span className="label block mb-1">Nom court</span><input name="shortName" defaultValue={p?.shortName ?? ""} className="input h-9" /></label>
         <label className="block"><span className="label block mb-1">Catégorie</span><input name="category" defaultValue={p?.category ?? ""} className="input h-9" placeholder="Sérum, Crème…" /></label>
         <label className="block"><span className="label block mb-1">Prix pharmacien (PPH)</span><input name="priceWholesale" defaultValue={p?.priceWholesale ?? ""} className="input h-9" inputMode="decimal" /></label>

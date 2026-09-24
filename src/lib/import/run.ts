@@ -23,7 +23,9 @@ export type ImportOptions = {
   columnGroups?: Record<string, string>;
   /** Matrice d'animations : en-têtes de toutes les colonnes de la feuille (produits = celles non mappées). */
   headers?: string[];
-  stockDate?: string; // photo de stock
+  stockDate?: string; // photo de stock, date du stock initial
+  /** Photo de stock : dépôt photographié (externe) ; stock initial : dépôt par défaut (interne). */
+  warehouseKey?: string;
   /** Régie par défaut quand le fichier ne porte pas de colonne « plateforme ». */
   adPlatform?: string;
   skipStatuses?: string[]; // ex: ["Annulé"]
@@ -240,6 +242,7 @@ export async function runImport(params: {
       case "MEDECINS": await importMedecins(rows, mapping, options, imp.id, summary); break;
       case "INVENTORY": await importInventory(rows, mapping, options, resolver, imp.id, summary); break;
       case "INFLUENCERS": await importInfluencers(rows, mapping, summary); break;
+      case "STOCK_INITIAL": await importStockInitial(rows, mapping, options, imp.id, params.userId ?? null, summary); break;
     }
     await resolver.flushAliases(type);
     summary.created = resolver.created;
@@ -332,9 +335,18 @@ async function importClients(rows: Record<string, unknown>[], mapping: Mapping, 
     const code = txt(r, mapping, "code");
     const typeRaw = txt(r, mapping, "type");
     const type = typeRaw ? (["PHARMACIE", "PARAPHARMACIE", "GROSSISTE", "AUTRE"].find((t) => normKey(typeRaw).startsWith(t)) as "PHARMACIE" | "PARAPHARMACIE" | "GROSSISTE" | "AUTRE" | undefined) : undefined;
+    // Gestion commerciale : identité légale et conditions. Jamais d'écrasement par du vide.
+    const legal = legalClientFields(r, mapping);
+    if ("error" in legal) { out.errors.push({ row: i + 2, message: legal.error }); continue; }
+    const accountCode = txt(r, mapping, "accountCode");
+    const byAccount = accountCode ? (await db.execute<{ id: string }>(sql`select id from clients where account_code = ${accountCode} limit 1`)).rows[0]?.id : undefined;
     const before = R.clients.length;
-    const id = await R.client(name, raw, code, city, true, { channel: txt(r, mapping, "channel") ?? undefined, salesRep: txt(r, mapping, "rep") ?? undefined, phone: txt(r, mapping, "phone") ?? undefined, ...(type ? { type } : {}), needsReview: false });
+    const id = byAccount ?? await R.client(name, raw, code, city, true, { channel: txt(r, mapping, "channel") ?? undefined, salesRep: txt(r, mapping, "rep") ?? undefined, phone: txt(r, mapping, "phone") ?? undefined, ...(type ? { type } : {}), needsReview: false });
     if (!id) { out.errors.push({ row: i + 2, message: "Client non résolu" }); continue; }
+    if (Object.keys(legal.set).length) {
+      try { await db.update(s.clients).set({ ...legal.set, updatedAt: new Date() }).where(eq(s.clients.id, id)); }
+      catch (e) { out.errors.push({ row: i + 2, message: explainDbError(e) }); continue; }
+    }
     if (R.clients.length > before) out.inserted++;
     else {
       // mise à jour des attributs connus
@@ -344,7 +356,8 @@ async function importClients(rows: Record<string, unknown>[], mapping: Mapping, 
       const channel = txt(r, mapping, "channel"); if (channel) set.channel = channel;
       const rep = txt(r, mapping, "rep"); if (rep) set.salesRep = rep;
       const phone = txt(r, mapping, "phone"); if (phone) set.phone = phone;
-      if (Object.keys(set).length) { await db.update(s.clients).set({ ...set, needsReview: false }).where(eq(s.clients.id, id)); out.updated++; }
+      if (Object.keys(set).length) await db.update(s.clients).set({ ...set, needsReview: false }).where(eq(s.clients.id, id));
+      if (Object.keys(set).length || Object.keys(legal.set).length) out.updated++;
     }
   }
 }
@@ -352,6 +365,8 @@ async function importClients(rows: Record<string, unknown>[], mapping: Mapping, 
 /* ------------------------------- Produits ----------------------------- */
 
 async function importProducts(rows: Record<string, unknown>[], mapping: Mapping, _o: ImportOptions, R: Resolver, out: ImportSummary) {
+  const taxKeys = new Map((await db.execute<{ key: string; rate: string }>(sql`select key, rate::text as rate from tax_rates`)).rows.map((t) => [Number(t.rate).toFixed(2), t.key]));
+  const productByCode = new Map((await db.execute<{ id: string; code: string }>(sql`select id, code from products where code is not null`)).rows.map((p) => [p.code.toUpperCase(), p.id]));
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
     const name = txt(r, mapping, "name");
@@ -366,11 +381,27 @@ async function importProducts(rows: Record<string, unknown>[], mapping: Mapping,
     const lt = num(r, mapping, "leadTime"); if (lt !== null) set.leadTimeDays = Math.round(lt);
     const moq = num(r, mapping, "moq"); if (moq !== null) set.moq = Math.round(moq);
     const cat = txt(r, mapping, "category"); if (cat) set.category = cat;
+    // Gestion commerciale : référence COMANET, EAN, TVA, unité, colisage.
+    const code = txt(r, mapping, "code"); if (code) set.code = code.toUpperCase();
+    const ean = txt(r, mapping, "ean"); if (ean) set.ean = ean.replace(/\s/g, "");
+    const unit = txt(r, mapping, "unit"); if (unit) set.unit = unit;
+    const pack = num(r, mapping, "packSize"); if (pack !== null && pack > 0) set.packSize = Math.round(pack);
+    const rate = num(r, mapping, "taxRate");
+    if (rate !== null) {
+      const pct = rate > 0 && rate < 1 ? rate * 100 : rate; // 0,2 lu comme 20 %
+      const key = taxKeys.get(pct.toFixed(2));
+      if (!key) { out.errors.push({ row: i + 2, message: `Taux de TVA ${pct} % absent du référentiel (Paramètres → Gestion commerciale).` }); continue; }
+      set.taxRateKey = key;
+    }
+    const byCode = code ? productByCode.get(code.toUpperCase()) : undefined;
     const before = R.products.length;
-    const id = await R.product(name, txt(r, mapping, "sku"), brandId, true, set);
+    const id = byCode ?? await R.product(name, txt(r, mapping, "sku"), brandId, true, set);
     if (!id) { out.errors.push({ row: i + 2, message: "Produit non résolu" }); continue; }
     if (R.products.length > before) out.inserted++;
-    else if (Object.keys(set).length || brandId) { await db.update(s.products).set({ ...set, ...(brandId ? { brandId, needsReview: false } : {}) }).where(eq(s.products.id, id)); out.updated++; }
+    else if (Object.keys(set).length || brandId) {
+      try { await db.update(s.products).set({ ...set, ...(brandId ? { brandId, needsReview: false } : {}) }).where(eq(s.products.id, id)); out.updated++; }
+      catch (e) { out.errors.push({ row: i + 2, message: explainDbError(e) }); }
+    }
   }
 }
 
@@ -397,7 +428,7 @@ async function importStock(rows: Record<string, unknown>[], mapping: Mapping, op
     if (R.products.length === before && Object.keys(set).length) await db.update(s.products).set(set).where(eq(s.products.id, id));
     const date = toISODate(get(r, mapping, "date")) ?? defaultDate;
     const onOrder = num(r, mapping, "onOrder") ?? 0;
-    await db.insert(s.stockSnapshots).values({ productId: id, quantity: String(qty), onOrder: String(onOrder), date, source: "IMPORT", importId });
+    await db.insert(s.stockSnapshots).values({ productId: id, quantity: String(qty), onOrder: String(onOrder), date, source: "IMPORT", warehouseKey: options.warehouseKey ?? null, importId });
     out.inserted++;
   }
 }
@@ -1331,4 +1362,102 @@ async function importInventory(rows: Record<string, unknown>[], mapping: Mapping
       out.inserted++;
     }
   }
+}
+
+/* --------------------------- Gestion commerciale --------------------------- */
+
+/** Colonnes légales et commerciales d'un client lues dans le fichier ; une cellule vide ne remplace rien. */
+function legalClientFields(r: Record<string, unknown>, mapping: Mapping): { set: Partial<typeof s.clients.$inferInsert> } | { error: string } {
+  const set: Partial<typeof s.clients.$inferInsert> = {};
+  const t = (k: string) => txt(r, mapping, k);
+  const accountCode = t("accountCode"); if (accountCode) set.accountCode = accountCode;
+  const legalName = t("legalName"); if (legalName) set.legalName = legalName;
+  const ice = t("ice"); if (ice) set.ice = ice.replace(/\D/g, "") || null;
+  const ifNumber = t("ifNumber"); if (ifNumber) set.ifNumber = ifNumber;
+  const rc = t("rc"); if (rc) set.rc = rc;
+  const patente = t("patente"); if (patente) set.patente = patente;
+  const address = t("address"); if (address) set.billingAddress = address;
+  const postalCode = t("postalCode"); if (postalCode) set.postalCode = postalCode;
+  const email = t("email"); if (email) set.email = email;
+  const contact = t("contact"); if (contact) set.contactName = contact;
+  const days = num(r, mapping, "paymentDays");
+  if (days !== null) { if (days < 0 || days > 365) return { error: `Délai de paiement invalide : ${days}.` }; set.paymentDays = Math.round(days); }
+  const disc = num(r, mapping, "discountPct");
+  if (disc !== null) {
+    const pct = disc > 0 && disc < 1 ? disc * 100 : disc; // 0,25 lu comme 25 %
+    if (pct < 0 || pct >= 100) return { error: `Remise invalide : ${disc}.` };
+    set.defaultDiscountPct = pct.toFixed(2);
+  }
+  return { set };
+}
+
+/**
+ * Stock initial : point de départ du journal de stock (mouvements STOCK_INITIAL, coût unitaire,
+ * lot et péremption). Idempotent : une ligne déjà chargée (même article, dépôt et lot, non
+ * annulée) est comptée en doublon. Tout le fichier passe dans une seule transaction.
+ */
+async function importStockInitial(rows: Record<string, unknown>[], mapping: Mapping, options: ImportOptions, importId: string, userId: string | null, out: ImportSummary) {
+  const { recordStockMovements } = await import("@/lib/gestion/ledger");
+  const { parseDecimal, SCALE, formatScaled } = await import("@/lib/gestion/money");
+  const date = options.stockDate ?? new Date().toISOString().slice(0, 10);
+  const defaultWarehouse = options.warehouseKey ?? "PRINCIPAL";
+  const products = (await db.execute<{ id: string; name: string; key: string; code: string | null; ean: string | null; sku: string | null; track_lots: boolean }>(sql`
+    select id, name, name_key as key, code, ean, sku, track_lots from products where kind = 'PRODUIT'`)).rows;
+  const byCode = new Map<string, string>();
+  for (const p of products) {
+    if (p.sku) byCode.set(p.sku.trim().toUpperCase(), p.id);
+    if (p.ean) byCode.set(p.ean.trim().toUpperCase(), p.id);
+    if (p.code) byCode.set(p.code.trim().toUpperCase(), p.id);
+  }
+  const byName = new Map(products.map((p) => [p.key, p.id]));
+  const aliases = new Map((await db.execute<{ alias: string; product_id: string }>(sql`select alias, product_id from product_aliases`)).rows.map((a) => [a.alias, a.product_id]));
+  const whs = (await db.execute<{ key: string; label: string; kind: string }>(sql`select key, label, kind from warehouses where active`)).rows;
+  const whOf = (v: string | null) => {
+    if (!v) return defaultWarehouse;
+    const k = normKey(v);
+    return whs.find((w) => normKey(w.key) === k || normKey(w.label) === k)?.key ?? null;
+  };
+  const loaded = new Set((await db.execute<{ k: string }>(sql`
+    select m.product_id || '|' || m.warehouse_key || '|' || coalesce(l.lot_number, '') as k
+    from stock_movements m left join stock_lots l on l.id = m.lot_id
+    where m.type = 'STOCK_INITIAL' and m.reversal_of is null and not exists (select 1 from stock_movements x where x.reversal_of = m.id)`)).rows.map((x) => x.k));
+
+  type Input = Parameters<typeof recordStockMovements>[0][number];
+  const inputs: Input[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const code = txt(r, mapping, "productCode");
+    const name = txt(r, mapping, "productName");
+    if (!code && !name) continue;
+    const qty = parseDecimal(get(r, mapping, "quantity") as string | number | null, SCALE.qty);
+    if (qty === null) { out.errors.push({ row: i + 2, message: "Quantité illisible." }); continue; }
+    if (qty === 0n) continue;
+    if (qty < 0n) { out.errors.push({ row: i + 2, message: "Quantité négative : un stock initial part de ce qui est réellement en stock." }); continue; }
+    const cost = parseDecimal(get(r, mapping, "unitCost") as string | number | null, SCALE.cost);
+    if (cost === null || cost < 0n) { out.errors.push({ row: i + 2, message: "Coût unitaire manquant ou négatif : le stock ne peut pas être valorisé." }); continue; }
+    const productId = (code && byCode.get(code.trim().toUpperCase())) || (name && (byName.get(normKey(name)) ?? aliases.get(normKey(name)))) || null;
+    if (!productId) { out.errors.push({ row: i + 2, message: `Article introuvable : ${code ?? ""} ${name ?? ""}`.trim() }); continue; }
+    const warehouseKey = whOf(txt(r, mapping, "warehouse"));
+    if (!warehouseKey) { out.errors.push({ row: i + 2, message: `Dépôt inconnu : ${txt(r, mapping, "warehouse")}.` }); continue; }
+    if (whs.find((w) => w.key === warehouseKey)?.kind !== "INTERNE") { out.errors.push({ row: i + 2, message: `${warehouseKey} est un dépôt externe : importez-le en « Stock (photo) ».` }); continue; }
+    const lot = txt(r, mapping, "lot");
+    const expiry = toISODate(get(r, mapping, "expiry"));
+    const k = `${productId}|${warehouseKey}|${lot ?? ""}`;
+    if (loaded.has(k) || seen.has(k)) { out.duplicates++; continue; }
+    seen.add(k);
+    inputs.push({
+      productId, type: "STOCK_INITIAL", quantity: formatScaled(qty, SCALE.qty), unitCost: formatScaled(cost, SCALE.cost), warehouseKey,
+      lotNumber: lot, expiryDate: expiry, date, sourceType: "IMPORT", sourceId: importId, importId, comment: "Stock initial (import)",
+    });
+  }
+  if (!inputs.length) { if (!out.duplicates) out.warnings.push("Aucune ligne de stock à charger."); return; }
+  try {
+    await recordStockMovements(inputs, { id: userId }, { allowNegative: false });
+    out.inserted += inputs.length;
+  } catch (e) {
+    // Un refus du journal (lot manquant sur un article suivi par lot, dépôt…) annule tout le fichier : rien n'est chargé à moitié.
+    out.errors.push({ row: 0, message: `Aucune ligne chargée : ${(e as Error).message}` });
+  }
+  if (out.duplicates) out.warnings.push(`${out.duplicates} ligne(s) déjà chargée(s) par un import précédent : ignorée(s). Pour recharger, annulez d'abord cet import.`);
 }

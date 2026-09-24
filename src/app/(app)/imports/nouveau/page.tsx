@@ -9,6 +9,7 @@ import { autoMap, FIELDS, IMPORT_TYPES, IMPORT_MODULE, type ImportType } from "@
 import { PageHeader, Card, Badge } from "@/components/ui";
 import { runImportAction } from "../actions";
 import { iso } from "@/lib/format";
+import { listWarehouses } from "@/lib/gestion/refs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -29,6 +30,7 @@ export default async function NewImportPage(props: { searchParams: Promise<{ fil
   const mapping = autoMap(type, parsed.headers);
   const typeDef = IMPORT_TYPES.find((t) => t.key === type)!;
   const base = `/imports/nouveau?file=${file.id}&type=${type}`;
+  const warehouses = type === "STOCK" || type === "STOCK_INITIAL" ? (await listWarehouses()).filter((w) => w.active) : [];
 
   return (
     <>
@@ -62,6 +64,22 @@ export default async function NewImportPage(props: { searchParams: Promise<{ fil
             {type === "ANIMATIONS" && <div className="rounded-xl bg-accent-soft/50 px-3 py-2 text-[11.5px] text-ink-2">Toutes les colonnes non mappées ci-dessus sont lues comme des <b>produits</b> (une colonne = un produit, la valeur = la quantité vendue). La ligne de prix sous l&apos;en-tête et la marque indiquée au-dessus des colonnes sont reprises automatiquement ; les colonnes de totaux du classeur sont ignorées.</div>}
             {type === "ANIM_OBJECTIVES" && <div className="rounded-xl bg-accent-soft/50 px-3 py-2 text-[11.5px] text-ink-2">Choisissez la ligne d&apos;en-tête du bloc <b>YEARLY</b>. Chaque colonne portant un nom de marque devient un objectif annuel en <b>unités</b> pour la ville de la ligne ; l&apos;objectif mensuel est calculé automatiquement.</div>}
             {type === "STOCK" && <label className="block"><span className="label block mb-1">Date de la photo de stock</span><input type="date" name="stockDate" defaultValue={iso(new Date())} className="input h-9" /></label>}
+            {type === "STOCK" && (
+              <label className="block"><span className="label block mb-1">Dépôt photographié</span>
+                <select name="warehouseKey" defaultValue="" className="select h-9">
+                  <option value="">Photo globale (avant la bascule)</option>
+                  {warehouses.filter((w) => w.kind === "EXTERNE").map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}
+                </select>
+                <span className="text-[11px] text-faint block mt-0.5">Cospharma et Pharmafirst : leur stock n&apos;est connu que par ces photos, dépôt par dépôt.</span>
+              </label>
+            )}
+            {type === "STOCK_INITIAL" && (<>
+              <label className="block"><span className="label block mb-1">Date du stock initial</span><input type="date" name="stockDate" defaultValue={iso(new Date())} className="input h-9" required /></label>
+              <label className="block"><span className="label block mb-1">Dépôt (si le fichier n&apos;a pas de colonne dépôt)</span>
+                <select name="warehouseKey" defaultValue="PRINCIPAL" className="select h-9">{warehouses.filter((w) => w.kind === "INTERNE").map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}</select>
+              </label>
+              <div className="rounded-xl bg-accent-soft/50 px-3 py-2 text-[11.5px] text-ink-2">Chaque ligne devient un mouvement <b>Stock initial</b> du journal, valorisé à son coût unitaire (base du CMUP). Un article suivi par lot exige son n° de lot. Le fichier passe <b>entièrement ou pas du tout</b> ; recharger le même fichier ignore les lignes déjà chargées.</div>
+            </>)}
             {type === "ADS" && <><label className="block"><span className="label block mb-1">Régie (si le fichier n&apos;a pas de colonne plateforme)</span><select name="adPlatform" className="select h-9"><option value="META">Meta Ads</option><option value="TIKTOK">TikTok Ads</option><option value="GOOGLE">Google Ads</option><option value="AUTRE">Autre régie</option></select></label><div className="rounded-xl bg-accent-soft/50 px-3 py-2 text-[11.5px] text-ink-2">Réimporter le même export <b>met à jour</b> les lignes existantes (clé : plateforme + jour + campagne + ensemble + publicité) — aucun doublon. La marque est déduite du nom de la campagne quand le fichier n&apos;a pas de colonne dédiée.</div></>}
             {(type === "SALES" || type === "STOCK") && <label className="flex items-center gap-2 text-[12.5px]"><input type="checkbox" name="createUnknown" value="on" defaultChecked /> Créer automatiquement les clients / produits inconnus (sinon : ligne en erreur)</label>}
             <div className="text-[11.5px] text-faint">Doublons : une ligne identique (date, client, article, quantité, montant, n° de pièce) déjà importée est ignorée. Les désignations proches d&apos;un produit existant sont rapprochées automatiquement et listées dans le rapport.</div>

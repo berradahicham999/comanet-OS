@@ -36,6 +36,14 @@ export const NAV: NavGroup[] = [
     ],
   },
   {
+    title: "Gestion commerciale",
+    items: [
+      { href: "/gestion", label: "Préparation", icon: "ClipboardCheck", module: ["livraisons", "facturation", "achats", "stock", "administration"], exact: true },
+      { href: "/gestion/stock", label: "Stock réel", icon: "Warehouse", module: "stock" },
+      { href: "/gestion/fournisseurs", label: "Fournisseurs", icon: "Truck", module: "achats" },
+    ],
+  },
+  {
     title: "Marketing",
     items: [
       { href: "/marketing", label: "Vue d'ensemble", icon: "Megaphone", module: "marketing", exact: true },

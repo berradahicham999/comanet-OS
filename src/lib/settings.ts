@@ -84,6 +84,67 @@ export type ComanetSettings = {
   marketingIntel: MarketingIntelSettings;
   /** Stock chez le client : ancienneté d'un relevé, fenêtres de croisement sell-in / sell-out. */
   clientStock: ClientStockSettings;
+  /** Gestion commerciale : identité de la société imprimée sur les pièces, politiques, bascule depuis Sage. */
+  gestion: GestionSettings;
+};
+
+/**
+ * Gestion commerciale (`src/lib/gestion/`). L'identité de la société n'a pas de valeur par défaut
+ * dans le code (le dépôt est public) : elle se saisit dans /parametres/gestion.
+ */
+export type CompanyIdentity = {
+  legalName: string;
+  address: string;
+  city: string;
+  postalCode: string;
+  phone: string;
+  email: string;
+  /** Capital social, tel qu'imprimé (« 100.000,00 Dirhams »). */
+  capital: string;
+  rc: string;
+  ice: string;
+  ifNumber: string;
+  cnss: string;
+  /** Taxe professionnelle (patente). */
+  tp: string;
+  bankName: string;
+  rib: string;
+};
+
+export type GestionSettings = {
+  company: CompanyIdentity;
+  /** Taux de TVA des articles qui n'en précisent pas (clé de `tax_rates`). */
+  defaultTaxRateKey: string;
+  /** Délai de paiement (jours) des clients qui n'en précisent pas. */
+  defaultPaymentDays: number;
+  /** Plafond du délai de paiement (jours) : aucune échéance ne va au-delà. À faire confirmer par le comptable. */
+  maxPaymentDays: number;
+  /** Stock insuffisant à la validation d'une sortie : bloquer, ou seulement alerter. */
+  insufficientStock: "BLOCK" | "WARN";
+  /** Alerte péremption : un lot est « proche » à moins de N jours. */
+  expiryAlertDays: number;
+  /** Fenêtre (jours) des ventes COMANET qui désigne les clients et articles à préparer pour la facturation. */
+  readinessWindowDays: number;
+  /**
+   * Bascule depuis Sage. OFF : Sage fait foi. PARALLELE : pièces en simulation. ACTIF : COMANET OS
+   * émet les pièces des `sites` listés, à partir de `date` ; les autres sites restent importés.
+   */
+  cutover: { mode: "OFF" | "PARALLELE" | "ACTIF"; date: string | null; sites: string[] };
+};
+
+export const EMPTY_COMPANY: CompanyIdentity = {
+  legalName: "", address: "", city: "", postalCode: "", phone: "", email: "", capital: "", rc: "", ice: "", ifNumber: "", cnss: "", tp: "", bankName: "", rib: "",
+};
+
+export const DEFAULT_GESTION: GestionSettings = {
+  company: EMPTY_COMPANY,
+  defaultTaxRateKey: "TVA20",
+  defaultPaymentDays: 60,
+  maxPaymentDays: 120,
+  insufficientStock: "BLOCK",
+  expiryAlertDays: 90,
+  readinessWindowDays: 365,
+  cutover: { mode: "OFF", date: null, sites: ["COMANET", "DESK DIGITAL"] },
 };
 
 /**
@@ -394,6 +455,7 @@ export const DEFAULT_SETTINGS: ComanetSettings = {
   ai: DEFAULT_AI_SETTINGS,
   marketingIntel: DEFAULT_MARKETING_INTEL,
   clientStock: DEFAULT_CLIENT_STOCK,
+  gestion: DEFAULT_GESTION,
 };
 
 export const SETTINGS_KEY = "comanet.rules";
@@ -418,6 +480,19 @@ export function mergeSettings(stored: Partial<ComanetSettings> | null | undefine
     ai: { ...DEFAULT_AI_SETTINGS, ...(stored.ai ?? {}) },
     marketingIntel: { ...DEFAULT_MARKETING_INTEL, ...(stored.marketingIntel ?? {}) },
     clientStock: { ...DEFAULT_CLIENT_STOCK, ...(stored.clientStock ?? {}) },
+    gestion: mergeGestion(stored.gestion),
+  };
+}
+
+/** Fusion profonde des réglages de gestion commerciale (identité et bascule imbriquées). */
+export function mergeGestion(stored: Partial<GestionSettings> | null | undefined): GestionSettings {
+  const d = DEFAULT_GESTION;
+  if (!stored) return d;
+  return {
+    ...d,
+    ...stored,
+    company: { ...d.company, ...(stored.company ?? {}) },
+    cutover: { ...d.cutover, ...(stored.cutover ?? {}) },
   };
 }
 

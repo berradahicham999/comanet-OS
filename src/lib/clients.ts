@@ -49,7 +49,7 @@ export type ClientIntel = {
   recommendation: { title: string; detail: string; kind: "RELANCE" | "REACTIVATION" | "ANALYSE" | "DEVELOPPEMENT" | "ANIMATION" | "NONE" };
 };
 
-export async function clientIntel(opts: { clientId?: string; clientIds?: string[] | null; brandIds?: string[] | null } = {}, ref?: Date): Promise<ClientIntel[]> {
+export async function clientIntel(opts: { clientId?: string; clientIds?: string[] | null; brandIds?: string[] | null; includeArchived?: boolean } = {}, ref?: Date): Promise<ClientIntel[]> {
   const s = await getSettings();
   const t = ref ?? today();
   const m12 = iso(addMonths(startOfMonth(t), -12));
@@ -108,7 +108,7 @@ export async function clientIntel(opts: { clientId?: string; clientIds?: string[
     left join field_stock fs on fs.client_id = c.id
     left join field_sellout fso on fso.client_id = c.id
     left join last_anim la on la.client_id = c.id
-    where c.active ${opts.clientId ? sql`and c.id = ${opts.clientId}::uuid` : sql``}
+    where ${opts.includeArchived ? sql`true` : sql`c.active`} ${opts.clientId ? sql`and c.id = ${opts.clientId}::uuid` : sql``}
       ${opts.clientIds && opts.clientIds.length ? sql`and c.id = any(${pgArray(opts.clientIds)})` : sql``}
       ${opts.brandIds && !(opts.clientIds && opts.clientIds.length) ? (opts.brandIds.length ? sql`and exists (select 1 from sales s2 join products p2 on p2.id = s2.product_id where s2.client_id = c.id and p2.brand_id = any(${pgArray(opts.brandIds)}))` : sql`and false`) : sql``}
     order by revenue12 desc`);

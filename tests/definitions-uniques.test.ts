@@ -179,3 +179,34 @@ describe("Stock chez le client — une seule écriture, une seule lecture du der
     assert.deepEqual(found, [], `Seuil d'ancienneté écrit en dur dans : ${found.join(", ")}`);
   });
 });
+
+describe("Gestion commerciale — journal de stock, numérotation, audit, montants exacts", () => {
+  test("seul `src/lib/gestion/ledger.ts` écrit dans `stock_movements`", () => {
+    const found = codeHits(/insert\(stockMovements\)|insert\s+into\s+stock_movements/i, ["lib/gestion/ledger.ts"]);
+    assert.deepEqual(found, [], `Écriture concurrente du journal dans : ${found.join(", ")}`);
+  });
+  test("personne ne modifie ni ne supprime un mouvement (le journal est en écriture seule)", () => {
+    const found = codeHits(/update\(stockMovements\)|delete\(stockMovements\)|update\s+stock_movements|delete\s+from\s+stock_movements|truncate[^`]*stock_movements/i);
+    assert.deepEqual(found, [], `Réécriture du journal dans : ${found.join(", ")}`);
+  });
+  test("seul `src/lib/gestion/numbering.ts` écrit les compteurs de numérotation", () => {
+    const found = codeHits(/insert\(documentSequences\)|update\(documentSequences\)|(insert\s+into|update)\s+document_sequences/i, ["lib/gestion/numbering.ts"]);
+    assert.deepEqual(found, [], `Compteur de numérotation écrit hors du module dans : ${found.join(", ")}`);
+  });
+  test("seul `src/lib/audit.ts` écrit le journal d'audit", () => {
+    const found = codeHits(/insert\(auditLogs\)|insert\s+into\s+audit_logs/i, ["lib/audit.ts"]);
+    assert.deepEqual(found, [], `Écriture directe du journal d'audit dans : ${found.join(", ")}`);
+  });
+  test("aucun montant de la gestion commerciale n'est calculé en virgule flottante", () => {
+    // Les montants passent par `money.ts` (entiers à échelle fixe). `Number(...)` reste permis pour
+    // l'affichage et le tri ; `parseFloat` et `toFixed` (arrondi binaire) sont proscrits.
+    const found = codeHits(/parseFloat\(|\.toFixed\(/, ["lib/gestion/money.ts"]).filter((p) => p.includes("lib/gestion/"));
+    assert.deepEqual(found, [], `Calcul flottant dans : ${found.join(", ")}`);
+  });
+  test("le CMUP et la numérotation n'ont qu'une définition", () => {
+    assert.deepEqual(hits(/export function nextCmup\(/), ["src/lib/gestion/money.ts"]);
+    assert.deepEqual(hits(/export function formatNumber\(/), ["src/lib/gestion/numbering-shared.ts"]);
+    assert.deepEqual(hits(/export async function allocateNumber\(/), ["src/lib/gestion/numbering.ts"]);
+    assert.deepEqual(hits(/export async function recordStockMovements\(/), ["src/lib/gestion/ledger.ts"]);
+  });
+});

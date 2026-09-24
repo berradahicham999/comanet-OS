@@ -13,15 +13,18 @@ import { MonthlyRevenueChart } from "@/components/charts";
 import { ProductForm } from "@/components/product-form";
 import { fmtMAD, fmtNum, fmtDate, fmtDateShort, addDays, iso, months, delta } from "@/lib/format";
 import { mergeProduct, addStockSnapshot } from "../actions";
+import { ProductTradeSection } from "./trade-section";
 
 export const dynamic = "force-dynamic";
 
 const LEVEL_TONE = { green: "green", yellow: "yellow", orange: "orange", red: "red", none: "gray", unknown: "gray" } as const;
 
-export default async function ProductPage(props: { params: Promise<{ id: string }> }) {
+export default async function ProductPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; done?: string }> }) {
   await requireAccess("produits");
   const seeMargins = await hasFlag("seeMargins");
   const { id } = await props.params;
+  const sp = await props.searchParams;
+  if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const product = await db.query.products.findFirst({ where: eq(productsTable.id, id) });
   if (!product) notFound();
   const { ref } = await getRefDate();
@@ -59,10 +62,12 @@ export default async function ProductPage(props: { params: Promise<{ id: string 
       <PageHeader
         eyebrow={<Link href="/produits" className="hover:underline">Produits</Link>}
         title={<span className="flex items-center gap-2 flex-wrap">{brand && <BrandDot color={brand.color} />}{product.name}{(product.needsReview || !product.brandId) && <Badge tone="yellow">à rattacher</Badge>}{!product.active && <Badge tone="gray">inactif</Badge>}</span>}
-        subtitle={[brand?.name, product.sku ? `Code ${product.sku}` : null, product.category, product.priceWholesale ? `PPH ${fmtMAD(product.priceWholesale)}` : null].filter(Boolean).join(" · ")}
+        subtitle={[brand?.name, product.code ? `Réf. ${product.code}` : null, product.sku ? `Code distributeur ${product.sku}` : null, product.category, product.priceWholesale ? `PPH ${fmtMAD(product.priceWholesale)}` : null].filter(Boolean).join(" · ")}
         actions={<Link href={`/taches/nouvelle?entityType=product&entityId=${id}&title=${encodeURIComponent(product.name)}`} className="btn-primary btn-sm">+ Tâche</Link>}
       />
 
+      {sp.error && <div className="mb-4 rounded-2xl bg-red-soft border border-red/30 px-4 py-3 text-[13px] text-red">{sp.error}</div>}
+      {sp.done && <div className="mb-4 rounded-2xl bg-green-soft border border-green/30 px-4 py-3 text-[13px] text-green">Données commerciales enregistrées.</div>}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <Card><div className="label">CA 12 mois</div><div className="kpi mt-2">{fmtMAD(k.revenue12, { compact: true })}</div><div className="mt-2 text-[12px] text-muted flex items-center gap-1"><Delta value={delta(k.revenue12, k.revenue_prev12)} /> vs 12 mois précédents</div></Card>
         <Card><div className="label">Unités 12 mois</div><div className="kpi mt-2">{fmtNum(k.qty12)}</div><div className="mt-2 text-[12px] text-muted">{k.clients12} clients · {fmtNum(st?.avgMonthly ?? 0)} u./mois en moyenne (3 m)</div></Card>
@@ -92,6 +97,8 @@ export default async function ProductPage(props: { params: Promise<{ id: string 
           )}
         </Card>
       </div>
+
+      <ProductTradeSection product={product} seeMargins={seeMargins} />
 
       <div className="grid lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">

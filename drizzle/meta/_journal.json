@@ -176,6 +176,13 @@
       "when": 1789800400000,
       "tag": "0024_animation_revisions",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1789800500000,
+      "tag": "0025_gestion_fondations",
+      "breakpoints": true
     }
   ]
 }
