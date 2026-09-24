@@ -69,7 +69,17 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
   const [query, setQuery] = useState("");
 
   const client = data.clients.find((c) => c.id === clientId) ?? null;
-  const fromOrigin = type === "AVOIR" || lines.some((l) => l.sourceLineId);
+  const fromOrigin = !!initial.originDocumentId || lines.some((l) => l.sourceLineId);
+  // Avoir financier : ni facture ni BL d'origine, une ligne par marque (remise sur objectifs…), sans stock.
+  const financial = type === "AVOIR" && !fromOrigin;
+  const reasons = financial ? creditReasons.filter((r) => !r.withReturn) : creditReasons;
+  const [brandPick, setBrandPick] = useState("");
+  const addBrandLine = (brandId: string) => {
+    const b = data.brands.find((x) => x.id === brandId);
+    if (!b) return;
+    setBrandPick("");
+    setLines((ls) => [...ls, { key: newKey(), productId: null, designation: b.name, ref: null, quantity: "1", freeQuantity: "0", unitPriceHt: "", discountPct: "0", taxRate: data.defaultRate, sourceLineId: null, sourceNumber: null, returnWarehouseKey: null, maxQty: null }]);
+  };
   const reason = creditReasons.find((r) => r.key === reasonKey);
 
   const calc = useMemo(() => {
@@ -187,7 +197,7 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
         {type === "AVOIR" && (
           <label className="block max-w-sm"><span className="label block mb-1">Motif de l&apos;avoir *</span>
             <select className="select h-9" value={reasonKey} onChange={(e) => setReasonKey(e.target.value)} required>
-              <option value="">Choisir…</option>{creditReasons.map((r) => <option key={r.key} value={r.key}>{r.label}{r.withReturn ? " (retour en stock)" : ""}</option>)}
+              <option value="">Choisir…</option>{reasons.map((r) => <option key={r.key} value={r.key}>{r.label}{r.withReturn ? " (retour en stock)" : ""}</option>)}
             </select>
           </label>
         )}
@@ -197,9 +207,17 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
       <div className="card p-4 space-y-3">
         <div className="flex items-center justify-between gap-2">
           <h3 className="font-semibold">Lignes</h3>
-          {type === "FACTURE" && !fromOrigin && <button type="button" className="btn-ghost btn-sm" onClick={addFreeLine}>+ Ligne libre (frais, service)</button>}
+          {(type === "FACTURE" || financial) && !fromOrigin && <button type="button" className="btn-ghost btn-sm" onClick={addFreeLine}>+ Ligne libre</button>}
         </div>
-        {!fromOrigin && (
+        {financial && (
+          <div className="space-y-2">
+            <select className="select h-10" value={brandPick} onChange={(e) => addBrandLine(e.target.value)}>
+              <option value="">Ajouter une marque…</option>{data.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+            <p className="text-[12px] text-muted">Avoir financier : une ligne par marque (« Gamarde », « Alphascience »…) avec le montant HT remboursé ; la TVA et le TTC se calculent. Sans effet sur le stock ; une fois validé, le montant devient un crédit client à imputer sur ses factures.</p>
+          </div>
+        )}
+        {!fromOrigin && !financial && (
           <div className="relative">
             <input className="input h-10" placeholder={type === "BL" ? "Ajouter un article : nom, référence, marque ou code-barres…" : "Ajouter un service ou des frais…"} value={query} onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (productMatches[0]) addProduct(productMatches[0]); } }} />

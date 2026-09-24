@@ -6,7 +6,7 @@ import { clientInScope, hasFlag, requirePermission } from "@/lib/access";
 import { errorParam, isUuid, str } from "@/lib/gestion/form";
 import { DOC_TYPES, type DocType } from "@/lib/gestion/documents-shared";
 import {
-  CommercialBlockError, cancelBL, createCreditNote, createInvoiceFromBLs, deleteDraft, getDocument, markDelivered, requestApproval,
+  CommercialBlockError, cancelBL, renameDocumentClient, createCreditNote, createInvoiceFromBLs, deleteDraft, getDocument, markDelivered, requestApproval,
   saveDraft, validateDocument, type DraftInput,
 } from "@/lib/gestion/documents";
 import { storedPdf } from "@/lib/gestion/pdf";
@@ -173,5 +173,20 @@ export async function creditNoteAction(fd: FormData) {
     redirect(`/gestion/pieces/${invoiceId}?error=${errorParam(e)}`);
   }
   done(id);
+  redirect(`/gestion/pieces/${id}?done=1`);
+}
+
+/** Corrige le nom du client imprimé sur une pièce validée (droit Valider du module de la pièce), puis régénère le PDF. */
+export async function renameClientAction(fd: FormData) {
+  const id = str(fd, "id");
+  try {
+    const d = await docOrThrow(id);
+    const user = await requirePermission(moduleOf(d.type as DocType), "validate");
+    await renameDocumentClient(d.id, str(fd, "name") ?? "", str(fd, "reason") ?? "", { id: user.id, name: user.name });
+    try { await storedPdf(d.id, user.id); } catch (e) { console.error("PDF de pièce", d.id, e); }
+  } catch (e) {
+    redirect(`/gestion/pieces/${id}?error=${errorParam(e)}`);
+  }
+  done(id!);
   redirect(`/gestion/pieces/${id}?done=1`);
 }

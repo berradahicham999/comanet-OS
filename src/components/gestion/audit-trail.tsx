@@ -6,7 +6,7 @@ const ACTION_LABELS: Record<string, string> = {
   BLOCK: "Blocage", UNBLOCK: "Déblocage", ADD_ADDRESS: "Adresse de livraison ajoutée", REMOVE_ADDRESS: "Adresse de livraison retirée",
   BRAND_DISCOUNT: "Remise par marque", SET_NEXT_NUMBER: "Prochain numéro réglé", MOVEMENT: "Mouvement de stock", SETTINGS: "Paramètres",
   VALIDATE: "Validation", DELIVER: "Livraison confirmée", CANCEL: "Annulation", APPROVAL_REQUESTED: "Déblocage demandé",
-  START: "Démarrage du comptage", ZERO_UNCOUNTED: "Non comptés mis à zéro", CLOSE: "Solde",
+  RENAME_CLIENT: "Nom du client corrigé", START: "Démarrage du comptage", ZERO_UNCOUNTED: "Non comptés mis à zéro", CLOSE: "Solde",
 };
 
 /** Libellés des champs pour un historique lisible. */
@@ -25,6 +25,10 @@ const show = (v: unknown) => (v === null || v === undefined || v === "" ? "—" 
 function summary(row: AuditRow): string | null {
   const after = (row.newValue ?? {}) as Record<string, unknown>;
   const before = (row.oldValue ?? {}) as Record<string, unknown>;
+  if (row.action === "RENAME_CLIENT") {
+    const a = after as { legalName?: string; reason?: string }, b = before as { legalName?: string };
+    return `${b.legalName ?? "—"} → ${a.legalName ?? "—"}${a.reason ? ` (motif : ${a.reason})` : ""}`;
+  }
   if (row.action !== "UPDATE" && row.action !== "BRAND_DISCOUNT" && row.action !== "SET_NEXT_NUMBER" && row.action !== "BLOCK" && row.action !== "UNBLOCK") return null;
   const keys = Object.keys(after);
   if (!keys.length) return null;

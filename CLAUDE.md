@@ -216,7 +216,7 @@ facture) + `payment_reminders` ; seul `src/lib/gestion/payments.ts` les écrit. 
 proposée : `receivables-shared.ts`. Un avoir s'impute sur sa facture à la validation. Bascule : `emitsReal()` (seule
 source du « réel ou simulation »), `importBlockedByCutover()` (C5), page `/gestion/bascule` (`cutover.ts` : contrôles,
 mode, rapport), reprise Sage (`importOpeningInvoices()`, source SAGE_REPRISE), `productStocks()` lit le journal en mode
-ACTIF. Envoi au comptable : les mêmes PDF que les clients (sans UG) + récapitulatif Excel (`exports.ts`, ZIP par 20).
+ACTIF. Envoi au comptable : sélection multiple des pièces et ZIP de leurs PDF assemblé dans le navigateur (`piece-exporter.tsx`) + récapitulatif Excel du mois (`exports.ts`). Retours de tests : P.U. TTC sur le BL, nom du client imprimé corrigeable sur une pièce validée (`renameDocumentClient()`, seule clé `legalName` de l'identité figée, migration 0030), avoir financier sans origine (lignes libres par marque, motif sans retour).
 
 **Permissions modulaires par utilisateur** (`docs/permissions-modulaires.md`). Chaque compte porte
 sa propre matrice `user_permissions` (17 modules × Voir / Créer / Modifier / Valider), une portée

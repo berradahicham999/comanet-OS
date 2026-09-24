@@ -44,7 +44,7 @@ type Col = { key: string; label: string; width: number; align?: "left" | "right"
 function columns(type: DocType, model: "PPH_REMISE" | "NET"): Col[] {
   if (type === "BL") return [
     { key: "ref", label: "REF", width: 48 }, { key: "designation", label: "Désignation", width: 150 }, { key: "lot", label: "Lot (péremption)", width: 82 },
-    { key: "quantity", label: "Qté", width: 38, align: "right" }, { key: "free", label: "UG", width: 30, align: "right" }, { key: "unitPriceHt", label: "P.U. HT", width: 46, align: "right" },
+    { key: "quantity", label: "Qté", width: 38, align: "right" }, { key: "free", label: "UG", width: 30, align: "right" }, { key: "unitPriceTtc", label: "P.U. TTC", width: 50, align: "right" },
     { key: "discount", label: "REMISE", width: 38, align: "right" }, { key: "netHt", label: "Montant HT", width: 60, align: "right" },
   ];
   if (model === "NET") return [
@@ -225,7 +225,7 @@ export async function pdfInput(doc: DocumentView): Promise<PdfInput> {
     client: { accountCode: client?.accountCode ?? null, legalName: client?.legalName ?? doc.client.name, address: client?.address ?? null, ice: client?.ice ?? null, city: client?.city ?? null, postalCode: client?.postalCode ?? null },
     lines: doc.lines.map((l) => ({
       ref: l.ref, designation: l.designation, quantity: l.quantity, freeQuantity: l.freeQuantity, unitPriceHt: l.unitPriceHt, publicPriceTtc: l.publicPriceTtc,
-      discountPct: l.discountPct, grossHt: l.grossHt, netHt: l.netHt, vatAmount: l.vatAmount, ttc: l.ttc, sourceNumber: l.sourceNumber, sourceDate: l.sourceDate,
+      discountPct: l.discountPct, grossHt: l.grossHt, netHt: l.netHt, taxRate: l.taxRate, vatAmount: l.vatAmount, ttc: l.ttc, sourceNumber: l.sourceNumber, sourceDate: l.sourceDate,
       lotAllocations: l.lotAllocations ?? [],
     })),
     grossHt: doc.grossHt, globalDiscountPct: doc.globalDiscountPct, netHt: doc.netHt, vatTotal: doc.vatTotal, ttc: doc.ttc, vatBreakdown: doc.vatBreakdown,

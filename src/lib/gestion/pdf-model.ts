@@ -21,13 +21,13 @@ export const fmtDateFr = (iso: string | null | undefined) => (iso ? `${iso.slice
 
 export type PdfLine = {
   ref: string | null; designation: string; quantity: string; freeQuantity: string; unitPriceHt: string; publicPriceTtc: string | null;
-  discountPct: string; grossHt: string; netHt: string; vatAmount: string; ttc: string; sourceNumber: string | null; sourceDate: string | null;
+  discountPct: string; grossHt: string; netHt: string; vatAmount: string; taxRate: string; ttc: string; sourceNumber: string | null; sourceDate: string | null;
   lotAllocations: { lotNumber: string; expiryDate: string | null; qty: string }[];
 };
 
 export type PdfRow =
   | { kind: "group"; label: string }
-  | { kind: "line"; ref: string; designation: string; lot: string; quantity: string; free: string; unitPriceHt: string; publicPriceTtc: string; discount: string; netHt: string; netUnit: string; vat: string; ttc: string; amount: bigint; amountTtc: bigint };
+  | { kind: "line"; ref: string; designation: string; lot: string; quantity: string; free: string; unitPriceHt: string; unitPriceTtc: string; publicPriceTtc: string; discount: string; netHt: string; netUnit: string; vat: string; ttc: string; amount: bigint; amountTtc: bigint };
 
 /**
  * Lignes imprimées : en-tête « BL n° … du … » quand la facture regroupe des BL. Les UG ne s'impriment
@@ -48,7 +48,8 @@ export function pdfRows(type: DocType, lines: PdfLine[]): PdfRow[] {
     const lot = l.lotAllocations.map((a) => `${a.lotNumber}${a.expiryDate ? ` (${fmtDateFr(a.expiryDate)})` : ""}`).join(", ");
     rows.push({
       kind: "line", ref: l.ref ?? "", designation: l.designation, lot, quantity: fmtSage(l.quantity), free: type === "BL" && parseDecimal(l.freeQuantity, SCALE.qty) ? fmtSage(l.freeQuantity) : "",
-      unitPriceHt: fmtSage(l.unitPriceHt), publicPriceTtc: fmtSage(l.publicPriceTtc), discount: parseDecimal(l.discountPct, SCALE.pct) ? fmtSage(l.discountPct) : "",
+      // P.U. TTC (imprimé sur le BL, demande d'Hicham) = P.U. HT × (1 + TVA), arrondi au centime.
+      unitPriceHt: fmtSage(l.unitPriceHt), unitPriceTtc: fmtSage(formatScaled(roundDiv((parseDecimal(l.unitPriceHt, SCALE.money) ?? 0n) * (10000n + (parseDecimal(l.taxRate, SCALE.pct) ?? 0n)), 10000n), SCALE.money)), publicPriceTtc: fmtSage(l.publicPriceTtc), discount: parseDecimal(l.discountPct, SCALE.pct) ? fmtSage(l.discountPct) : "",
       netHt: fmtSage(l.grossHt), netUnit: qty ? fmtSage(formatScaled(roundDiv(gross * 1000n, qty), 2)) : "", vat: fmtSage(l.vatAmount), ttc: fmtSage(l.ttc), amount: gross, amountTtc: parseDecimal(l.ttc, 2) ?? 0n,
     });
   }

@@ -169,7 +169,7 @@ async function main() {
   await D.cancelBL(bl3, "Erreur de saisie", who);
   assert.equal((await D.getDocument(bl3))!.status, "ANNULE");
   assert.equal((await stockState({ productIds: [p1.id] }))[0].available, "143.000");
-  assert.equal((await one<{ n: number }>(sql`select count(*)::int as n from sales where source = 'COMANET_OS'`)).n, 0);
+  assert.equal((await one<{ n: number }>(sql`select count(*)::int as n from sales where source = 'COMANET_OS' and client_id = ${client.id}::uuid`)).n, 0);
   console.log("✓ BL annulé : stock remis par contre-mouvements ; mode OFF : aucune vente projetée");
 
 
@@ -327,6 +327,32 @@ async function main() {
   assert.equal(repDoc.is_simulation, false);
   await refused("règlement de simulation sur une facture reprise (réelle)", () => RG.createPayment({ clientId: client.id, date: day, modeKey: "VIREMENT", amount: "100", allocations: [{ invoiceId: repDoc.id, amount: "100" }] }, who), /simulation sur une facture réelle/);
   console.log("✓ reprise Sage : facture ouverte reprise avec son reste (300), idempotente, jamais soldée par un règlement de simulation");
+
+
+  // Retours de tests : nom du client corrigé sur une pièce validée (le reste reste figé), avoir financier par marque.
+  const beforeName = (await D.getDocument(faPay))!.clientSnapshot as Record<string, string>;
+  await D.renameDocumentClient(faPay, "PHARMACIE CORRIGÉE " + tag, "Changement de raison sociale", who);
+  const renamed = (await D.getDocument(faPay))!;
+  assert.equal((renamed.clientSnapshot as Record<string, string>).legalName, "PHARMACIE CORRIGÉE " + tag);
+  assert.equal((renamed.clientSnapshot as Record<string, string>).ice, beforeName.ice);
+  assert.equal(renamed.pdfAssetId, null);
+  await refused("correction sans motif", () => D.renameDocumentClient(faPay, "AUTRE", " ", who), /motif/);
+  await refused("modifier l'ICE d'une pièce validée", () => db.execute(sql`update sales_documents set client_snapshot = jsonb_set(client_snapshot, '{ice}', '"000"') where id = ${faPay}::uuid`), /plus modifiable/);
+  const brandRow = await one<{ name: string }>(sql`select name from brands where id = ${brand.id}::uuid`);
+  const avf = await D.saveDraft({ type: "AVOIR", clientId: client.id, date: day, site: "COMANET", deliveryAddress: null, salesRepId: null, paymentModeKey: null, globalDiscountPct: "0", notes: null, reasonKey: "RETOUR",
+    lines: [{ productId: null, designation: brandRow.name, quantity: "1", unitPriceHt: "500", discountPct: "0", taxRate: "20" }, { productId: null, designation: "Alphascience", quantity: "1", unitPriceHt: "250", discountPct: "0", taxRate: "20" }] }, who);
+  await refused("avoir financier avec retour en stock", () => D.validateDocument(avf, who), /sans retour en stock/);
+  const avfDoc = (await D.getDocument(avf))!;
+  await D.saveDraft({ id: avf, type: "AVOIR", clientId: client.id, date: day, site: "COMANET", deliveryAddress: null, salesRepId: null, paymentModeKey: null, globalDiscountPct: "0", notes: null, reasonKey: "REMISE_OBJECTIFS",
+    lines: avfDoc.lines.map((l) => ({ productId: null, designation: l.designation, quantity: l.quantity, unitPriceHt: l.unitPriceHt, discountPct: l.discountPct, taxRate: l.taxRate })) }, who);
+  const vAvf = await D.validateDocument(avf, who);
+  assert.ok(/^SIMAV/.test(vAvf.number), vAvf.number);
+  assert.equal((await D.getDocument(avf))!.ttc, "900.00");
+  const credit = (await RG.openCredits(client.id)).find((x) => x.id === avf)!;
+  assert.equal(credit.left, "900.00");
+  await RG.allocateCredit(avf, faPay, "400", who);
+  assert.equal((await RG.invoiceSettlement(faPay)).balance, "0.00");
+  console.log(`✓ nom du client corrigé sur ${renamed.number} (ICE et montants figés), avoir financier ${vAvf.number} par marque (900 TTC) imputé sur une facture`);
 
   const before = await getSettings();
   try {

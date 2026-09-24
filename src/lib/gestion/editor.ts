@@ -17,7 +17,7 @@ export type EditorProduct = { id: string; name: string; ref: string | null; ean:
 export async function editorData(opts: { clientIds?: string[] | null } = {}) {
   const g = (await getSettings()).gestion;
   const scope = opts.clientIds ? (opts.clientIds.length ? sql`and c.id = any(${pgArray(opts.clientIds)})` : sql`and false`) : sql``;
-  const [clients, discounts, products, modes, reps, stock, defaultRate] = await Promise.all([
+  const [clients, discounts, products, modes, reps, stock, defaultRate, brands] = await Promise.all([
     db.execute<{ id: string; name: string; legal_name: string | null; city: string | null; blocked: boolean; default_discount_pct: string | null; payment_mode_key: string | null }>(sql`
       select c.id, c.name, c.legal_name, c.city, c.blocked, c.default_discount_pct::text, c.payment_mode_key from clients c where c.active ${scope} order by c.name`),
     db.execute<{ client_id: string; brand_id: string; pct: string }>(sql`select client_id, brand_id, discount_pct::text as pct from client_brand_discounts`),
@@ -28,6 +28,7 @@ export async function editorData(opts: { clientIds?: string[] | null } = {}) {
     db.execute<{ id: string; name: string }>(sql`select id, name from users where active order by name`),
     stockState(),
     db.execute<{ rate: string }>(sql`select rate::text as rate from tax_rates where key = ${g.defaultTaxRateKey}`),
+    db.execute<{ id: string; name: string }>(sql`select id, name from brands where active and merged_into_id is null order by name`),
   ]);
   const byClient = new Map<string, Record<string, string>>();
   for (const d of discounts.rows) {
@@ -44,6 +45,7 @@ export async function editorData(opts: { clientIds?: string[] | null } = {}) {
     reps: reps.rows,
     sites: g.cutover.sites.length ? g.cutover.sites : ["COMANET"],
     defaultRate: rate,
+    brands: brands.rows,
   };
 }
 export type EditorData = Awaited<ReturnType<typeof editorData>>;

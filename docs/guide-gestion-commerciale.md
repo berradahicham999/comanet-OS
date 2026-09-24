@@ -226,7 +226,7 @@ sur le serveur Next : `/gestion/pieces/<id>/pdf`.
 | **Fiche règlement** | Imputations (désimputer, imputer le reste), suivi : remis en banque → encaissé, ou impayé (motif) ; annulé depuis le portefeuille. |
 | **Fiche facture / avoir** | Solde, règlements et avoirs imputés (un impayé est barré), « Encaisser ». Avoir : crédit restant et imputation sur une autre facture du client. |
 | **Relances** (`/gestion/relances`) | Clients avec des factures échues, niveau 1 / 2 / 3 selon le retard, message prêt (WhatsApp, e-mail) ; chaque relance est enregistrée. |
-| **Envoi au comptable** (`/gestion/exports`) | Les factures et avoirs du mois en PDF, **les mêmes que ceux des clients (sans UG)**, par ZIP de 20, et un récapitulatif Excel : journal des ventes (base et TVA par taux), TVA par taux, journal des achats, règlements, balance âgée. |
+| **Envoi au comptable** (`/gestion/exports`) | Sélection des pièces (BL, factures, avoirs) d'une période et ZIP de leurs PDF, **les mêmes que ceux des clients (sans UG)**, avec un récapitulatif CSV ; et un récapitulatif Excel du mois : journal des ventes (base et TVA par taux), TVA par taux, journal des achats, règlements, balance âgée. |
 | **Bascule** (`/gestion/bascule`) | Contrôles (bloquants et avertissements), mode (Sage fait foi → période parallèle → COMANET OS émet), reprise des factures ouvertes de Sage, rapport de contrôle mensuel (CA HT et nombre de pièces COMANET OS contre Sage, stock du journal contre la photo Sage). |
 | **Action Center** | Factures échues à relancer, effets à remettre en banque, impayés récents, rappel de bascule. |
 | **Paramètres** | Niveaux de relance (7 / 30 / 60 j), délai entre deux relances, remise des effets N jours avant échéance ; mode de paiement « encaissé à la réception ». |
@@ -257,6 +257,19 @@ sur le serveur Next : `/gestion/pieces/<id>/pdf`.
 - **Droits** : règlements = Facturation (Créer = saisir, Modifier = imputer / remettre / encaisser / relancer,
   Valider = impayé / annulation) ; envoi au comptable = Voir sur Facturation + interrupteur « Exporter des données » ;
   bascule = Administration.
+
+## Retours de tests (septembre 2026)
+
+- **BL** : le prix unitaire s'imprime en **TTC** (P.U. HT × (1 + TVA), au centime) ; le reste du BL est inchangé.
+- **Nom du client imprimé** corrigeable sur une pièce validée (fiche de la pièce, droit Valider) : motif obligatoire,
+  historique « ancien → nouveau », PDF régénéré (l'ancien reste archivé). Seule la raison sociale imprimée change —
+  client rattaché, ICE, adresse, montants et numéro restent figés par la base (migration 0030).
+- **Avoir financier** (Pièces → Avoirs → « + Avoir financier ») : sans facture ni BL, motif sans retour en stock
+  (« Remise sur objectifs » par défaut), une ligne par marque avec son montant HT. Sans effet sur le stock ni sur le
+  sell-in produit ; validé, il devient un crédit client imputable sur ses factures depuis sa fiche.
+- **Export groupé** (Envoi au comptable, ou « Sélectionner et exporter » depuis la liste des pièces) : période,
+  types (BL, factures, avoirs), cases à cocher, puis un ZIP assemblé dans le navigateur avec le PDF de chaque pièce
+  et un récapitulatif CSV (sans limite de nombre). Le récapitulatif comptable du mois reste disponible en Excel.
 
 ## Suite
 

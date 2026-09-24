@@ -472,8 +472,13 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
         touchedBLs.add(r.document_id);
       }
     }
-    if (type === "AVOIR") {
-      if (!doc.originDocumentId) throw new DocumentError("Un avoir porte sur une facture.");
+    if (type === "AVOIR" && !doc.originDocumentId) {
+      // Avoir financier (remise sur objectifs…) : ni facture ni stock ; un crédit client à imputer ensuite.
+      if (!doc.reasonKey) throw new DocumentError("Indiquez le motif de l'avoir.");
+      if (reason?.with_return) throw new DocumentError("Un avoir sans facture d'origine ne fait pas rentrer de marchandise : choisissez un motif sans retour en stock.");
+      if (doc.lines.some((l) => l.productId)) throw new DocumentError("Un avoir financier se ventile par marque ou par libellé libre, sans article.");
+    }
+    if (type === "AVOIR" && doc.originDocumentId) {
       const room = (await tx.execute<{ room: string }>(sql`
         select (f.ttc - coalesce((select sum(a.ttc) from sales_documents a where a.origin_document_id = f.id and a.type = 'AVOIR' and a.status <> 'BROUILLON'), 0))::text as room
         from sales_documents f where f.id = ${doc.originDocumentId}::uuid`)).rows[0]?.room ?? "0";
@@ -600,5 +605,31 @@ export async function importOpeningInvoices(rows: OpeningInvoice[], actor: Audit
     }
     await audit({ actor, action: "IMPORT", module: "facturation", entity: "sales_document", label: "Reprise des factures ouvertes Sage", after: { inserted, skipped: skipped.length } }, tx);
     return { inserted, skipped };
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Correction du nom du client imprimé                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Corrige le nom (raison sociale) du client imprimé sur une pièce validée — seule donnée d'une pièce
+ * figée qui se corrige (migration 0030). Client rattaché, ICE, adresse, montants et numéro ne bougent
+ * pas. Motif obligatoire, ancien et nouveau nom dans l'historique ; le PDF figé est détaché pour être
+ * régénéré (l'ancien reste archivé dans les fichiers de la pièce).
+ */
+export async function renameDocumentClient(id: string, name: string, reason: string, actor: AuditActor): Promise<void> {
+  const next = name.trim();
+  if (!next) throw new DocumentError("Indiquez le nom à imprimer.");
+  if (!reason.trim()) throw new DocumentError("Indiquez le motif de la correction.");
+  await db.transaction(async (tx) => {
+    const [d] = await tx.select().from(salesDocuments).where(eq(salesDocuments.id, id)).for("update");
+    if (!d) throw new DocumentError("Pièce introuvable.");
+    if (d.status === "BROUILLON") throw new DocumentError("Un brouillon prend le nom de la fiche client : corrigez la fiche.");
+    const snap = (d.clientSnapshot ?? {}) as Record<string, unknown>;
+    const before = String(snap.legalName ?? "");
+    if (before === next) throw new DocumentError("Le nom est inchangé.");
+    await tx.update(salesDocuments).set({ clientSnapshot: { ...snap, legalName: next }, pdfAssetId: null, updatedAt: new Date() }).where(eq(salesDocuments.id, id));
+    await audit({ actor, action: "RENAME_CLIENT", module: moduleOf(d.type as DocType), entity: "sales_document", entityId: id, label: d.number, before: { legalName: before }, after: { legalName: next, reason: reason.trim() } }, tx);
   });
 }
