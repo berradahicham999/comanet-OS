@@ -153,6 +153,19 @@ export type GestionSettings = {
     /** Écart de prix toléré (%) entre facture fournisseur et réception avant de le signaler. */
     priceGapTolerancePct: number;
   };
+  /** Inventaires (lot 4) : alertes et analyse des écarts. */
+  inventory: {
+    /** Comptage commencé depuis plus de N jours sans être validé ni annulé. */
+    staleCountDays: number;
+    /** Aucun inventaire validé depuis plus de N jours (dès qu'il y a du stock au journal). */
+    maxDaysWithoutCount: number;
+    /** Un écart apparaît dans au moins N inventaires validés : écart récurrent. */
+    recurringCount: number;
+    /** Piste « BL tardif » : BL validé plus de N heures après sa date. */
+    lateEntryHours: number;
+    /** Fenêtre (jours) de l'analyse des écarts quand il n'y a pas d'inventaire précédent. */
+    analysisWindowDays: number;
+  };
 };
 
 export const EMPTY_COMPANY: CompanyIdentity = {
@@ -176,6 +189,7 @@ export const DEFAULT_GESTION: GestionSettings = {
   shareLinkDays: 30,
   uninvoicedAlertDays: 15,
   purchases: { lateOrderGraceDays: 7, uninvoicedReceptionDays: 30, priceGapTolerancePct: 0 },
+  inventory: { staleCountDays: 7, maxDaysWithoutCount: 365, recurringCount: 2, lateEntryHours: 48, analysisWindowDays: 180 },
 };
 
 /**
@@ -526,6 +540,7 @@ export function mergeGestion(stored: Partial<GestionSettings> | null | undefined
     cutover: { ...d.cutover, ...(stored.cutover ?? {}) },
     amountWords: { ...d.amountWords, ...(stored.amountWords ?? {}) },
     purchases: { ...d.purchases, ...(stored.purchases ?? {}) },
+    inventory: { ...d.inventory, ...(stored.inventory ?? {}) },
   };
 }
 

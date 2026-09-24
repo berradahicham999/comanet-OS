@@ -6,6 +6,7 @@ const ACTION_LABELS: Record<string, string> = {
   BLOCK: "Blocage", UNBLOCK: "Déblocage", ADD_ADDRESS: "Adresse de livraison ajoutée", REMOVE_ADDRESS: "Adresse de livraison retirée",
   BRAND_DISCOUNT: "Remise par marque", SET_NEXT_NUMBER: "Prochain numéro réglé", MOVEMENT: "Mouvement de stock", SETTINGS: "Paramètres",
   VALIDATE: "Validation", DELIVER: "Livraison confirmée", CANCEL: "Annulation", APPROVAL_REQUESTED: "Déblocage demandé",
+  START: "Démarrage du comptage", ZERO_UNCOUNTED: "Non comptés mis à zéro", CLOSE: "Solde",
 };
 
 /** Libellés des champs pour un historique lisible. */

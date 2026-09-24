@@ -29,7 +29,7 @@ npm run db:push        # pousse le schéma sans migration (dev uniquement)
 npm run db:studio
 npm run agent:tool -- <outil> '<json>'   # pont CLI de l'Agent marketing (lecture seule, données réelles)
 GESTION_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/gestion-integration.ts
-                                         # intégration gestion commerciale (journal, numérotation, ventes, achats) — jamais sur la prod
+                                         # intégration gestion commerciale (journal, numérotation, ventes, achats, inventaires) — jamais sur la prod
 ```
 
 Variables d'environnement : `DATABASE_URL`, `DATABASE_SSL`, `SESSION_SECRET`, `SETUP_KEY`,
@@ -61,7 +61,7 @@ drizzle/              migrations SQL + meta/_journal.json
 Modules : Cockpit, Action Center, Ventes, Clients, Produits, Marques, Stock,
 **Marketing** (vue d'ensemble, campagnes, Digital Ads, Influence, planning éditorial, activations, matériel, budgets, analytics, agent marketing),
 Terrain (animations, animatrices, saisie), Réglementaire, Tâches, Imports, Paramètres,
-**Gestion commerciale** (préparation de la bascule, stock réel, fournisseurs, pièces de vente : BL, factures, avoirs, PDF ; achats : commandes, réceptions, factures fournisseurs, retours ; inventaires, règlements à venir).
+**Gestion commerciale** (préparation de la bascule, stock réel, fournisseurs, pièces de vente : BL, factures, avoirs, PDF ; achats : commandes, réceptions, factures fournisseurs, retours ; inventaires ; règlements à venir).
 
 ---
 
@@ -111,6 +111,7 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Stock réel de l'entrepôt (journal de mouvements, lots, péremption, dépôts externes par photo) | `src/lib/gestion/ledger.ts` + `ledger-shared.ts` | `recordStockMovements()` (seule écriture), `stockState()`, `listMovements()`, `reverseImportMovements()`, `movementError()`, `allocateFefo()`, `expiryStatus()` |
 | Journal d'audit (qui a créé, modifié, archivé quoi) | `src/lib/audit.ts` | `audit()` (seule écriture de `audit_logs`), `changedFields()`, `auditTrail()` |
 | Pièce d'achat (montants en devise et en MAD, frais d'approche, coût de revient, rapprochement, cycle) | `src/lib/gestion/purchases-shared.ts` + `purchases.ts` | `computePurchase()`, `allocateLandedCosts()`, `unitCostMad()`, `invoiceGaps()`, `validatePurchase()` (seule validation, seule entrée d'achat en stock) |
+| Inventaire (théorique figé, compté, écart, fiabilité, pistes d'explication) | `src/lib/gestion/counts-shared.ts` + `counts.ts` | `countedByLine()`, `lineGap()`, `countStats()`, `gapLeads()`, `recurringGaps()`, `validateCount()` (seule validation, seuls ajustements d'inventaire) |
 | Client prêt à facturer, doublons de clients | `src/lib/gestion/clients-shared.ts` + `clients.ts` | `billingReadiness()`, `duplicateCandidates()`, `createClient()`, `updateClientLegal()`, `clientLinks()` |
 
 `tests/definitions-uniques.test.ts` échoue si une seconde définition réapparaît.
@@ -203,6 +204,12 @@ coût de revient (prix × taux + frais d'approche répartis, `purchases-shared.t
 facture fournisseur est rapprochée des réceptions (écarts signalés, jamais corrigés). Matériel marketing via
 `recordMovement()`. `productStocks()` : commandes en cours = reste à recevoir des commandes ouvertes. Droits : module
 `achats` ; réception et retour aussi par `stock` (Magasin).
+Lot 4 livré : inventaires. `stock_counts` + `stock_count_lines` (théorique et CMUP figés au démarrage) +
+`stock_count_entries` (une saisie par compteur, sommées) + `count_gap_reasons` ; seul `src/lib/gestion/counts.ts` les
+écrit (`validateCount()` : motif obligatoire, un AJUSTEMENT_INVENTAIRE par écart, numéro INV). Non compté ≠ zéro. Écart,
+fiabilité et pistes (`counts-shared.ts` : `lineGap()`, `countStats()`, `gapLeads()` — donnée ≠ hypothèse). Comptage
+mobile avec scan (BarcodeDetector) ; à l'aveugle, le théorique ne quitte pas le serveur. Droits : `stock` (Créer =
+compter, Valider = valider).
 
 **Permissions modulaires par utilisateur** (`docs/permissions-modulaires.md`). Chaque compte porte
 sa propre matrice `user_permissions` (17 modules × Voir / Créer / Modifier / Valider), une portée

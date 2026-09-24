@@ -9,7 +9,7 @@ import { fmtMoney } from "@/lib/gestion/money";
 import { iso, today, fmtDate } from "@/lib/format";
 import { PageHeader, Card, Badge, Tabs } from "@/components/ui";
 import {
-  saveCompanyAction, uploadCompanyFileAction, savePoliciesAction, saveTaxRateAction, savePaymentModeAction, saveWarehouseAction, saveSeriesAction, setNextNumberAction, saveCreditReasonAction,
+  saveCompanyAction, uploadCompanyFileAction, savePoliciesAction, saveTaxRateAction, savePaymentModeAction, saveWarehouseAction, saveSeriesAction, setNextNumberAction, saveCreditReasonAction, saveGapReasonAction,
 } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +20,7 @@ export default async function GestionSettingsPage(props: { searchParams: Promise
   const sp = await props.searchParams;
   const thisYear = Number(iso(today()).slice(0, 4));
   const year = Number(sp.year) >= 2020 && Number(sp.year) <= 2100 ? Number(sp.year) : thisYear;
-  const [settings, refs, series, files, usage, reasons] = await Promise.all([
+  const [settings, refs, series, files, usage, reasons, gapReasonRows] = await Promise.all([
     getSettings(), gestionRefs(), listSeries(year),
     db.execute<{ slot: string; version: number; created_at: Date }>(sql`select distinct on (company_slot) company_slot as slot, version, created_at from content_assets where company_slot is not null order by company_slot, version desc`),
     db.execute<{ kind: string; key: string; n: number }>(sql`
@@ -28,7 +28,9 @@ export default async function GestionSettingsPage(props: { searchParams: Promise
       union all select 'mode', payment_mode_key, count(*)::int from clients where payment_mode_key is not null group by payment_mode_key
       union all select 'wh', warehouse_key, count(*)::int from stock_movements group by warehouse_key`),
     listCreditReasons(),
+    db.execute<{ key: string; label: string; sort: number; active: boolean }>(sql`select key, label, sort, active from count_gap_reasons order by sort, key`),
   ]);
+  const gapReasons = gapReasonRows.rows;
   const g = settings.gestion;
   const used = new Map(usage.rows.map((u) => [`${u.kind}:${u.key}`, u.n]));
   const file = new Map(files.rows.map((f) => [f.slot, f]));
@@ -103,6 +105,9 @@ export default async function GestionSettingsPage(props: { searchParams: Promise
           <label className="block"><span className="label block mb-1">Commande en retard après (jours)</span><input name="lateOrderGraceDays" defaultValue={g.purchases.lateOrderGraceDays} className="input h-9" inputMode="numeric" /><span className="text-[11px] text-faint">Délai de grâce après la livraison attendue</span></label>
           <label className="block"><span className="label block mb-1">Réception sans facture (jours)</span><input name="uninvoicedReceptionDays" defaultValue={g.purchases.uninvoicedReceptionDays} className="input h-9" inputMode="numeric" /></label>
           <label className="block"><span className="label block mb-1">Écart de prix toléré, achats (%)</span><input name="priceGapTolerancePct" defaultValue={g.purchases.priceGapTolerancePct} className="input h-9" inputMode="decimal" /><span className="text-[11px] text-faint">Facture fournisseur ↔ réception</span></label>
+          <label className="block"><span className="label block mb-1">Comptage ouvert trop longtemps (jours)</span><input name="staleCountDays" defaultValue={g.inventory.staleCountDays} className="input h-9" inputMode="numeric" /></label>
+          <label className="block"><span className="label block mb-1">Délai maximal sans inventaire (jours)</span><input name="maxDaysWithoutCount" defaultValue={g.inventory.maxDaysWithoutCount} className="input h-9" inputMode="numeric" /></label>
+          <label className="block"><span className="label block mb-1">Écart récurrent à partir de (inventaires)</span><input name="recurringCount" defaultValue={g.inventory.recurringCount} className="input h-9" inputMode="numeric" /></label>
           <label className="flex items-center gap-2 pt-5"><input type="checkbox" name="requireDelivered" defaultChecked={g.requireDelivered} /> Exiger « Livré » avant de facturer un BL</label>
           <label className="flex items-center gap-2 pt-5"><input type="checkbox" name="checkCreditLimit" defaultChecked={g.checkCreditLimit} /> Contrôler le plafond d&apos;encours</label>
           <div className="sm:col-span-2 lg:col-span-4 flex flex-wrap items-center gap-3">
@@ -180,6 +185,27 @@ export default async function GestionSettingsPage(props: { searchParams: Promise
             <button className="btn-primary btn-sm text-[11px]" type="submit">Ajouter</button>
           </form>
           <p className="text-[11px] text-faint pt-1">Un motif « retour en stock » fait rentrer la marchandise au dépôt choisi sur chaque ligne de l&apos;avoir.</p>
+        </div>
+      </Card>
+
+      <Card title="Motifs d'écart d'inventaire" className="mb-4">
+        <div id="motifs-ecart" className="space-y-1 text-[12.5px] scroll-mt-20">
+          {gapReasons.map((r) => (
+            <form key={r.key} action={saveGapReasonAction} className="grid grid-cols-[50px_1fr_40px_44px] items-center gap-1">
+              <input type="hidden" name="key" value={r.key} />
+              <input name="sort" defaultValue={r.sort} className="input h-8 text-[12px]" />
+              <input name="label" defaultValue={r.label} className="input h-8 text-[12px]" />
+              <label className="text-center" title="Actif"><input type="checkbox" name="active" defaultChecked={r.active} /></label>
+              <button className="btn-ghost btn-sm text-[11px]" type="submit">OK</button>
+            </form>
+          ))}
+          <form action={saveGapReasonAction} className="grid grid-cols-[50px_1fr_40px_auto] items-center gap-1 pt-1">
+            <input name="sort" defaultValue={gapReasons.length * 10 + 10} className="input h-8 text-[12px]" />
+            <input name="label" placeholder="Libellé du motif" className="input h-8 text-[12px]" required />
+            <label className="text-center"><input type="checkbox" name="active" defaultChecked /></label>
+            <button className="btn-primary btn-sm text-[11px]" type="submit">Ajouter</button>
+          </form>
+          <p className="text-[11px] text-faint pt-1">Chaque écart d&apos;inventaire porte un motif : ils nourrissent l&apos;analyse des écarts récurrents.</p>
         </div>
       </Card>
 

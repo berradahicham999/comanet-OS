@@ -178,6 +178,41 @@ sur le serveur Next : `/gestion/pieces/<id>/pdf`.
 - **Garde-fous ajoutés.** Un fournisseur qui a des pièces s'archive, il ne se supprime pas ; un article sur une pièce
   (vente ou achat) ne se fusionne plus ; la réinitialisation du classeur est refusée dès qu'une pièce existe.
 
+## Lot 4 — inventaires (livré)
+
+### Ce que l'on trouve dans l'application
+
+| Écran | Rôle |
+|---|---|
+| **Gestion commerciale → Inventaires** (`/gestion/inventaires`) | Liste des inventaires (statut, fiabilité, écart net) et préparation : nom, date, dépôt interne, marques (aucune = tout le stock), à l'aveugle ou non, consignes. |
+| **Fiche d'un inventaire** | Préparation modifiable puis **Démarrer** (fige le théorique). En cours : compteurs et nombre de saisies, **rapprochement** (théorique, compté, écart en quantité / valeur / %, motif et commentaire enregistrés à chaque choix ; filtres écarts / non comptés), « Non comptés → 0 », **Valider** ou Annuler. Validé : fiabilité, écarts et **pistes d'explication**. |
+| **Compter** (téléphone) | Scan du code-barres à la caméra (Chrome Android), douchette ou saisie de l'EAN, ou recherche par nom ; choix du lot (ou « autre lot » avec péremption) ; quantité ; « Mes saisies » avec retrait. À l'aveugle, aucun théorique n'est envoyé à l'écran. |
+| **Paramètres → Gestion commerciale** | Motifs d'écart (référentiel modifiable), comptage ouvert trop longtemps, délai maximal sans inventaire, seuil d'écart récurrent. |
+| **Action Center** | Inventaire ouvert trop longtemps, pas d'inventaire récent, écarts récurrents. |
+
+### Règles
+
+- **Cycle.** En préparation → Comptage en cours (théorique et CMUP de chaque article × lot du périmètre figés au
+  démarrage ; un article sans stock a une ligne à 0) → Validé (numéro INV sans trou) ou Annulé. Un inventaire clos est
+  figé par la base (migration 0028). Seul `src/lib/gestion/counts.ts` écrit les inventaires (test).
+- **Plusieurs compteurs** : chaque saisie est une ligne (compteur, heure) ; le compté d'une ligne est la **somme** des
+  saisies (lot comparé sans casse). Un article ou un lot trouvé en rayon sans théorique crée sa ligne.
+- **Non compté ≠ zéro.** Une ligne sans saisie n'est ni juste ni fausse : elle n'est pas ajustée. « Non comptés → 0 »
+  seulement si le rayon a été vérifié vide.
+- **Validation** (droit Valider sur Stock) : chaque écart exige un motif ; chaque ligne comptée en écart devient un
+  mouvement **AJUSTEMENT_INVENTAIRE** (quantité = écart, sur son lot, à la date du comptage, au CMUP : l'ajustement
+  ne modifie pas le CMUP).
+- **Fiabilité** (`countStats()`) : part des lignes comptées sans écart, et 1 − |écarts| ÷ valeur théorique ; l'écart
+  net et l'écart en valeur absolue sont affichés tous les deux (un net nul peut cacher deux écarts).
+- **Pistes d'explication** (`gapLeads()`) : chaque piste sépare la **donnée** (fait mesuré) de l'**hypothèse** ; une
+  piste n'apparaît que si sa donnée existe et va dans le sens de l'écart. Manquant : BL daté au plus tard du jour du
+  comptage mais validé après son démarrage, BL validés en retard, échantillons remis aux délégués sans sortie au
+  journal, lot périmé. Surplus : réception validée après le démarrage, commande ouverte (livraison non réceptionnée),
+  avoir « sans retour ». Dans les deux sens : mouvements pendant le comptage. S'y ajoutent l'écart rapporté aux
+  sorties de la période (depuis l'inventaire précédent) et le nombre d'inventaires où l'article était déjà en écart.
+- **Droits** : préparer, démarrer et compter = Créer sur Stock ; valider, annuler, motifs et « non comptés → 0 » =
+  Valider sur Stock. À l'aveugle, seul qui valide voit le théorique.
+
 ## À venir
 
-Lot 4 (inventaires), lot 5 (règlements, bascule, exports comptables) — voir le plan.
+Lot 5 (règlements, bascule, exports comptables) — voir le plan.

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { creditReasons, paymentModes, taxRates, warehouses } from "@/db/schema";
+import { countGapReasons, creditReasons, paymentModes, taxRates, warehouses } from "@/db/schema";
 import { requireAdmin } from "@/lib/access";
 import { audit } from "@/lib/audit";
 import { getSettings, saveSettings, type CompanyIdentity, type GestionSettings } from "@/lib/settings";
@@ -87,6 +87,12 @@ export async function savePoliciesAction(fd: FormData) {
         uninvoicedReceptionDays: intOrNull(fd, "uninvoicedReceptionDays", "Alerte réceptions sans facture", 1, 365) ?? g.purchases.uninvoicedReceptionDays,
         priceGapTolerancePct: Number(decimalOrNull(fd, "priceGapTolerancePct", "Tolérance d'écart de prix", 2, { min: 0, maxExclusive: 100 }) ?? g.purchases.priceGapTolerancePct),
       },
+      inventory: {
+        ...g.inventory,
+        staleCountDays: intOrNull(fd, "staleCountDays", "Comptage en cours trop long", 1, 90) ?? g.inventory.staleCountDays,
+        maxDaysWithoutCount: intOrNull(fd, "maxDaysWithoutCount", "Délai maximal sans inventaire", 30, 730) ?? g.inventory.maxDaysWithoutCount,
+        recurringCount: intOrNull(fd, "recurringCount", "Écarts récurrents", 2, 10) ?? g.inventory.recurringCount,
+      },
     };
   } catch (e) {
     back("politiques", `error=${errorParam(e)}`);
@@ -147,6 +153,22 @@ export async function saveCreditReasonAction(fd: FormData) {
   }
   revalidatePath(PAGE);
   back("motifs");
+}
+
+export async function saveGapReasonAction(fd: FormData) {
+  const user = await requireAdmin();
+  try {
+    const label = str(fd, "label");
+    const key = str(fd, "key") ?? (label ? refKey(label) : null);
+    if (!key || !label) throw new Error("Libellé obligatoire.");
+    const values = { label, sort: intOrNull(fd, "sort", "Ordre", 0, 999) ?? 0, active: bool(fd, "active") };
+    await db.insert(countGapReasons).values({ key, ...values }).onConflictDoUpdate({ target: countGapReasons.key, set: values });
+    await audit({ actor: actorOf(user), action: "SETTINGS", module: "administration", entity: "count_gap_reason", label: key, after: values });
+  } catch (e) {
+    back("motifs-ecart", `error=${errorParam(e)}`);
+  }
+  revalidatePath(PAGE);
+  back("motifs-ecart");
 }
 
 export async function saveWarehouseAction(fd: FormData) {

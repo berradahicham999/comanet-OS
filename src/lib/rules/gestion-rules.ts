@@ -181,4 +181,79 @@ export const uninvoicedReceptionsRule: Rule = {
   },
 };
 
-export const gestionRules: Rule[] = [uninvoicedBLRule, approvalPendingRule, expiringLotsRule, lateOrdersRule, uninvoicedReceptionsRule];
+/** Comptage ouvert depuis trop longtemps : le théorique figé vieillit, les écarts perdent leur sens. */
+export const staleCountRule: Rule = {
+  id: "gestion-inventaire-ouvert",
+  label: "Inventaire ouvert depuis trop longtemps",
+  description: "Comptage démarré depuis plus de N jours sans validation ni annulation (settings.gestion.inventory.staleCountDays).",
+  async run({ settings, now }) {
+    const days = settings.gestion.inventory.staleCountDays;
+    const rows = (await db.execute<{ id: string; title: string; started: string; entries: number }>(sql`
+      select c.id, c.title, c.started_at::date::text as started, (select count(*)::int from stock_count_entries e where e.count_id = c.id) as entries
+      from stock_counts c where c.status = 'EN_COURS' and c.started_at < ${new Date(now.getTime() - days * 86400000).toISOString()}::timestamptz`)).rows;
+    return rows.map((r): Recommendation => ({
+      key: `gestion-inventaire-ouvert:${r.id}`, rule: "gestion-inventaire-ouvert", category: "GESTION", priority: "HIGH",
+      title: `${r.title} — comptage ouvert depuis le ${fmtDate(r.started)}`,
+      facts: [{ label: "Saisies", value: fmtNum(r.entries) }],
+      why: `Le stock théorique a été figé le ${fmtDate(r.started)} ; depuis, BL et réceptions continuent de le faire bouger. Plus le comptage reste ouvert, plus ses écarts mélangent vrais manquants et flux normaux.`,
+      action: "Terminer le comptage et valider l'inventaire (motif sur chaque écart), ou l'annuler et en relancer un sur un périmètre plus court.",
+      task: { title: `Clore l'inventaire « ${r.title} »`, dueInDays: 2, role: "ADMIN", priority: "HIGH" },
+      entity: { type: "document", id: r.id, href: `/gestion/inventaires/${r.id}` },
+    }));
+  },
+};
+
+/** Aucun inventaire validé depuis trop longtemps alors que le journal porte du stock. */
+export const noRecentCountRule: Rule = {
+  id: "gestion-sans-inventaire",
+  label: "Pas d'inventaire récent",
+  description: "Du stock est suivi au journal mais aucun inventaire n'a été validé depuis plus de N jours (settings.gestion.inventory.maxDaysWithoutCount).",
+  async run({ settings, now }) {
+    const days = settings.gestion.inventory.maxDaysWithoutCount;
+    const r = (await db.execute<{ last: string | null; first: string | null; open: number }>(sql`
+      select (select max(count_date)::text from stock_counts where status = 'VALIDE') as last,
+        (select min(date)::text from stock_movements) as first,
+        (select count(*)::int from stock_counts where status in ('BROUILLON', 'EN_COURS')) as open`)).rows[0];
+    if (!r?.first || r.open > 0) return [];
+    const ref = r.last ?? r.first;
+    const age = Math.round((now.getTime() - new Date(`${ref}T12:00:00Z`).getTime()) / 86400000);
+    if (age <= days) return [];
+    return [{
+      key: `gestion-sans-inventaire:${iso(now).slice(0, 7)}`, rule: "gestion-sans-inventaire", category: "GESTION", priority: "MEDIUM",
+      title: r.last ? `Dernier inventaire validé il y a ${age} jours` : `Aucun inventaire depuis le début du journal (${age} jours)`,
+      facts: [{ label: r.last ? "Dernier inventaire" : "Premier mouvement", value: fmtDate(ref) }],
+      why: "Le stock du journal n'a pas été confronté au rayon depuis longtemps : casse, périmés détruits et erreurs de saisie s'accumulent sans être vus.",
+      action: "Préparer un inventaire, au moins tournant sur les marques qui tournent le plus (Gestion commerciale → Inventaires).",
+      task: { title: "Préparer un inventaire", dueInDays: 14, role: "ADMIN" },
+      entity: { type: "document", id: "inventaires", href: "/gestion/inventaires" },
+    }];
+  },
+};
+
+/** Articles en écart dans plusieurs inventaires validés. */
+export const recurringGapsRule: Rule = {
+  id: "gestion-ecarts-recurrents",
+  label: "Écarts d'inventaire récurrents",
+  description: "Article en écart dans au moins N inventaires validés (settings.gestion.inventory.recurringCount).",
+  async run({ settings }) {
+    const min = settings.gestion.inventory.recurringCount;
+    const rows = (await db.execute<{ product_id: string; name: string; brand_id: string | null; n: number; net: string; value: string | null }>(sql`
+      select l.product_id, p.name, p.brand_id, count(distinct l.count_id)::int as n, sum(l.gap_qty)::text as net, sum(l.gap_value)::text as value
+      from stock_count_lines l join stock_counts c on c.id = l.count_id join products p on p.id = l.product_id
+      where c.status = 'VALIDE' and l.gap_qty is not null and l.gap_qty <> 0
+      group by l.product_id, p.name, p.brand_id having count(distinct l.count_id) >= ${min} order by count(distinct l.count_id) desc limit 15`)).rows;
+    return rows.map((r): Recommendation => ({
+      key: `gestion-ecarts-recurrents:${r.product_id}`, rule: "gestion-ecarts-recurrents", category: "GESTION", priority: Number(r.net) < 0 ? "HIGH" : "MEDIUM",
+      title: `${r.name} — en écart dans ${r.n} inventaires`,
+      facts: [{ label: "Écart cumulé", value: `${fmtNum(Number(r.net))} u.` }, ...(r.value ? [{ label: "Valeur cumulée", value: fmtMAD(r.value) }] : [])],
+      why: `Le même article ressort en écart à chaque inventaire : ce n'est plus une erreur de comptage isolée mais un flux qui n'est pas saisi (échantillons, casse, BL tardifs) ou une fragilité de stockage.`,
+      action: "Ouvrir les pistes d'explication du dernier inventaire, suivre cet article en inventaire tournant mensuel et revoir qui le sort du stock.",
+      task: { title: `Comprendre les écarts sur ${r.name}`, dueInDays: 7, role: "ADMIN" },
+      entity: { type: "product", id: r.product_id, href: `/produits/${r.product_id}` },
+      brandId: r.brand_id,
+      score: Math.abs(Number(r.value ?? 0)),
+    }));
+  },
+};
+
+export const gestionRules: Rule[] = [uninvoicedBLRule, approvalPendingRule, expiringLotsRule, lateOrdersRule, uninvoicedReceptionsRule, staleCountRule, noRecentCountRule, recurringGapsRule];

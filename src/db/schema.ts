@@ -1182,6 +1182,94 @@ export const landedCosts = pgTable(
 );
 
 /* ------------------------------------------------------------------ */
+/* Gestion commerciale — inventaires (lot 4)                           */
+/* ------------------------------------------------------------------ */
+
+/** Motifs d'écart d'inventaire (modifiables dans /parametres/gestion). */
+export const countGapReasons = pgTable("count_gap_reasons", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  sort: integer("sort").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+});
+
+/**
+ * Session d'inventaire : un dépôt interne, un périmètre de marques (vide = tout), comptage à
+ * l'aveugle ou non. Au démarrage, le théorique et le CMUP de chaque article × lot sont figés ; à la
+ * validation, chaque écart devient un mouvement AJUSTEMENT_INVENTAIRE. Seul
+ * `src/lib/gestion/counts.ts` écrit ces tables ; un inventaire validé est figé par la base.
+ */
+export const stockCounts = pgTable(
+  "stock_counts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    number: text("number"),
+    seriesKey: text("series_key").references(() => documentSeries.key, { onDelete: "restrict", onUpdate: "cascade" }),
+    fiscalYear: integer("fiscal_year"),
+    title: text("title").notNull(),
+    status: text("status").notNull().default("BROUILLON"),
+    warehouseKey: text("warehouse_key").notNull().default("PRINCIPAL").references(() => warehouses.key, { onUpdate: "cascade" }),
+    brandIds: jsonb("brand_ids").$type<string[]>().notNull().default([]),
+    /** À l'aveugle : les compteurs ne voient pas le théorique. */
+    blind: boolean("blind").notNull().default(true),
+    countDate: date("count_date").notNull(),
+    notes: text("notes"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    startedById: uuid("started_by_id"),
+    validatedAt: timestamp("validated_at", { withTimezone: true }),
+    validatedById: uuid("validated_by_id"),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelReason: text("cancel_reason"),
+    /** Chiffres figés à la validation : lignes, écarts, fiabilité, valeurs. */
+    stats: jsonb("stats"),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("stock_counts_number_uq").on(t.number).where(sql`number is not null`), index("stock_counts_status_idx").on(t.status, t.countDate)],
+);
+
+export const stockCountLines = pgTable(
+  "stock_count_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    countId: uuid("count_id").notNull().references(() => stockCounts.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
+    lotNumber: text("lot_number"),
+    expiryDate: date("expiry_date"),
+    theoreticalQty: numeric("theoretical_qty", { precision: 12, scale: 3 }).notNull().default("0"),
+    cmup: numeric("cmup", { precision: 14, scale: 4 }),
+    countedQty: numeric("counted_qty", { precision: 12, scale: 3 }),
+    gapQty: numeric("gap_qty", { precision: 12, scale: 3 }),
+    gapValue: numeric("gap_value", { precision: 14, scale: 2 }),
+    reasonKey: text("reason_key").references(() => countGapReasons.key, { onUpdate: "cascade" }),
+    comment: text("comment"),
+    /** Article ou lot trouvé en rayon sans théorique (créé par une saisie). */
+    addedDuringCount: boolean("added_during_count").notNull().default(false),
+  },
+  (t) => [
+    uniqueIndex("stock_count_lines_uq").on(t.countId, t.productId, sql`coalesce(${t.lotNumber}, '')`),
+    index("stock_count_lines_product_idx").on(t.productId),
+  ],
+);
+
+export const stockCountEntries = pgTable(
+  "stock_count_entries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    countId: uuid("count_id").notNull().references(() => stockCounts.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
+    lotNumber: text("lot_number"),
+    expiryDate: date("expiry_date"),
+    quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
+    counterId: uuid("counter_id").references(() => users.id, { onDelete: "set null" }),
+    counterName: text("counter_name"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("stock_count_entries_count_idx").on(t.countId, t.productId)],
+);
+
+/* ------------------------------------------------------------------ */
 /* Terrain : animations & saisies animatrices                          */
 /* ------------------------------------------------------------------ */
 
