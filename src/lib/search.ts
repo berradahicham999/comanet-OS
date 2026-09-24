@@ -13,6 +13,8 @@ export type SearchResult = {
   regulatory: SearchHit[]; campaigns: SearchHit[]; contents: SearchHit[]; users: SearchHit[];
   /** Pièces de vente par numéro : bons de livraison (module livraisons), factures et avoirs (module facturation). */
   deliveries?: SearchHit[]; invoices?: SearchHit[];
+  /** Achats (module achats) : pièces par numéro ou référence du fournisseur, et fournisseurs. */
+  purchases?: SearchHit[]; suppliers?: SearchHit[];
 };
 
 const EMPTY: SearchResult = { products: [], clients: [], brands: [], tasks: [], regulatory: [], campaigns: [], contents: [], users: [] };
@@ -23,7 +25,8 @@ export async function searchEntities(q: string, limit = 10): Promise<SearchResul
   const like = `%${key}%`;
   type R = Record<string, string | number | null>;
   const rows = async (query: ReturnType<typeof sql>) => ((await db.execute(query).catch(() => ({ rows: [] }))).rows as R[]);
-  const [products, clients, brands, tasks, regs, campaigns, contents, users, pieces] = await Promise.all([
+  const up = `%${q.trim().toUpperCase()}%`;
+  const [products, clients, brands, tasks, regs, campaigns, contents, users, pieces, purchases, suppliers] = await Promise.all([
     rows(sql`select p.id, p.name, p.sku, b.name as brand from products p left join brands b on b.id = p.brand_id where p.name_key like ${like} or p.sku like ${like} or exists (select 1 from product_aliases a where a.product_id = p.id and a.alias like ${like}) order by p.name limit ${limit}`),
     rows(sql`select c.id, c.name, c.city, c.code from clients c where c.name_key like ${like} or upper(coalesce(c.city,'')) like ${like} or upper(coalesce(c.code,'')) like ${like} or exists (select 1 from client_aliases a where a.client_id = c.id and a.alias like ${like}) order by c.name limit ${limit}`),
     rows(sql`select id, name from brands where active and (upper(name) like ${like} or exists (select 1 from jsonb_array_elements_text(aliases) a where upper(a) like ${like})) limit ${limit}`),
@@ -34,6 +37,9 @@ export async function searchEntities(q: string, limit = 10): Promise<SearchResul
     rows(sql`select u.id, u.name, u.role::text as role from users u where u.active and upper(u.name) like ${like} order by u.name limit ${limit}`),
     rows(sql`select d.id, d.type, d.number, d.date::text as date, d.ttc::text as ttc, d.client_id, c.name as client from sales_documents d join clients c on c.id = d.client_id
       where d.number is not null and upper(d.number) like ${`%${q.trim().toUpperCase()}%`} order by d.date desc limit ${limit * 2}`),
+    rows(sql`select d.id, d.type, d.number, d.supplier_ref, d.date::text as date, d.net_ht_mad::text as net, s.legal_name as supplier from purchase_documents d join suppliers s on s.id = d.supplier_id
+      where d.number is not null and (upper(d.number) like ${up} or upper(coalesce(d.supplier_ref, '')) like ${up}) order by d.date desc limit ${limit}`),
+    rows(sql`select id, legal_name, city, currency from suppliers where name_key like ${like} or upper(coalesce(code, '')) like ${up} or coalesce(ice, '') like ${up} order by legal_name limit ${limit}`),
   ]);
   const s = (v: unknown) => (v === null || v === undefined ? null : String(v));
   return {
@@ -47,6 +53,8 @@ export async function searchEntities(q: string, limit = 10): Promise<SearchResul
     users: users.map((r) => ({ id: String(r.id), label: String(r.name), sub: s(r.role), href: `/parametres/utilisateurs` })),
     deliveries: pieces.filter((r) => r.type === "BL").map(pieceHit),
     invoices: pieces.filter((r) => r.type !== "BL").map(pieceHit),
+    purchases: purchases.map((r) => ({ id: String(r.id), label: String(r.number), sub: [s(r.supplier), r.supplier_ref ? `réf. ${r.supplier_ref}` : null, s(r.date), `${r.net} MAD HT`].filter(Boolean).join(" · "), href: `/gestion/achats/${r.id}` })),
+    suppliers: suppliers.map((r) => ({ id: String(r.id), label: String(r.legal_name), sub: [s(r.city), s(r.currency)].filter(Boolean).join(" · ") || null, href: `/gestion/fournisseurs/${r.id}` })),
   };
 }
 

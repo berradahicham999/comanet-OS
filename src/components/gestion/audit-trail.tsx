@@ -16,6 +16,7 @@ const FIELD_LABELS: Record<string, string> = {
   creditLimit: "plafond d'encours", type: "type", blocked: "blocage", reason: "motif", code: "code", nature: "nature", currency: "devise",
   country: "pays", notes: "notes", brandIds: "marques", pct: "remise", next: "prochain numéro", ean: "EAN", kind: "nature",
   taxRateKey: "TVA", unit: "unité", packSize: "colisage", trackLots: "suivi des lots", address: "adresse",
+  lines: "lignes", netHtMad: "HT MAD", netHt: "net HT", ttc: "TTC",
 };
 
 const show = (v: unknown) => (v === null || v === undefined || v === "" ? "—" : Array.isArray(v) ? `${v.length} élément(s)` : typeof v === "object" ? "…" : String(v));

@@ -131,12 +131,53 @@ s'efface pas.
 
 ### Vérifier sur une base jetable
 
-Le script d'intégration couvre aussi les pièces : BL avec sortie FEFO et UG, remise bloquée puis levée, stock
+Le script d'intégration couvre aussi les pièces de vente : BL avec sortie FEFO et UG, remise bloquée puis levée, stock
 insuffisant, facture regroupée, immutabilité (UPDATE / DELETE refusés par la base), double facturation refusée,
 avoir avec retour en stock, annulation de BL, aucune projection hors mode ACTIF. Le PDF (module ESM) se vérifie
 sur le serveur Next : `/gestion/pieces/<id>/pdf`.
 
+## Lot 3 — achats (livré)
+
+### Ce que l'on trouve dans l'application
+
+| Écran | Rôle |
+|---|---|
+| **Gestion commerciale → Achats** (`/gestion/achats`) | Onglets Commandes / Réceptions / Factures fournisseurs / Retours ; montants en devise et en dirhams ; commandes en retard signalées. |
+| **+ Commande** | Fournisseur, devise, **taux saisi sur la pièce** (jamais deviné, 1 refusé pour une devise), livraison attendue, lignes article / matériel marketing / ligne libre. Le dernier prix payé à ce fournisseur dans cette devise est proposé. PDF « Bon de commande » et e-mail pré-rempli au fournisseur. |
+| **Réceptionner** (depuis une commande) ou **+ Réception sans commande** | Reste à recevoir repris, quantités ajustables (réception partielle), lot et péremption (obligatoire pour un article suivi par lot), dépôt interne, **frais d'approche** (transport, douane, transit) répartis à la valeur ou à la quantité, coût de revient unitaire en direct. PDF « Bon de réception ». |
+| **Facturer des réceptions** (`/gestion/achats/facturer`) | Un fournisseur, ses réceptions à facturer, une facture brouillon : n° de facture du fournisseur (obligatoire, unique), prix et quantités de la facture reçue, taux du jour de la facture. Pièce jointe : le PDF de la facture. |
+| **Retour fournisseur** (depuis une réception) | Sortie de stock sur le lot reçu, au CMUP. |
+| **Suivi des achats** (`/gestion/achats/suivi`) | Coût de revient des réceptions nets des retours, par mois × fournisseur et par marque, 12 mois glissants ou par année. |
+| **Fiche fournisseur** | Ses pièces d'achat et « + Commande ». |
+| **Stock & achats, commande conseillée** | Les « commandes en cours » sont le reste à recevoir des commandes ouvertes (sinon la valeur de la photo importée). |
+| **Action Center** | Commandes en retard (livraison attendue + délai de grâce), réceptions sans facture fournisseur au-delà du délai réglé. |
+| **Paramètres → Gestion commerciale** | Délai de grâce des commandes, alerte réceptions sans facture, tolérance d'écart de prix facture ↔ réception. |
+
+### Règles
+
+- **Cycle.** Commande : Brouillon → Envoyée → Reçue en partie → Reçue ; Soldée (le reliquat n'est plus attendu) ;
+  Annulée (rien reçu). Réception : Brouillon → Entrée en stock → Facturée en partie / Facturée. Facture et retour :
+  Brouillon → Validé. Séries CF, BR, FF (enregistrement interne), RF, sans trou.
+- **Figées par la base** (triggers de la migration 0027) : une pièce d'achat validée ne se modifie ni ne se supprime ;
+  seuls statut, clôture et compteurs (reçu, facturé, retourné) évoluent. Seul `src/lib/gestion/purchases.ts` écrit
+  ces tables (test).
+- **Montants** (`purchases-shared.ts`, seule définition) : ligne = qté × prix (4 décimales, en devise) × (1 − remise) ;
+  montant en dirhams = même produit × taux, arrondi une fois ; TVA sur le montant en dirhams.
+- **Coût de revient** = (HT en dirhams + frais d'approche répartis) ÷ quantité, 4 décimales. La répartition tombe
+  exactement sur le montant du frais (plus grands restes). Il entre dans le **CMUP** à la validation de la réception,
+  et `products.cost_price` devient le CMUP (marges, valeur du stock), `last_purchase_price` le dernier coût.
+- **La facture fournisseur s'enregistre telle qu'elle est.** Écarts de prix (au-delà de la tolérance) et de quantité
+  avec les réceptions, article facturé sans réception : signalés et figés sur la facture, jamais corrigés en silence ;
+  le CMUP reste celui de la réception (décision par défaut : un écart se règle avec le fournisseur, avoir ou
+  complément). Pas de double facturation d'une réception ; un même n° de facture fournisseur ne s'enregistre qu'une fois.
+- **Matériel marketing** (PLV, goodies) : même pièce d'achat, mais son stock reste tenu par `recordMovement()`
+  (Activations), en unités entières, au coût de revient au centime.
+- **Dépôts.** Une réception entre dans un dépôt interne ; Cospharma et Pharmafirst restent connus par leurs photos.
+- **Droits.** Module Achats pour tout ; la réception et le retour sont aussi ouverts au module Stock (profil
+  Magasin). Valider = numéroter et faire bouger le stock ; solder ou annuler une commande = Valider sur Achats.
+- **Garde-fous ajoutés.** Un fournisseur qui a des pièces s'archive, il ne se supprime pas ; un article sur une pièce
+  (vente ou achat) ne se fusionne plus ; la réinitialisation du classeur est refusée dès qu'une pièce existe.
+
 ## À venir
 
-Lot 3 (achats, réceptions, CMUP depuis les factures fournisseurs),
-lot 4 (inventaires), lot 5 (règlements, bascule, exports comptables) — voir le plan.
+Lot 4 (inventaires), lot 5 (règlements, bascule, exports comptables) — voir le plan.

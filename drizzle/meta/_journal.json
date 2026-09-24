@@ -190,6 +190,13 @@
       "when": 1789800600000,
       "tag": "0026_gestion_ventes",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1789800700000,
+      "tag": "0027_gestion_achats",
+      "breakpoints": true
     }
   ]
 }

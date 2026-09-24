@@ -290,7 +290,7 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
       </div>
 
       {/* Actions — collées en bas de l'écran, au-dessus de la barre de navigation du téléphone */}
-      <div className="sticky bottom-[calc(4.75rem+env(safe-area-inset-bottom))] lg:bottom-2 z-10 flex gap-2 justify-start lg:justify-end bg-surface/95 backdrop-blur rounded-2xl p-2 border border-line">
+      <div className="sticky bottom-[calc(4.75rem+env(safe-area-inset-bottom))] lg:bottom-2 z-10 flex gap-2 justify-start lg:justify-end bg-surface/95 backdrop-blur rounded-2xl p-2 lg:pr-36 border border-line">
         <button type="submit" name="intent" value="save" className="btn-secondary" disabled={!clientId || !lines.length}><span className="lg:hidden">Brouillon</span><span className="hidden lg:inline">Enregistrer le brouillon</span></button>
         {canValidate && <button type="submit" name="intent" value="validate" className="btn-primary" disabled={!clientId || !lines.length || !calc}><span className="lg:hidden">Valider</span><span className="hidden lg:inline">Enregistrer et valider</span></button>}
       </div>

@@ -29,7 +29,7 @@ npm run db:push        # pousse le schéma sans migration (dev uniquement)
 npm run db:studio
 npm run agent:tool -- <outil> '<json>'   # pont CLI de l'Agent marketing (lecture seule, données réelles)
 GESTION_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/gestion-integration.ts
-                                         # intégration gestion commerciale (journal, numérotation) — jamais sur la prod
+                                         # intégration gestion commerciale (journal, numérotation, ventes, achats) — jamais sur la prod
 ```
 
 Variables d'environnement : `DATABASE_URL`, `DATABASE_SSL`, `SESSION_SECRET`, `SETUP_KEY`,
@@ -61,7 +61,7 @@ drizzle/              migrations SQL + meta/_journal.json
 Modules : Cockpit, Action Center, Ventes, Clients, Produits, Marques, Stock,
 **Marketing** (vue d'ensemble, campagnes, Digital Ads, Influence, planning éditorial, activations, matériel, budgets, analytics, agent marketing),
 Terrain (animations, animatrices, saisie), Réglementaire, Tâches, Imports, Paramètres,
-**Gestion commerciale** (préparation de la bascule, stock réel, fournisseurs, pièces de vente : BL, factures, avoirs, PDF ; achats, inventaires, règlements à venir).
+**Gestion commerciale** (préparation de la bascule, stock réel, fournisseurs, pièces de vente : BL, factures, avoirs, PDF ; achats : commandes, réceptions, factures fournisseurs, retours ; inventaires, règlements à venir).
 
 ---
 
@@ -110,6 +110,7 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Numéro d'une pièce (séries, reprise Sage, sans trou) | `src/lib/gestion/numbering.ts` + `numbering-shared.ts` | `allocateNumber()` (seule écriture, dans la transaction de validation), `setNextNumber()`, `formatNumber()`, `patternError()`, `nextNumberError()` |
 | Stock réel de l'entrepôt (journal de mouvements, lots, péremption, dépôts externes par photo) | `src/lib/gestion/ledger.ts` + `ledger-shared.ts` | `recordStockMovements()` (seule écriture), `stockState()`, `listMovements()`, `reverseImportMovements()`, `movementError()`, `allocateFefo()`, `expiryStatus()` |
 | Journal d'audit (qui a créé, modifié, archivé quoi) | `src/lib/audit.ts` | `audit()` (seule écriture de `audit_logs`), `changedFields()`, `auditTrail()` |
+| Pièce d'achat (montants en devise et en MAD, frais d'approche, coût de revient, rapprochement, cycle) | `src/lib/gestion/purchases-shared.ts` + `purchases.ts` | `computePurchase()`, `allocateLandedCosts()`, `unitCostMad()`, `invoiceGaps()`, `validatePurchase()` (seule validation, seule entrée d'achat en stock) |
 | Client prêt à facturer, doublons de clients | `src/lib/gestion/clients-shared.ts` + `clients.ts` | `billingReadiness()`, `duplicateCandidates()`, `createClient()`, `updateClientLegal()`, `clientLinks()` |
 
 `tests/definitions-uniques.test.ts` échoue si une seconde définition réapparaît.
@@ -195,6 +196,13 @@ sont des simulations (séries SIMBL / SIMFA / SIMAV) ; en mode ACTIF seulement, 
 `COMANET_OS`). PDF : `pdf.tsx` (@react-pdf/renderer, `serverExternalPackages`), stocké à la validation ; lien public
 `/d/<jeton>` (`share.ts`). Levée de blocage : interrupteur `overrideCommercial`. Règles Action Center : catégorie
 GESTION (`src/lib/rules/gestion-rules.ts`), table catégorie → modules unique : `CATEGORY_MODULES`.
+Lot 3 livré : achats. `purchase_documents` + `purchase_document_lines` + `landed_costs` (commande CF, réception BR,
+facture fournisseur FF, retour RF), figées par triggers ; seul `src/lib/gestion/purchases.ts` les écrit
+(`validatePurchase()`). Devise et **taux saisi sur la pièce** (jamais deviné). La réception fait entrer le stock au
+coût de revient (prix × taux + frais d'approche répartis, `purchases-shared.ts`) : CMUP, `products.cost_price`. La
+facture fournisseur est rapprochée des réceptions (écarts signalés, jamais corrigés). Matériel marketing via
+`recordMovement()`. `productStocks()` : commandes en cours = reste à recevoir des commandes ouvertes. Droits : module
+`achats` ; réception et retour aussi par `stock` (Magasin).
 
 **Permissions modulaires par utilisateur** (`docs/permissions-modulaires.md`). Chaque compte porte
 sa propre matrice `user_permissions` (17 modules × Voir / Créer / Modifier / Valider), une portée

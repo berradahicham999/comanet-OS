@@ -135,6 +135,8 @@ export async function deleteSupplier(id: string, actor: AuditActor): Promise<voi
   await db.transaction(async (tx) => {
     const [s] = await tx.select().from(suppliers).where(eq(suppliers.id, id)).for("update");
     if (!s) throw new Error("Fournisseur introuvable.");
+    const used = (await tx.execute<{ n: number }>(sql`select count(*)::int as n from purchase_documents where supplier_id = ${id}::uuid`)).rows[0]?.n ?? 0;
+    if (used) throw new Error(`Ce fournisseur a ${used} pièce(s) d'achat : il s'archive, il ne se supprime pas.`);
     await tx.delete(suppliers).where(eq(suppliers.id, id));
     await audit({ actor, action: "DELETE", module: "achats", entity: "supplier", entityId: id, label: s.legalName, before: { legalName: s.legalName, ice: s.ice, code: s.code } }, tx);
   });

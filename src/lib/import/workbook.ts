@@ -41,11 +41,11 @@ function findSheet(names: string[], wanted: string) {
  */
 export async function resetImportedData() {
   const r = await db.execute<{ movements: number; legal: number }>(sql`
-    select (select count(*)::int from stock_movements) as movements,
+    select (select count(*)::int from stock_movements) + (select count(*)::int from sales_documents) + (select count(*)::int from purchase_documents) as movements,
            (select count(*)::int from clients where legal_name is not null or ice is not null or account_code is not null) as legal`);
   const { movements, legal } = r.rows[0] ?? { movements: 0, legal: 0 };
   if (movements || legal) {
-    throw new Error(`Réinitialisation refusée : la gestion commerciale contient ${movements} mouvement(s) de stock et ${legal} fiche(s) client complétée(s) dans l'application. Elles seraient effacées. Réimportez sans réinitialiser.`);
+    throw new Error(`Réinitialisation refusée : la gestion commerciale contient ${movements} mouvement(s) de stock ou pièce(s) de vente et d'achat, et ${legal} fiche(s) client complétée(s) dans l'application. Elles seraient effacées. Réimportez sans réinitialiser.`);
   }
   await db.execute(sql`TRUNCATE TABLE sales, stock_snapshots, product_aliases, client_aliases, objectives, budget_lines, budgets, imports, animation_lines, animations, regulatory_files, content_items, marketing_expenses, campaigns, task_comments, tasks, products, clients RESTART IDENTITY CASCADE`);
 }

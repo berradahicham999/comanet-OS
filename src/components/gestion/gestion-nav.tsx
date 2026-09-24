@@ -21,8 +21,15 @@ export async function GestionTabs({ current }: { current: string }) {
     { href: "/gestion/pieces", label: "Pièces", ok: can(a.perms, "livraisons", "view") || can(a.perms, "facturation", "view") },
     { href: "/gestion/pieces/facturer", label: "Facturer des BL", ok: can(a.perms, "facturation", "create") },
     { href: "/gestion/stock", label: "Stock réel", ok: can(a.perms, "stock", "view") },
+    { href: "/gestion/achats", label: "Achats", ok: can(a.perms, "achats", "view") || can(a.perms, "stock", "view") },
     { href: "/gestion/fournisseurs", label: "Fournisseurs", ok: can(a.perms, "achats", "view") },
     { href: "/parametres/gestion", label: "Paramètres", ok: can(a.perms, "administration", "view") },
   ].filter((t) => t.ok);
   return <Tabs current={current} tabs={tabs.map(({ href, label }) => ({ href, label }))} />;
+}
+
+/** Types de pièces d'achat visibles : commandes et factures = Achats ; réceptions et retours = Achats ou Stock (magasin). */
+export function visiblePurchaseTypes(perms: Awaited<ReturnType<typeof requireAccessContext>>["perms"]) {
+  const achats = can(perms, "achats", "view"), stock = can(perms, "stock", "view");
+  return (["COMMANDE", "RECEPTION", "FACTURE", "RETOUR"] as const).filter((t) => achats || (stock && (t === "RECEPTION" || t === "RETOUR")));
 }

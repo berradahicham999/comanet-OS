@@ -55,8 +55,9 @@ export async function mergeProduct(formData: FormData) {
   const targetId = String(formData.get("targetId") ?? "");
   if (!sourceId || !targetId || sourceId === targetId) return;
   // Le journal de stock et les lots ne se réécrivent pas : un article qui a des mouvements ne se fusionne plus.
-  const ledger = (await db.execute<{ n: number }>(sql`select (select count(*) from stock_movements where product_id = ${sourceId}::uuid)::int + (select count(*) from stock_lots where product_id = ${sourceId}::uuid)::int as n`)).rows[0]?.n ?? 0;
-  if (ledger > 0) redirect(`/produits/${sourceId}?error=${encodeURIComponent("Fusion impossible : cet article a des mouvements dans le journal de stock. Archivez-le plutôt (décochez « actif »).")}`);
+  const ledger = (await db.execute<{ n: number }>(sql`select (select count(*) from stock_movements where product_id = ${sourceId}::uuid)::int + (select count(*) from stock_lots where product_id = ${sourceId}::uuid)::int
+    + (select count(*) from sales_document_lines where product_id = ${sourceId}::uuid)::int + (select count(*) from purchase_document_lines where product_id = ${sourceId}::uuid)::int as n`)).rows[0]?.n ?? 0;
+  if (ledger > 0) redirect(`/produits/${sourceId}?error=${encodeURIComponent("Fusion impossible : cet article a des mouvements de stock ou figure sur des pièces de vente ou d'achat. Archivez-le plutôt (décochez « actif »).")}`);
   const source = await db.query.products.findFirst({ where: eq(products.id, sourceId) });
   if (!source) return;
   await db.transaction(async (tx) => {

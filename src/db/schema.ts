@@ -1073,6 +1073,115 @@ export const salesDocumentLines = pgTable(
 );
 
 /* ------------------------------------------------------------------ */
+/* Gestion commerciale — achats (lot 3)                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Pièces d'achat : commande fournisseur (CF), réception (BR, entrée en stock au coût de revient),
+ * facture fournisseur (FF, rapprochée des réceptions), retour fournisseur (RF). Montants en devise
+ * de la pièce ET en dirhams, au taux saisi sur la pièce. Figées par triggers dès la validation ;
+ * seul `src/lib/gestion/purchases.ts` écrit ces tables.
+ */
+export const purchaseDocuments = pgTable(
+  "purchase_documents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    type: text("type").notNull(),
+    status: text("status").notNull().default("BROUILLON"),
+    number: text("number"),
+    seriesKey: text("series_key").references(() => documentSeries.key, { onDelete: "restrict", onUpdate: "cascade" }),
+    fiscalYear: integer("fiscal_year"),
+    supplierId: uuid("supplier_id").notNull().references(() => suppliers.id, { onDelete: "restrict" }),
+    supplierSnapshot: jsonb("supplier_snapshot"),
+    /** N° de la pièce du fournisseur (sa facture, son BL). Unique par fournisseur pour une facture validée. */
+    supplierRef: text("supplier_ref"),
+    date: date("date").notNull(),
+    /** Commande : livraison attendue. */
+    expectedDate: date("expected_date"),
+    dueDate: date("due_date"),
+    currency: text("currency").notNull().default("MAD"),
+    /** Dirhams pour 1 unité de la devise, saisi sur la pièce. */
+    exchangeRate: numeric("exchange_rate", { precision: 14, scale: 6 }).notNull().default("1"),
+    warehouseKey: text("warehouse_key").notNull().default("PRINCIPAL").references(() => warehouses.key, { onUpdate: "cascade" }),
+    originDocumentId: uuid("origin_document_id").references((): AnyPgColumn => purchaseDocuments.id, { onDelete: "restrict" }),
+    netHtCurrency: numeric("net_ht_currency", { precision: 14, scale: 2 }).notNull().default("0"),
+    netHtMad: numeric("net_ht_mad", { precision: 14, scale: 2 }).notNull().default("0"),
+    landedMad: numeric("landed_mad", { precision: 14, scale: 2 }).notNull().default("0"),
+    vatMad: numeric("vat_mad", { precision: 14, scale: 2 }).notNull().default("0"),
+    ttcMad: numeric("ttc_mad", { precision: 14, scale: 2 }).notNull().default("0"),
+    vatBreakdown: jsonb("vat_breakdown").$type<{ rate: string; base: string; vat: string }[]>().notNull().default([]),
+    /** Facture : écarts de rapprochement avec les réceptions, figés à la validation. */
+    gaps: jsonb("gaps").$type<{ kind: string; label: string }[]>().notNull().default([]),
+    notes: text("notes"),
+    pdfAssetId: uuid("pdf_asset_id"),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    validatedById: uuid("validated_by_id").references(() => users.id, { onDelete: "set null" }),
+    validatedAt: timestamp("validated_at", { withTimezone: true }),
+    closedById: uuid("closed_by_id"),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    closeReason: text("close_reason"),
+  },
+  (t) => [
+    uniqueIndex("purchase_documents_number_uq").on(t.number).where(sql`number is not null`),
+    index("purchase_documents_supplier_idx").on(t.supplierId, t.date),
+    index("purchase_documents_type_status_idx").on(t.type, t.status, t.date),
+  ],
+);
+
+export const purchaseDocumentLines = pgTable(
+  "purchase_document_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    documentId: uuid("document_id").notNull().references(() => purchaseDocuments.id, { onDelete: "cascade" }),
+    position: integer("position").notNull().default(0),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "restrict" }),
+    /** Matériel marketing (PLV, goodies) : son stock reste tenu par `recordMovement()` (Activations). */
+    inventoryItemId: uuid("inventory_item_id").references(() => inventoryItems.id, { onDelete: "restrict" }),
+    ref: text("ref"),
+    designation: text("designation").notNull(),
+    quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
+    /** Prix unitaire HT dans la devise de la pièce. */
+    unitPrice: numeric("unit_price", { precision: 14, scale: 4 }).notNull().default("0"),
+    discountPct: numeric("discount_pct", { precision: 5, scale: 2 }).notNull().default("0"),
+    taxRate: numeric("tax_rate", { precision: 5, scale: 2 }).notNull().default("20"),
+    netHtCurrency: numeric("net_ht_currency", { precision: 14, scale: 2 }).notNull().default("0"),
+    netHtMad: numeric("net_ht_mad", { precision: 14, scale: 2 }).notNull().default("0"),
+    landedMad: numeric("landed_mad", { precision: 14, scale: 2 }).notNull().default("0"),
+    vatMad: numeric("vat_mad", { precision: 14, scale: 2 }).notNull().default("0"),
+    /** Réception : coût de revient unitaire (MAD HT, frais d'approche compris) entré dans le CMUP. */
+    unitCostMad: numeric("unit_cost_mad", { precision: 14, scale: 4 }),
+    lotNumber: text("lot_number"),
+    expiryDate: date("expiry_date"),
+    sourceLineId: uuid("source_line_id").references((): AnyPgColumn => purchaseDocumentLines.id, { onDelete: "restrict" }),
+    receivedQty: numeric("received_qty", { precision: 12, scale: 3 }).notNull().default("0"),
+    invoicedQty: numeric("invoiced_qty", { precision: 12, scale: 3 }).notNull().default("0"),
+    returnedQty: numeric("returned_qty", { precision: 12, scale: 3 }).notNull().default("0"),
+  },
+  (t) => [
+    index("purchase_document_lines_document_idx").on(t.documentId, t.position),
+    index("purchase_document_lines_product_idx").on(t.productId),
+    index("purchase_document_lines_source_idx").on(t.sourceLineId),
+  ],
+);
+
+/** Frais d'approche d'une réception, répartis à la valeur ou à la quantité sur ses lignes. */
+export const landedCosts = pgTable(
+  "landed_costs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    documentId: uuid("document_id").notNull().references(() => purchaseDocuments.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    amountMad: numeric("amount_mad", { precision: 14, scale: 2 }).notNull(),
+    allocation: text("allocation").notNull().default("VALEUR"),
+    supplierId: uuid("supplier_id").references(() => suppliers.id, { onDelete: "set null" }),
+    ref: text("ref"),
+  },
+  (t) => [index("landed_costs_document_idx").on(t.documentId)],
+);
+
+/* ------------------------------------------------------------------ */
 /* Terrain : animations & saisies animatrices                          */
 /* ------------------------------------------------------------------ */
 
@@ -2547,6 +2656,7 @@ export const contentAssets = pgTable(
     companySlot: text("company_slot"),
     /** PDF figé d'une pièce de vente validée. */
     salesDocumentId: uuid("sales_document_id").references((): AnyPgColumn => salesDocuments.id, { onDelete: "cascade" }),
+    purchaseDocumentId: uuid("purchase_document_id").references((): AnyPgColumn => purchaseDocuments.id, { onDelete: "cascade" }),
     kind: text("kind").notNull().default("LIVRABLE"), // LIVRABLE | REFERENCE | DEVIS | FACTURE | VISUEL | PHOTO | COMPTE_RENDU
     name: text("name").notNull(),
     mime: text("mime").notNull().default("application/octet-stream"),
@@ -2563,7 +2673,8 @@ export const contentAssets = pgTable(
     index("content_assets_user_idx").on(t.uploadedById),
     index("content_assets_company_idx").on(t.companySlot, t.kind, t.version),
     index("content_assets_sales_document_idx").on(t.salesDocumentId, t.kind, t.version),
-    check("content_assets_owner_ck", sql`((${t.contentId} is not null)::int + (${t.activationId} is not null)::int + (${t.inventoryItemId} is not null)::int + (${t.companySlot} is not null)::int + (${t.salesDocumentId} is not null)::int) = 1`),
+    index("content_assets_purchase_document_idx").on(t.purchaseDocumentId, t.kind, t.version),
+    check("content_assets_owner_ck", sql`((${t.contentId} is not null)::int + (${t.activationId} is not null)::int + (${t.inventoryItemId} is not null)::int + (${t.companySlot} is not null)::int + (${t.salesDocumentId} is not null)::int + (${t.purchaseDocumentId} is not null)::int) = 1`),
   ],
 );
 

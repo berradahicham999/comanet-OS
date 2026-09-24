@@ -229,3 +229,17 @@ describe("Gestion commerciale — pièces de vente", () => {
     assert.deepEqual(hits(/export async function storedPdf\(/), ["src/lib/gestion/pdf.tsx"]);
   });
 });
+
+describe("Gestion commerciale — achats", () => {
+  test("seul `src/lib/gestion/purchases.ts` crée, valide ou fait évoluer une pièce d'achat", () => {
+    const found = codeHits(/(insert|update|delete)\((purchaseDocuments|purchaseDocumentLines|landedCosts)\)|(insert\s+into|update|delete\s+from)\s+(purchase_documents?|purchase_document_lines|landed_costs)\b/i, ["lib/gestion/purchases.ts"]);
+    assert.deepEqual(found, [], `Écriture de pièce d'achat hors du module dans : ${found.join(", ")}`);
+  });
+  test("montants d'achat, frais d'approche et coût de revient n'ont qu'une définition", () => {
+    assert.deepEqual(hits(/export function computePurchase\(/), ["src/lib/gestion/purchases-shared.ts"]);
+    assert.deepEqual(hits(/export function allocateLandedCosts\(/), ["src/lib/gestion/purchases-shared.ts"]);
+    assert.deepEqual(hits(/export function unitCostMad\(/), ["src/lib/gestion/purchases-shared.ts"]);
+    assert.deepEqual(hits(/export async function validatePurchase\(/), ["src/lib/gestion/purchases.ts"]);
+  });
+});
+

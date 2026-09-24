@@ -5,8 +5,8 @@ import type { Rule, Recommendation } from "./types";
 
 /**
  * Règles de la gestion commerciale : BL validés restés sans facture, pièces en attente de
- * déblocage, lots périmés ou proches de la péremption encore en stock. Seuils dans
- * `settings.gestion` (uninvoicedAlertDays, expiryAlertDays).
+ * déblocage, lots périmés ou proches de la péremption encore en stock, commandes fournisseurs en
+ * retard, réceptions sans facture fournisseur. Seuils dans `settings.gestion`.
  */
 
 /** BL validés non facturés depuis plus de N jours, regroupés par client. */
@@ -111,4 +111,74 @@ export const expiringLotsRule: Rule = {
   },
 };
 
-export const gestionRules: Rule[] = [uninvoicedBLRule, approvalPendingRule, expiringLotsRule];
+/** Commandes fournisseurs en retard : livraison attendue dépassée (+ délai de grâce) et pas entièrement reçue. */
+export const lateOrdersRule: Rule = {
+  id: "gestion-commandes-en-retard",
+  label: "Commandes fournisseurs en retard",
+  description: "Commandes validées dont la livraison attendue est dépassée de plus du délai réglé (settings.gestion.purchases.lateOrderGraceDays) et qui ne sont pas entièrement reçues.",
+  async run({ settings, now }) {
+    const grace = settings.gestion.purchases.lateOrderGraceDays;
+    const limit = iso(new Date(now.getTime() - grace * 86400000));
+    const rows = (await db.execute<{ id: string; number: string; supplier: string; expected: string; left_lines: number; net: string; brands: string | null }>(sql`
+      select d.id, d.number, s.legal_name as supplier, d.expected_date::text as expected, d.net_ht_mad::text as net,
+        (select count(*)::int from purchase_document_lines l where l.document_id = d.id and l.received_qty < l.quantity) as left_lines,
+        (select string_agg(distinct b.name, ', ') from purchase_document_lines l join products p on p.id = l.product_id join brands b on b.id = p.brand_id
+          where l.document_id = d.id and l.received_qty < l.quantity) as brands
+      from purchase_documents d join suppliers s on s.id = d.supplier_id
+      where d.type = 'COMMANDE' and d.status in ('VALIDE', 'PARTIELLE') and d.expected_date is not null and d.expected_date < ${limit}::date
+      order by d.expected_date limit 20`)).rows;
+    return rows.map((r): Recommendation => {
+      const late = Math.round((now.getTime() - new Date(`${r.expected}T12:00:00Z`).getTime()) / 86400000);
+      return {
+        key: `gestion-commandes-en-retard:${r.id}`,
+        rule: "gestion-commandes-en-retard",
+        category: "GESTION",
+        priority: late > 30 ? "HIGH" : "MEDIUM",
+        title: `${r.number} — ${r.supplier}`,
+        subtitle: `Livraison attendue le ${fmtDate(r.expected)} · ${late} jours de retard`,
+        facts: [
+          { label: "Lignes non reçues", value: fmtNum(r.left_lines) },
+          { label: "Montant HT commandé", value: fmtMAD(r.net) },
+          ...(r.brands ? [{ label: "Marques", value: r.brands }] : []),
+        ],
+        why: `La commande ${r.number} devait être livrée le ${fmtDate(r.expected)} ; ${r.left_lines} ligne(s) ne sont pas reçues. Ces quantités comptent encore comme « commandes en cours » dans la couverture de stock : si elles n'arrivent pas, la rupture n'est pas vue.`,
+        action: `Relancer ${r.supplier} pour une nouvelle date ; si le reliquat ne viendra pas, solder la commande (il sort alors des commandes en cours et la commande conseillée se recalcule).`,
+        task: { title: `Relancer ${r.supplier} — ${r.number}`, dueInDays: 2, role: "ADMIN" },
+        entity: { type: "document", id: r.id, href: `/gestion/achats/${r.id}` },
+        score: Number(r.net),
+      };
+    });
+  },
+};
+
+/** Réceptions validées sans facture fournisseur enregistrée au-delà du délai réglé. */
+export const uninvoicedReceptionsRule: Rule = {
+  id: "gestion-receptions-non-facturees",
+  label: "Réceptions sans facture fournisseur",
+  description: "Réceptions validées dont la facture du fournisseur n'est pas enregistrée après le délai réglé (settings.gestion.purchases.uninvoicedReceptionDays).",
+  async run({ settings, now }) {
+    const days = settings.gestion.purchases.uninvoicedReceptionDays;
+    const limit = iso(new Date(now.getTime() - days * 86400000));
+    const rows = (await db.execute<{ supplier_id: string; supplier: string; n: number; oldest: string; numbers: string; net: string }>(sql`
+      select d.supplier_id, s.legal_name as supplier, count(*)::int as n, min(d.date)::text as oldest, string_agg(d.number, ', ' order by d.date) as numbers, sum(d.net_ht_mad)::text as net
+      from purchase_documents d join suppliers s on s.id = d.supplier_id
+      where d.type = 'RECEPTION' and d.status in ('VALIDE', 'FACTUREE_PARTIEL') and d.date <= ${limit}::date
+      group by d.supplier_id, s.legal_name order by min(d.date) limit 20`)).rows;
+    return rows.map((r): Recommendation => ({
+      key: `gestion-receptions-non-facturees:${r.supplier_id}`,
+      rule: "gestion-receptions-non-facturees",
+      category: "GESTION",
+      priority: "MEDIUM",
+      title: `${r.supplier} — ${r.n} réception(s) sans facture`,
+      subtitle: `Depuis le ${fmtDate(r.oldest)}`,
+      facts: [{ label: "Réceptions", value: r.numbers }, { label: "Montant HT reçu", value: fmtMAD(r.net) }],
+      why: `Des marchandises de ${r.supplier} sont entrées en stock depuis plus de ${days} jours sans que leur facture soit enregistrée : la dette fournisseur et la TVA déductible ne sont pas suivies, et un écart de prix passerait inaperçu.`,
+      action: "Enregistrer la facture reçue (Achats → Facturer des réceptions) et joindre son PDF ; la réclamer au fournisseur si elle n'est pas arrivée.",
+      task: { title: `Enregistrer la facture de ${r.supplier}`, dueInDays: 5, role: "ADMIN" },
+      entity: { type: "document", id: r.supplier_id, href: `/gestion/achats/facturer?supplier=${r.supplier_id}` },
+      score: Number(r.net),
+    }));
+  },
+};
+
+export const gestionRules: Rule[] = [uninvoicedBLRule, approvalPendingRule, expiringLotsRule, lateOrdersRule, uninvoicedReceptionsRule];
