@@ -144,6 +144,15 @@ export type GestionSettings = {
   shareLinkDays: number;
   /** Alerte : BL validés et non facturés depuis plus de N jours. */
   uninvoicedAlertDays: number;
+  /** Achats (lot 3) : alertes et tolérance de rapprochement facture / réception. */
+  purchases: {
+    /** Commande en retard : livraison attendue dépassée de plus de N jours et pas entièrement reçue. */
+    lateOrderGraceDays: number;
+    /** Réception non facturée par le fournisseur depuis plus de N jours. */
+    uninvoicedReceptionDays: number;
+    /** Écart de prix toléré (%) entre facture fournisseur et réception avant de le signaler. */
+    priceGapTolerancePct: number;
+  };
 };
 
 export const EMPTY_COMPANY: CompanyIdentity = {
@@ -166,6 +175,7 @@ export const DEFAULT_GESTION: GestionSettings = {
   amountWords: { major: "MAD", minor: "cents" },
   shareLinkDays: 30,
   uninvoicedAlertDays: 15,
+  purchases: { lateOrderGraceDays: 7, uninvoicedReceptionDays: 30, priceGapTolerancePct: 0 },
 };
 
 /**
@@ -515,6 +525,7 @@ export function mergeGestion(stored: Partial<GestionSettings> | null | undefined
     company: { ...d.company, ...(stored.company ?? {}) },
     cutover: { ...d.cutover, ...(stored.cutover ?? {}) },
     amountWords: { ...d.amountWords, ...(stored.amountWords ?? {}) },
+    purchases: { ...d.purchases, ...(stored.purchases ?? {}) },
   };
 }
 

@@ -8,6 +8,10 @@ import { getSupplier, SUPPLIER_NATURES } from "@/lib/gestion/suppliers";
 import { PageHeader, Card, Badge } from "@/components/ui";
 import { SupplierForm } from "@/components/gestion/supplier-form";
 import { AuditTrail } from "@/components/gestion/audit-trail";
+import { listPurchases } from "@/lib/gestion/purchases";
+import { PURCHASE_STATUS_META, PURCHASE_TYPE_LABELS, purchaseStatusLabel } from "@/lib/gestion/purchases-shared";
+import { fmtMoney } from "@/lib/gestion/money";
+import { fmtDate } from "@/lib/format";
 import { updateSupplierAction, archiveSupplierAction, deleteSupplierAction } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -17,8 +21,9 @@ export default async function SupplierPage(props: { params: Promise<{ id: string
   const { id } = await props.params;
   const sp = await props.searchParams;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
-  const [s, brands, modes, history, canEdit, canValidate] = await Promise.all([
-    getSupplier(id), listBrands(), listPaymentModes(), auditTrail("supplier", id), canDo("achats", "edit"), canDo("achats", "validate"),
+  const [s, brands, modes, history, canEdit, canValidate, canCreate, purchases] = await Promise.all([
+    getSupplier(id), listBrands(), listPaymentModes(), auditTrail("supplier", id), canDo("achats", "edit"), canDo("achats", "validate"), canDo("achats", "create"),
+    listPurchases({ supplierId: id, limit: 50 }),
   ]);
   if (!s) notFound();
 
@@ -37,8 +42,19 @@ export default async function SupplierPage(props: { params: Promise<{ id: string
           <SupplierForm action={updateSupplierAction} supplier={s} brands={brands} paymentModes={modes} readOnly={!canEdit} />
         </Card>
         <div className="space-y-4">
-          <Card title="Achats">
-            <p className="text-[13px] text-muted">Commandes, réceptions et factures de ce fournisseur apparaîtront ici avec le lot 3 (achats).</p>
+          <Card title="Achats" action={canCreate ? <Link href={`/gestion/achats/nouveau?type=COMMANDE&supplier=${s.id}`} className="btn-secondary btn-sm">+ Commande</Link> : undefined}>
+            {purchases.length ? (
+              <ul className="text-[13px] space-y-1">
+                {purchases.slice(0, 12).map((p) => (
+                  <li key={p.id} className="flex items-center gap-2">
+                    <Link href={`/gestion/achats/${p.id}`} className="font-mono hover:underline">{p.number ?? "Brouillon"}</Link>
+                    <span className="text-faint text-[11.5px]">{PURCHASE_TYPE_LABELS[p.type].one} · {fmtDate(p.date)}</span>
+                    <Badge tone={PURCHASE_STATUS_META[p.status].tone}>{purchaseStatusLabel(p.type, p.status)}</Badge>
+                    <span className="ml-auto tabular-nums">{fmtMoney(p.netHtMad, 0)} MAD</span>
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="text-[13px] text-muted">Aucune pièce d&apos;achat. Une commande se passe en {s.currency} ; le taux se saisit sur chaque pièce.</p>}
           </Card>
           {canValidate && (
             <Card title="Archivage">

@@ -2,7 +2,8 @@
  * Test d'intégration de la gestion commerciale, sur une VRAIE base Postgres (hors `npm test`) :
  * journal de stock (lots, CMUP, refus, contre-passation), numérotation (reprise Sage, absence de
  * trou, validations simultanées), import du stock initial (idempotence, annulation), pièces de
- * vente (BL, blocages, facture regroupée, avoir, annulation).
+ * vente (BL, blocages, facture regroupée, avoir, annulation), achats (commande en devise, réception,
+ * frais d'approche, CMUP, facture rapprochée, retour, solde).
  *
  * Écrit des données qui ne s'effacent pas (le journal est en écriture seule) : à lancer sur une
  * base jetable uniquement (PGlite local, branche Supabase de test), jamais sur la production.
@@ -169,6 +170,79 @@ async function main() {
   assert.equal((await stockState({ productIds: [p1.id] }))[0].available, "143.000");
   assert.equal((await one<{ n: number }>(sql`select count(*)::int as n from sales where source = 'COMANET_OS'`)).n, 0);
   console.log("✓ BL annulé : stock remis par contre-mouvements ; mode OFF : aucune vente projetée");
+
+
+  // Achats (lot 3) : commande en euros, réception partielle avec lot et frais d'approche (CMUP,
+  // cost_price), commandes en cours, facture fournisseur rapprochée, retour, solde, immutabilité.
+  const P = await import("@/lib/gestion/purchases");
+  const { productStocks } = await import("@/lib/stock");
+  const sup = await one<{ id: string }>(sql`insert into suppliers (legal_name, name_key, currency, payment_days) values (${"IT LABO " + tag}, ${"IT LABO " + tag}, 'EUR', 60) returning id`);
+  const p3 = await one<{ id: string }>(sql`insert into products (name, name_key, code, track_lots) values (${"IT ACHAT LOT " + tag}, ${"IT ACHAT LOT " + tag}, ${"ITA" + tag}, true) returning id`);
+  await refused("devise sans taux", () => P.savePurchaseDraft({ type: "COMMANDE", supplierId: sup.id, date: day, currency: "EUR", exchangeRate: "", lines: [{ productId: p3.id, quantity: "1", unitPrice: "1" }] }, who), /taux du jour/);
+  const cf = await P.savePurchaseDraft({ type: "COMMANDE", supplierId: sup.id, date: day, expectedDate: day, currency: "EUR", exchangeRate: "10.8", lines: [
+    { productId: p3.id, quantity: "100", unitPrice: "10" }, { productId: p2.id, quantity: "50", unitPrice: "5" },
+  ] }, who);
+  const vcf = await P.validatePurchase(cf, who);
+  assert.ok(vcf.number.startsWith("CF"), vcf.number);
+  assert.equal((await productStocks({ productId: p3.id }))[0].onOrder, 100);
+  console.log(`✓ commande ${vcf.number} en EUR au taux saisi ; 100 u. comptées en commandes en cours`);
+
+  const br = await P.createReceptionFromOrder(cf, who);
+  const brDoc = (await P.getPurchase(br))!;
+  await refused("lot manquant à la réception", () => P.validatePurchase(br, who), /suivi par lot/);
+  await P.savePurchaseDraft({ id: br, type: "RECEPTION", supplierId: sup.id, date: day, currency: "EUR", exchangeRate: "10.8", originDocumentId: cf, lines: brDoc.lines.map((l) => ({
+    productId: l.productId, quantity: l.productId === p3.id ? "60" : l.quantity, unitPrice: l.unitPrice, sourceLineId: l.sourceLineId,
+    lotNumber: l.productId === p3.id ? "L1" : null, expiryDate: l.productId === p3.id ? "2028-01-31" : null,
+  })), landedCosts: [{ label: "Transport", amountMad: "324", allocation: "VALEUR" }] }, who);
+  const vbr = await P.validatePurchase(br, who);
+  const brv = (await P.getPurchase(br))!;
+  const lp3 = brv.lines.find((l) => l.productId === p3.id)!;
+  assert.equal(lp3.netHtMad, "6480.00"); // 60 × 10 × 10,8
+  assert.equal(lp3.landedMad, "228.71"); // 324 × 6480 ÷ 9180
+  assert.equal(lp3.unitCostMad, "111.8118");
+  assert.equal(brv.landedMad, "324.00");
+  const s3 = (await stockState({ productIds: [p3.id] }))[0];
+  assert.equal(s3.available, "60.000");
+  assert.equal(s3.cmup, "111.8118");
+  assert.equal((await one<{ c: string }>(sql`select cost_price::text as c from products where id = ${p3.id}::uuid`)).c, "111.81");
+  assert.equal((await P.getPurchase(cf))!.status, "PARTIELLE");
+  assert.equal((await productStocks({ productId: p3.id }))[0].onOrder, 40);
+  console.log(`✓ réception ${vbr.number} : 60 u. lot L1 au revient 111,8118 MAD (frais répartis au centime), CMUP et prix de revient à jour, commande « reçue en partie », 40 u. encore attendues`);
+
+  const over = await P.savePurchaseDraft({ type: "RECEPTION", supplierId: sup.id, date: day, currency: "EUR", exchangeRate: "10.8", originDocumentId: cf, lines: [
+    { productId: p3.id, quantity: "50", unitPrice: "10", sourceLineId: brDoc.lines.find((l) => l.productId === p3.id)!.sourceLineId, lotNumber: "L2" },
+  ] }, who);
+  await refused("réception au-delà du commandé", () => P.validatePurchase(over, who), /reste à recevoir/);
+  await P.deletePurchaseDraft(over, who);
+
+  const ff = await P.createInvoiceFromReceptions([br], who);
+  const ffDoc = (await P.getPurchase(ff))!;
+  await P.savePurchaseDraft({ id: ff, type: "FACTURE", supplierId: sup.id, date: day, currency: "EUR", exchangeRate: "10.9", supplierRef: "F-" + tag, lines: ffDoc.lines.map((l) => ({
+    productId: l.productId, quantity: l.quantity, unitPrice: l.productId === p3.id ? "10.5" : l.unitPrice, sourceLineId: l.sourceLineId,
+  })) }, who);
+  const vff = await P.validatePurchase(ff, who);
+  assert.deepEqual(vff.gaps.map((x) => x.kind), ["PRIX"]);
+  assert.equal((await P.getPurchase(br))!.status, "FACTUREE");
+  assert.ok((await P.getPurchase(ff))!.dueDate);
+  const ff2 = await P.savePurchaseDraft({ type: "FACTURE", supplierId: sup.id, date: day, currency: "EUR", exchangeRate: "10.9", supplierRef: "F-" + tag, lines: [{ designation: "Frais de dossier", quantity: "1", unitPrice: "20" }] }, who);
+  await refused("même facture fournisseur enregistrée deux fois", () => P.validatePurchase(ff2, who), /déjà enregistrée/);
+  await P.deletePurchaseDraft(ff2, who);
+  console.log(`✓ facture ${vff.number} rapprochée : écart de prix signalé (10,50 contre 10,00), réception « facturée », doublon de n° fournisseur refusé`);
+
+  const rf = await P.createReturnFromReception(br, who);
+  const rfDoc = (await P.getPurchase(rf))!;
+  await P.savePurchaseDraft({ id: rf, type: "RETOUR", supplierId: sup.id, date: day, currency: "EUR", exchangeRate: "10.8", originDocumentId: br, lines: rfDoc.lines.filter((l) => l.productId === p3.id).map((l) => ({
+    productId: l.productId, quantity: "10", unitPrice: l.unitPrice, sourceLineId: l.sourceLineId, lotNumber: l.lotNumber,
+  })) }, who);
+  await P.validatePurchase(rf, who);
+  assert.equal((await stockState({ productIds: [p3.id] }))[0].available, "50.000");
+  await P.closeOrder(cf, "Reliquat abandonné par le laboratoire", who);
+  assert.equal((await P.getPurchase(cf))!.status, "CLOTUREE");
+  assert.equal((await productStocks({ productId: p3.id }))[0].onOrder, 0);
+  await refused("modifier une réception validée", () => db.execute(sql`update purchase_documents set net_ht_mad = 0 where id = ${br}::uuid`), /plus modifiable/);
+  await refused("modifier une ligne de réception validée", () => db.execute(sql`update purchase_document_lines set unit_cost_mad = 1 where document_id = ${br}::uuid`), /ne se modifient pas/);
+  await refused("supprimer une commande numérotée", () => db.execute(sql`delete from purchase_documents where id = ${cf}::uuid`), /ne se supprime pas/);
+  console.log("✓ retour de 10 u. sur le lot L1, commande soldée (plus rien en commandes en cours), pièces d'achat figées par la base");
 
   console.log("Tous les contrôles d'intégration sont passés.");
   process.exit(0);

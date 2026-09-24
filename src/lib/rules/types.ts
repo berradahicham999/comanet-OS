@@ -22,7 +22,7 @@ export const CATEGORY_META: Record<RecCategory, { label: string; tone: "red" | "
 /** Modules donnant accès à chaque catégorie de recommandation (page /actions et copilote). */
 export const CATEGORY_MODULES: Record<RecCategory, ModuleKey[]> = {
   STOCK: ["stock"], MARKETING: ["marketing", "influence"], REGLEMENTAIRE: ["reglementaire"], TERRAIN: ["terrain"], COMMERCIAL: ["ventes", "clients"],
-  BUDGET: ["budgets"], EXECUTION: ["taches"], DATA: ["administration"], MEDICAL: ["medical"], GESTION: ["livraisons", "facturation", "stock"],
+  BUDGET: ["budgets"], EXECUTION: ["taches"], DATA: ["administration"], MEDICAL: ["medical"], GESTION: ["livraisons", "facturation", "achats", "stock"],
 };
 
 export type Recommendation = {

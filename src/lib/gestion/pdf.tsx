@@ -35,6 +35,11 @@ const s = StyleSheet.create({
   totalRow: { flexDirection: "row", borderBottomWidth: 0.4, borderColor: LINE },
 });
 
+/** Styles du modèle Sage, partagés avec les PDF d'achat (`purchase-pdf.tsx`). */
+export const PDF_STYLES = s;
+export const PDF_LINE_COLOR = LINE;
+export const PDF_GREY = GREY;
+
 type Col = { key: string; label: string; width: number; align?: "left" | "right" | "center" };
 function columns(type: DocType, model: "PPH_REMISE" | "NET"): Col[] {
   if (type === "BL") return [
@@ -169,7 +174,7 @@ export function DocumentPdf({ d }: { d: PdfInput }) {
   );
 }
 
-function TotalRow({ label, value, bold, grey }: { label: string; value: string; bold?: boolean; grey?: boolean }) {
+export function TotalRow({ label, value, bold, grey }: { label: string; value: string; bold?: boolean; grey?: boolean }) {
   return (
     <View style={[s.totalRow, grey ? { backgroundColor: GREY } : {}]}>
       <Text style={[{ width: 170, padding: 3 }, bold ? s.bold : {}]}>{label}</Text>
@@ -182,15 +187,21 @@ function TotalRow({ label, value, bold, grey }: { label: string; value: string; 
 /* Données et stockage                                                 */
 /* ------------------------------------------------------------------ */
 
-type Img = { data: Buffer; format: "png" | "jpg" };
+export type Img = { data: Buffer; format: "png" | "jpg" };
 /** Logo et cachet : PNG ou JPEG seulement (formats lus par le moteur PDF). */
-async function fileData(id: string | null | undefined): Promise<Img | null> {
+export async function fileData(id: string | null | undefined): Promise<Img | null> {
   if (!id) return null;
   const f = await readAsset(id);
   if (!f) return null;
   if (f.mime === "image/png") return { data: f.data, format: "png" };
   if (f.mime === "image/jpeg" || f.mime === "image/jpg") return { data: f.data, format: "jpg" };
   return null;
+}
+
+/** Dernières versions du logo et du cachet de la société (identifiants d'actifs). */
+export async function companyAssetIds(): Promise<{ logoId: string | null; cachetId: string | null }> {
+  const files = (await db.execute<{ slot: string; id: string }>(sql`select distinct on (company_slot) company_slot as slot, id from content_assets where company_slot is not null order by company_slot, version desc`)).rows;
+  return { logoId: files.find((f) => f.slot === "LOGO")?.id ?? null, cachetId: files.find((f) => f.slot === "CACHET")?.id ?? null };
 }
 
 /** Données d'impression : identités figées pour une pièce validée, fiches actuelles pour un brouillon. */

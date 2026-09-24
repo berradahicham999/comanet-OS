@@ -23,27 +23,28 @@ export const ASSET_KIND_LABELS: Record<AssetKind, string> = {
   LIVRABLE: "Livrable", REFERENCE: "Référence", DEVIS: "Devis", FACTURE: "Facture", VISUEL: "Visuel", PHOTO: "Photo", COMPTE_RENDU: "Compte rendu", PIECE: "PDF de la pièce",
 };
 
-export type AssetOwner = { contentId: string } | { activationId: string } | { inventoryItemId: string } | { companySlot: CompanySlot } | { salesDocumentId: string };
+export type AssetOwner = { contentId: string } | { activationId: string } | { inventoryItemId: string } | { companySlot: CompanySlot } | { salesDocumentId: string } | { purchaseDocumentId: string };
 
 /** Fichiers de la société imprimés sur les pièces (gestion commerciale). Jamais dans le dépôt de code : le cachet signé y serait public. */
 export const COMPANY_SLOTS = ["LOGO", "CACHET"] as const;
 export type CompanySlot = (typeof COMPANY_SLOTS)[number];
 
 export type AssetMeta = {
-  id: string; contentId: string | null; activationId: string | null; inventoryItemId: string | null; companySlot: string | null; salesDocumentId: string | null;
+  id: string; contentId: string | null; activationId: string | null; inventoryItemId: string | null; companySlot: string | null; salesDocumentId: string | null; purchaseDocumentId: string | null;
   kind: string; name: string; mime: string; size: number; version: number; uploadedById: string | null; uploadedBy: string | null; createdAt: Date;
 };
 
 function ownerOf(owner: AssetOwner | string): AssetOwner {
   return typeof owner === "string" ? { contentId: owner } : owner;
 }
-function ownerColumns(owner: AssetOwner): { contentId: string | null; activationId: string | null; inventoryItemId: string | null; companySlot: string | null; salesDocumentId: string | null } {
+function ownerColumns(owner: AssetOwner): { contentId: string | null; activationId: string | null; inventoryItemId: string | null; companySlot: string | null; salesDocumentId: string | null; purchaseDocumentId: string | null } {
   return {
     contentId: "contentId" in owner ? owner.contentId : null,
     activationId: "activationId" in owner ? owner.activationId : null,
     inventoryItemId: "inventoryItemId" in owner ? owner.inventoryItemId : null,
     companySlot: "companySlot" in owner ? owner.companySlot : null,
     salesDocumentId: "salesDocumentId" in owner ? owner.salesDocumentId : null,
+    purchaseDocumentId: "purchaseDocumentId" in owner ? owner.purchaseDocumentId : null,
   };
 }
 function ownerWhere(owner: AssetOwner): SQL {
@@ -51,6 +52,7 @@ function ownerWhere(owner: AssetOwner): SQL {
   if ("activationId" in owner) return sql`a.activation_id = ${owner.activationId}::uuid`;
   if ("companySlot" in owner) return sql`a.company_slot = ${owner.companySlot}`;
   if ("salesDocumentId" in owner) return sql`a.sales_document_id = ${owner.salesDocumentId}::uuid`;
+  if ("purchaseDocumentId" in owner) return sql`a.purchase_document_id = ${owner.purchaseDocumentId}::uuid`;
   return sql`a.inventory_item_id = ${owner.inventoryItemId}::uuid`;
 }
 function ownerCondition(owner: AssetOwner) {
@@ -58,12 +60,13 @@ function ownerCondition(owner: AssetOwner) {
   if ("activationId" in owner) return eq(contentAssets.activationId, owner.activationId);
   if ("companySlot" in owner) return eq(contentAssets.companySlot, owner.companySlot);
   if ("salesDocumentId" in owner) return eq(contentAssets.salesDocumentId, owner.salesDocumentId);
+  if ("purchaseDocumentId" in owner) return eq(contentAssets.purchaseDocumentId, owner.purchaseDocumentId);
   return eq(contentAssets.inventoryItemId, owner.inventoryItemId);
 }
 
 export async function listAssets(owner: AssetOwner | string): Promise<AssetMeta[]> {
   const r = await db.execute<AssetMeta>(sql`
-    select a.id, a.content_id as "contentId", a.activation_id as "activationId", a.inventory_item_id as "inventoryItemId", a.company_slot as "companySlot", a.sales_document_id as "salesDocumentId",
+    select a.id, a.content_id as "contentId", a.activation_id as "activationId", a.inventory_item_id as "inventoryItemId", a.company_slot as "companySlot", a.sales_document_id as "salesDocumentId", a.purchase_document_id as "purchaseDocumentId",
       a.kind, a.name, a.mime, a.size, a.version, a.uploaded_by_id as "uploadedById", u.name as "uploadedBy", a.created_at as "createdAt"
     from content_assets a left join users u on u.id = a.uploaded_by_id
     where ${ownerWhere(ownerOf(owner))} order by a.kind, a.version desc, a.created_at desc`);
@@ -112,7 +115,7 @@ export async function appendChunk(id: string, buf: Buffer): Promise<{ received: 
 
 export async function assetMeta(id: string): Promise<AssetMeta | null> {
   const r = await db.execute<AssetMeta>(sql`
-    select a.id, a.content_id as "contentId", a.activation_id as "activationId", a.inventory_item_id as "inventoryItemId", a.company_slot as "companySlot", a.sales_document_id as "salesDocumentId",
+    select a.id, a.content_id as "contentId", a.activation_id as "activationId", a.inventory_item_id as "inventoryItemId", a.company_slot as "companySlot", a.sales_document_id as "salesDocumentId", a.purchase_document_id as "purchaseDocumentId",
       a.kind, a.name, a.mime, a.size, a.version, a.uploaded_by_id as "uploadedById", u.name as "uploadedBy", a.created_at as "createdAt"
     from content_assets a left join users u on u.id = a.uploaded_by_id where a.id = ${id}::uuid`);
   return r.rows[0] ?? null;

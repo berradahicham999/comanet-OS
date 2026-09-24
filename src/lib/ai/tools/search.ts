@@ -22,11 +22,13 @@ const SECTIONS: { key: keyof SearchResult; module: ModuleKey | ModuleKey[]; labe
   { key: "tasks", module: "taches", label: "tâches" },
   { key: "deliveries", module: "livraisons", label: "bons de livraison" },
   { key: "invoices", module: "facturation", label: "factures et avoirs" },
+  { key: "purchases", module: "achats", label: "pièces d'achat" },
+  { key: "suppliers", module: "achats", label: "fournisseurs" },
 ];
 
 export const searchEntities: AiTool<typeof schema> = {
   name: "search_entities",
-  description: "Retrouve le nom exact et l'identifiant d'une marque, d'un produit, d'un client, d'une personne (animatrice, délégué), d'une campagne, d'un contenu, d'un dossier réglementaire, d'une tâche ou d'une pièce de vente (numéro de BL, facture, avoir) à partir d'un mot-clé. À utiliser avant un autre outil quand l'orthographe est incertaine.",
+  description: "Retrouve le nom exact et l'identifiant d'une marque, d'un produit, d'un client, d'une personne (animatrice, délégué), d'une campagne, d'un contenu, d'un dossier réglementaire, d'une tâche, d'un fournisseur ou d'une pièce (numéro de BL, facture, avoir, commande ou réception fournisseur) à partir d'un mot-clé. À utiliser avant un autre outil quand l'orthographe est incertaine.",
   module: "any",
   action: "view",
   schema,

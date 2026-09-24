@@ -104,7 +104,9 @@ const ORPHAN_PRODUCT_SQL = (importId: string) => sql`
     and not exists (select 1 from activations where product_id = p.id)
     and not exists (select 1 from stock_movements where product_id = p.id)
     and not exists (select 1 from stock_lots where product_id = p.id)
-    and not exists (select 1 from client_stock_readings where product_id = p.id)`;
+    and not exists (select 1 from client_stock_readings where product_id = p.id)
+    and not exists (select 1 from sales_document_lines where product_id = p.id)
+    and not exists (select 1 from purchase_document_lines where product_id = p.id)`;
 
 const ORPHAN_CLIENT_SQL = (importId: string) => sql`
   from clients c where c.import_id = ${importId}::uuid
@@ -114,6 +116,7 @@ const ORPHAN_CLIENT_SQL = (importId: string) => sql`
     and not exists (select 1 from user_client_assignments where client_id = c.id)
     and not exists (select 1 from client_stock_readings where client_id = c.id)
     and not exists (select 1 from activation_clients where client_id = c.id)
+    and not exists (select 1 from sales_documents where client_id = c.id)
     and c.legal_name is null and c.ice is null and c.account_code is null`;
 
 /** Ce que le nettoyage des fiches retirerait, sans rien modifier. */

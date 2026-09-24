@@ -79,13 +79,20 @@ export async function productStocks(
     last_month as (
       select product_id, sum(quantity)::float8 as qty from sales where date >= ${lastMonthStart}::date and date < ${avgEnd}::date group by product_id
     ),
+    -- Commandes en cours = reste à recevoir des commandes fournisseurs ouvertes ; à défaut, la valeur de la photo importée.
+    open_po as (
+      select l.product_id, sum(l.quantity - l.received_qty)::float8 as qty
+      from purchase_document_lines l join purchase_documents d on d.id = l.document_id
+      where d.type = 'COMMANDE' and d.status in ('VALIDE', 'PARTIELLE') and l.product_id is not null and l.quantity > l.received_qty
+      group by l.product_id
+    ),
     field as (
       select al.product_id, sum(al.quantity_sold)::float8 as sold, avg(al.stock_observed)::float8 as stock_avg
       from animation_lines al join animations a on a.id = al.animation_id
       where a.status = 'DONE' and a.date >= ${d30}::date group by al.product_id
     )
     select p.id as product_id, p.sku, p.name, p.brand_id, b.name as brand_name, b.color as brand_color, p.category,
-           coalesce(l.quantity, 0) as stock, coalesce(l.on_order, 0) as on_order, l.date as stock_date,
+           coalesce(l.quantity, 0) as stock, coalesce(po.qty, l.on_order, 0) as on_order, l.date as stock_date,
            coalesce(a.avg_monthly, 0) as avg_monthly, lm.qty as last_month_qty,
            p.lead_time_days, p.safety_stock_days, p.moq,
            p.cost_price::float8 as cost_price, p.price_wholesale::float8 as price_wholesale,
@@ -93,6 +100,7 @@ export async function productStocks(
     from products p
     left join brands b on b.id = p.brand_id
     left join latest l on l.product_id = p.id
+    left join open_po po on po.product_id = p.id
     left join avg_sales a on a.product_id = p.id
     left join last_month lm on lm.product_id = p.id
     left join field f on f.product_id = p.id
