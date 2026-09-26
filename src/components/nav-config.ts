@@ -45,6 +45,7 @@ export const NAV: NavGroup[] = [
       { href: "/gestion/stock", label: "Stock réel", icon: "Warehouse", module: "stock" },
       { href: "/gestion/inventaires", label: "Inventaires", icon: "ClipboardList", module: "stock" },
       { href: "/gestion/fournisseurs", label: "Fournisseurs", icon: "Truck", module: "achats" },
+      { href: "/gestion/pnl", label: "P&L", icon: "Scale", module: "administration", action: "validate" },
       { href: "/gestion/bascule", label: "Bascule", icon: "ArrowRightLeft", module: "administration" },
     ],
   },

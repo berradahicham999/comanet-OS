@@ -218,6 +218,13 @@
       "when": 1789801000000,
       "tag": "0030_gestion_nom_client",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1789801100000,
+      "tag": "0031_pnl",
+      "breakpoints": true
     }
   ]
 }

@@ -113,6 +113,7 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Pièce d'achat (montants en devise et en MAD, frais d'approche, coût de revient, rapprochement, cycle) | `src/lib/gestion/purchases-shared.ts` + `purchases.ts` | `computePurchase()`, `allocateLandedCosts()`, `unitCostMad()`, `invoiceGaps()`, `validatePurchase()` (seule validation, seule entrée d'achat en stock) |
 | Inventaire (théorique figé, compté, écart, fiabilité, pistes d'explication) | `src/lib/gestion/counts-shared.ts` + `counts.ts` | `countedByLine()`, `lineGap()`, `countStats()`, `gapLeads()`, `recurringGaps()`, `validateCount()` (seule validation, seuls ajustements d'inventaire) |
 | Règlement, solde d'une facture, balance âgée, relance, bascule (réel ou simulation) | `src/lib/gestion/receivables-shared.ts` + `payments.ts` + `documents-shared.ts` + `cutover.ts` | `invoiceBalance()`, `agingBucket()`, `agedBalance()`, `reminderLevel()`, `planAllocation()`, `createPayment()` (seule écriture des règlements), `emitsReal()`, `importBlockedByCutover()`, `setCutoverMode()` |
+| P&L de gestion (nature des sites, CA direct / en bloc / commissions, coût des ventes, charges récurrentes, soldes, contribution par marque, point mort) | `src/lib/pnl-shared.ts` + `src/lib/pnl.ts` (+ `budgetConsumptionByMonth()` dans `budget.ts`) | `classifySite()`, `chargeMonths()`, `buildPnl()` (seule définition du compte de résultat), `pnlStatement()`, `createCharge()`, `reviseCharge()`, `createBulkSale()` |
 | Client prêt à facturer, doublons de clients | `src/lib/gestion/clients-shared.ts` + `clients.ts` | `billingReadiness()`, `duplicateCandidates()`, `createClient()`, `updateClientLegal()`, `clientLinks()` |
 
 `tests/definitions-uniques.test.ts` échoue si une seconde définition réapparaît.
@@ -217,6 +218,16 @@ proposée : `receivables-shared.ts`. Un avoir s'impute sur sa facture à la vali
 source du « réel ou simulation »), `importBlockedByCutover()` (C5), page `/gestion/bascule` (`cutover.ts` : contrôles,
 mode, rapport), reprise Sage (`importOpeningInvoices()`, source SAGE_REPRISE), `productStocks()` lit le journal en mode
 ACTIF. Envoi au comptable : sélection multiple des pièces et ZIP de leurs PDF assemblé dans le navigateur (`piece-exporter.tsx`) + récapitulatif Excel du mois (`exports.ts`). Retours de tests : P.U. TTC sur le BL, nom du client imprimé corrigeable sur une pièce validée (`renameDocumentClient()`, seule clé `legalName` de l'identité figée, migration 0030), avoir financier sans origine (lignes libres par marque, motif sans retour).
+
+**P&L** (`/gestion/pnl`, section du `docs/guide-gestion-commerciale.md`, migration 0031). Réservé aux administrateurs
+(`requireAdmin()` : salaires). Compte de résultat mensuel HT : CA = ventes directes (sites de `settings.pnl.directSites`)
++ ventes en bloc aux distributeurs (`pnl_bulk_sales`, saisies à l'arrivage : Cospharma achète tout le stock Gamarde / Ainhoa)
++ commissions de prestation (taux × CA HT remisé du prestataire : PHARMAFIRST × 35 %). La revente des distributeurs (COS,
+CAS…) est hors CA, affichée pour info. Coût des ventes : (quantité + UG) × `products.cost_price` ; sans prix d'achat, CA
+signalé, jamais estimé. Marketing : `budgetConsumptionByMonth()` (même définition que le budget consommé). Charges :
+`pnl_charges` PONCTUELLE ou MENSUELLE (début → fin), révision par clôture + nouvelle ligne ; postes dans
+`pnl_charge_categories` (familles COMMERCIAL, PERSONNEL, STRUCTURE, FINANCIER, IMPOTS). Vue marque : frais communs non
+répartis. N-1 des charges affiché seulement si des charges N-1 existent.
 
 **Permissions modulaires par utilisateur** (`docs/permissions-modulaires.md`). Chaque compte porte
 sa propre matrice `user_permissions` (17 modules × Voir / Créer / Modifier / Valider), une portée
