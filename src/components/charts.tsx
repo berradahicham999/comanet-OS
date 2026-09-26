@@ -1,6 +1,6 @@
 "use client";
 
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend, Cell } from "recharts";
+import { Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend, Cell } from "recharts";
 import { fmtMAD, fmtNum } from "@/lib/format";
 
 const MONTHS = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
@@ -73,6 +73,24 @@ export function SimpleLine({ data, xKey, yKey, height = 160, color = "#0f766e", 
         <Tooltip formatter={(v) => (money ? fmtMAD(Number(v)) : fmtNum(Number(v)))} contentStyle={{ borderRadius: 12, border: "1px solid #e7e7e3", fontSize: 12 }} />
         <Line type="monotone" dataKey={yKey} stroke={color} strokeWidth={2} dot={false} />
       </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+/** P&L mensuel : CA et marge brute en barres, résultat net en ligne. */
+export function PnlMonthlyChart({ data, height = 240 }: { data: { month: string; revenue: number; gross: number; net: number }[]; height?: number }) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <ComposedChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barCategoryGap="24%">
+        <CartesianGrid vertical={false} stroke={GRID} />
+        <XAxis dataKey="month" tickFormatter={monthLabel} tick={AXIS} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+        <YAxis tick={AXIS} axisLine={false} tickLine={false} width={48} tickFormatter={(v) => fmtMAD(v, { compact: true, suffix: false })} />
+        <Tooltip content={<MoneyTip labelFormatter={monthLabel} />} cursor={{ fill: "rgba(0,0,0,0.04)" }} />
+        <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: "#6b7280" }} />
+        <Bar dataKey="revenue" name="CA HT" fill="#0f766e" radius={[6, 6, 0, 0]} maxBarSize={32} />
+        <Bar dataKey="gross" name="Marge brute" fill="#99d5c9" radius={[6, 6, 0, 0]} maxBarSize={32} />
+        <Line dataKey="net" name="Résultat net" stroke="#c2410c" strokeWidth={2} dot={{ r: 3 }} type="monotone" />
+      </ComposedChart>
     </ResponsiveContainer>
   );
 }

@@ -86,6 +86,28 @@ export type ComanetSettings = {
   clientStock: ClientStockSettings;
   /** Gestion commerciale : identité de la société imprimée sur les pièces, politiques, bascule depuis Sage. */
   gestion: GestionSettings;
+  /** P&L de gestion : quels sites de vente sont du CA COMANET, lesquels sont des prestations commissionnées. */
+  pnl: PnlSettings;
+};
+
+/**
+ * Règles du P&L (`src/lib/pnl.ts`). Le fichier de ventes mélange trois natures de lignes selon le site :
+ *  · ventes DIRECTES de COMANET (CA HT, coût d'achat = quantité × prix d'achat) ;
+ *  · ventes d'un PRESTATAIRE (Pharmafirst pour Auracos) : COMANET touche un % de ce CA HT remisé ;
+ *  · revente d'un DISTRIBUTEUR (Cospharma pour Gamarde / Ainhoa) : hors CA COMANET — COMANET a déjà
+ *    facturé le stock en bloc à l'arrivage (`pnl_bulk_sales`). Affichée pour information seulement.
+ * Un site absent des trois listes est signalé, jamais classé d'office.
+ */
+export type PnlPrestation = { site: string; label: string; ratePct: number };
+export type PnlSettings = {
+  directSites: string[];
+  distributorSites: string[];
+  prestations: PnlPrestation[];
+};
+export const DEFAULT_PNL: PnlSettings = {
+  directSites: ["COMANET", "DESK DIGITAL"],
+  distributorSites: ["COS", "CAS", "CAG", "DAG", "CMR"],
+  prestations: [{ site: "PHARMAFIRST", label: "Commission Pharmafirst", ratePct: 35 }],
 };
 
 /**
@@ -511,6 +533,7 @@ export const DEFAULT_SETTINGS: ComanetSettings = {
   marketingIntel: DEFAULT_MARKETING_INTEL,
   clientStock: DEFAULT_CLIENT_STOCK,
   gestion: DEFAULT_GESTION,
+  pnl: DEFAULT_PNL,
 };
 
 export const SETTINGS_KEY = "comanet.rules";
@@ -536,6 +559,7 @@ export function mergeSettings(stored: Partial<ComanetSettings> | null | undefine
     marketingIntel: { ...DEFAULT_MARKETING_INTEL, ...(stored.marketingIntel ?? {}) },
     clientStock: { ...DEFAULT_CLIENT_STOCK, ...(stored.clientStock ?? {}) },
     gestion: mergeGestion(stored.gestion),
+    pnl: { ...DEFAULT_PNL, ...(stored.pnl ?? {}) },
   };
 }
 

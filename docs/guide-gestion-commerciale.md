@@ -275,3 +275,35 @@ sur le serveur Next : `/gestion/pieces/<id>/pdf`.
 
 Le module est complet. Calendrier retenu : période parallèle en décembre 2026, bascule au 1ᵉʳ janvier 2027
 (date modifiable dans Paramètres).
+
+
+---
+
+## P&L (compte de résultat de gestion)
+
+**Où :** Gestion commerciale → **P&L** (`/gestion/pnl`). Réservé aux administrateurs (on y voit les salaires).
+
+**Ce que le P&L compte comme CA de COMANET (HT)**
+
+| Source | D'où vient la donnée | Coût des ventes |
+|---|---|---|
+| Ventes directes (sites `COMANET`, `DESK DIGITAL`) | fichier de ventes / pièces COMANET OS | (quantité + UG) × prix d'achat de l'article |
+| Ventes en bloc aux distributeurs (Gamarde, Ainhoa → Cospharma à l'arrivage) | **saisie** : P&L → Ventes en bloc | coût d'achat saisi sur la vente |
+| Commission de prestation (Auracos via Pharmafirst) | 35 % × ventes HT remisées du site `PHARMAFIRST` | aucun |
+| Revente des distributeurs (sites `COS`, `CAS`, `CAG`, `DAG`, `CMR`) | fichier de ventes | **hors CA** — affichée pour information |
+
+Les sites se classent dans P&L → Règles. Un site non classé est exclu et signalé.
+
+**Charges.** Marketing : repris du module Marketing (dépenses engagées + dépense de régie + échantillons), rien à ressaisir.
+Le reste se saisit dans P&L → Charges : une charge **mensuelle** (salaire, loyer, internet) se déclare une fois ; « Réviser à
+partir de » change le montant sans toucher aux mois passés ; « Arrêter » la clôt. Une charge **ponctuelle** tombe sur son
+mois. Une charge peut être affectée à une marque (animatrice dédiée) : elle entre alors dans la contribution de la marque.
+Les remises exceptionnelles supportées sur les opérations Pharmafirst (3 %) et les gratuités passées en avoir chez Cospharma
+(au coût d'achat) sont des charges commerciales.
+
+**Soldes.** Marge brute → contribution après marketing et charges commerciales → résultat d'exploitation (après
+personnel et structure) → résultat net (après financier et impôts). Point mort mensuel = charges fixes récurrentes du
+dernier mois ÷ taux de contribution observé.
+
+**Ce qui n'est jamais estimé :** un article sans prix d'achat, une vente en bloc sans coût, un mois sans charges. Le
+bandeau « À compléter » les liste avec leur montant.

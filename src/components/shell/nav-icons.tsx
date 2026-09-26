@@ -6,7 +6,7 @@ import {
   Rocket, MousePointerClick, Heart, Wallet,
   Stethoscope, UserRound, IdCard, CalendarCheck, Map, FlaskConical, LandPlot, BriefcaseMedical, SlidersHorizontal,
   ScrollText, UserCog, Images, FileBarChart, PartyPopper, ChartLine,
-  ClipboardCheck, Warehouse, Truck, FileText, PackagePlus, ArrowRightLeft,
+  ClipboardCheck, Warehouse, Truck, FileText, PackagePlus, ArrowRightLeft, Scale,
   type LucideProps,
 } from "lucide-react";
 
@@ -16,7 +16,7 @@ const ICONS = {
   Rocket, MousePointerClick, Heart, Wallet,
   Stethoscope, UserRound, IdCard, CalendarCheck, Map, FlaskConical, LandPlot, BriefcaseMedical, SlidersHorizontal,
   ScrollText, UserCog, Images, FileBarChart, PartyPopper, ChartLine,
-  ClipboardCheck, Warehouse, Truck, FileText, PackagePlus, ArrowRightLeft,
+  ClipboardCheck, Warehouse, Truck, FileText, PackagePlus, ArrowRightLeft, Scale,
 } as const;
 
 export function NavIcon({ name, ...props }: { name: string } & LucideProps) {

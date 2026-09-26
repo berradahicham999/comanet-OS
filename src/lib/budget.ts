@@ -213,6 +213,63 @@ export async function budgetConsumption(year: number, brandId?: string | null): 
   };
 }
 
+/* ------------------------------- Consommation par mois ------------------------------- */
+
+export type MonthlyConsumption = { brandId: string; month: number; consumed: number; adSpend: number; committed: number; samplesValue: number };
+
+/**
+ * Consommation marque × mois d'une année, pour le P&L. Même définition que `foldConsumption()`, appliquée
+ * mois par mois ; la priorité régie / saisie est tranchée sur l'ANNÉE de la marque (comme le budget annuel) :
+ * la somme des douze mois égale donc exactement `budgetConsumptionByBrand(year)`.
+ */
+export async function budgetConsumptionByMonth(year: number): Promise<MonthlyConsumption[]> {
+  const adCats = sql.join(AD_EXPENSE_CATEGORIES.map((c) => sql`${c}`), sql`, `);
+  const r = await db.execute(sql`
+    with exp as (
+      select brand_id, extract(month from date)::int as m,
+        coalesce(sum(amount) filter (where status in ('COMMITTED','SPENT')), 0)::float8 as committed_all,
+        coalesce(sum(amount) filter (where status = 'SPENT'), 0)::float8 as spent_all,
+        coalesce(sum(amount) filter (where status in ('COMMITTED','SPENT') and category in (${adCats})), 0)::float8 as manual_ad_committed,
+        coalesce(sum(amount) filter (where status = 'SPENT' and category in (${adCats})), 0)::float8 as manual_ad_spent
+      from marketing_expenses where extract(year from date) = ${year} group by 1, 2
+    ),
+    samples as (
+      select p.brand_id, extract(month from sm.date)::int as m,
+        coalesce(sum(case when coalesce(p.cost_price, p.price_wholesale) is not null then -sm.quantity * coalesce(p.cost_price, p.price_wholesale) else 0 end), 0)::float8 as samples_value
+      from sample_movements sm join products p on p.id = sm.product_id
+      where sm.type = 'SORTIE_VISITE' and extract(year from sm.date) = ${year} and p.brand_id is not null
+      group by 1, 2
+    ),
+    regie as (
+      select brand_id, extract(month from date)::int as m, coalesce(sum(spend), 0)::float8 as regie_spend
+      from ad_metrics where extract(year from date) = ${year} and is_partial = false and brand_id is not null group by 1, 2
+    ),
+    regie_year as (
+      select brand_id, count(*)::int as regie_rows from ad_metrics
+      where extract(year from date) = ${year} and is_partial = false and brand_id is not null group by 1
+    ),
+    keys as (select brand_id, m from exp union select brand_id, m from samples union select brand_id, m from regie)
+    select k.brand_id, k.m,
+      coalesce(exp.committed_all, 0) as committed_all, coalesce(exp.spent_all, 0) as spent_all,
+      coalesce(exp.manual_ad_committed, 0) as manual_ad_committed, coalesce(exp.manual_ad_spent, 0) as manual_ad_spent,
+      coalesce(regie.regie_spend, 0) as regie_spend, coalesce(ry.regie_rows, 0) as regie_rows,
+      coalesce(samples.samples_value, 0) as samples_value
+    from keys k
+    left join exp on exp.brand_id = k.brand_id and exp.m = k.m
+    left join samples on samples.brand_id = k.brand_id and samples.m = k.m
+    left join regie on regie.brand_id = k.brand_id and regie.m = k.m
+    left join regie_year ry on ry.brand_id = k.brand_id`);
+  return (r.rows as Record<string, unknown>[]).map((x) => {
+    const c = foldConsumption(String(x.brand_id), {
+      annual: 0, planned: 0,
+      committedAll: Number(x.committed_all), spentAll: Number(x.spent_all),
+      manualAdCommitted: Number(x.manual_ad_committed), manualAdSpent: Number(x.manual_ad_spent),
+      regieSpend: Number(x.regie_spend), regieRows: Number(x.regie_rows), samplesValue: Number(x.samples_value),
+    });
+    return { brandId: String(x.brand_id), month: Number(x.m), consumed: c.consumed, adSpend: c.adSpend, committed: c.committed, samplesValue: c.samplesValue };
+  });
+}
+
 export { AD_SPEND_SOURCE_LABEL };
 
 /* --------------------------- Répartition par catégorie --------------------------- */

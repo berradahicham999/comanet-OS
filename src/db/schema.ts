@@ -3708,3 +3708,62 @@ export const adMemory = pgTable(
   },
   (t) => [index("ad_memory_brand_idx").on(t.brandId), index("ad_memory_scope_idx").on(t.scope)],
 );
+
+/* ------------------------------------------------------------------------------------------------
+ * P&L de gestion (migration 0031). Le CA direct et les commissions de prestation sont lus dans
+ * `sales` selon `settings.pnl` ; seuls ce qui n'existe nulle part ailleurs est saisi ici : les charges
+ * (ponctuelles ou mensuelles) et les ventes en bloc aux distributeurs (Cospharma à l'arrivage).
+ * Calculs : `src/lib/pnl-shared.ts` (pur) + `src/lib/pnl.ts` (lecture).
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Postes de charges, rangés par famille du P&L (COMMERCIAL, PERSONNEL, STRUCTURE, FINANCIER, IMPOTS). */
+export const pnlChargeCategories = pgTable("pnl_charge_categories", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  grp: text("grp").notNull(),
+  sort: integer("sort").notNull().default(100),
+  active: boolean("active").notNull().default(true),
+});
+
+/** Charge : PONCTUELLE (le mois de `start_month`) ou MENSUELLE (de `start_month` à `end_month` inclus, ouverte si vide). */
+export const pnlCharges = pgTable(
+  "pnl_charges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    categoryKey: text("category_key").notNull().references(() => pnlChargeCategories.key, { onUpdate: "cascade" }),
+    label: text("label").notNull(),
+    amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+    recurrence: text("recurrence").notNull().default("PONCTUELLE"),
+    startMonth: date("start_month").notNull(),
+    endMonth: date("end_month"),
+    /** Charge propre à une marque (animatrice dédiée…) : entre dans la contribution de la marque. */
+    brandId: uuid("brand_id").references(() => brands.id, { onDelete: "set null" }),
+    notes: text("notes"),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("pnl_charges_start_idx").on(t.startMonth)],
+);
+
+/** Vente en bloc à un distributeur (stock vendu à Cospharma dès réception) : CA HT et coût d'achat de l'arrivage. */
+export const pnlBulkSales = pgTable(
+  "pnl_bulk_sales",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    date: date("date").notNull(),
+    brandId: uuid("brand_id").notNull().references(() => brands.id, { onDelete: "cascade" }),
+    clientId: uuid("client_id").references(() => clients.id, { onDelete: "set null" }),
+    label: text("label").notNull(),
+    quantity: numeric("quantity", { precision: 14, scale: 3 }),
+    amountHt: numeric("amount_ht", { precision: 14, scale: 2 }).notNull(),
+    /** Coût d'achat (de revient) de la marchandise vendue ; vide = non renseigné, jamais estimé. */
+    costAmount: numeric("cost_amount", { precision: 14, scale: 2 }),
+    discountPct: numeric("discount_pct", { precision: 5, scale: 2 }),
+    notes: text("notes"),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("pnl_bulk_sales_date_idx").on(t.date)],
+);
