@@ -20,7 +20,10 @@ Plan complet, décisions et lots : `docs/plan-gestion-commerciale.md`. Ce guide 
 
 ### Règles
 
-- **Le client reste le point de vente.** `name` = nom commercial ; `legal_name` = raison sociale imprimée.
+- **Le client reste le point de vente.** `name` = nom du point de vente (clé des imports, affiché partout) ;
+  `legal_name` = raison sociale imprimée, 1ʳᵉ colonne de la base clients ; `group_id` → `client_groups` = **Groupe**
+  (enseigne) qui rassemble plusieurs raisons sociales (migration 0032). Le champ « Groupe » se saisit en clair sur la
+  fiche : un nom inconnu crée le groupe, un champ vide détache le client. Liste : filtre et vue « Regrouper par groupe ».
   `account_code` = code du Sage COMANET (« 056 ») ; `code` reste le code des fichiers distributeurs.
 - **L'article garde son code distributeur** (`sku`) ; la référence COMANET est `code`. Le matériel marketing
   (PLV, goodies) n'est pas un article : il reste dans `inventory_items` (Activations).

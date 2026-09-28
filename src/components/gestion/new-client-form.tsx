@@ -8,8 +8,9 @@ import type { DuplicateCandidate } from "@/lib/gestion/clients-shared";
  * Création d'un client, avec détection des doublons pendant la saisie (ICE, nom, téléphone) :
  * on montre les fiches qui ressemblent avant de créer, plutôt qu'après.
  */
-export function NewClientForm({ action, check, sectors }: {
+export function NewClientForm({ action, check, sectors, groups }: {
   action: (fd: FormData) => Promise<void>;
+  groups: { name: string }[];
   check: (input: { name: string; legalName?: string; ice?: string; phone?: string; city?: string }) => Promise<DuplicateCandidate[]>;
   sectors: readonly string[];
 }) {
@@ -28,8 +29,12 @@ export function NewClientForm({ action, check, sectors }: {
   return (
     <form ref={form} action={action} className="space-y-4 text-[13px]">
       <div className="grid sm:grid-cols-2 gap-2">
-        {field("name", "Nom commercial (point de vente) *", { required: true })}
         {field("legalName", "Raison sociale")}
+        <label className="block"><span className="label block mb-1">Groupe</span>
+          <input name="groupName" list="client-groups" placeholder="ex. COTE PARA — facultatif" className="input h-9" />
+          <datalist id="client-groups">{groups.map((g) => <option key={g.name} value={g.name} />)}</datalist>
+        </label>
+        {field("name", "Nom du point de vente (interne) *", { required: true })}
         {field("ice", "ICE (15 chiffres)", { inputMode: "numeric" })}
         {field("accountCode", "Code client Sage COMANET")}
         <label className="block"><span className="label block mb-1">Type</span>

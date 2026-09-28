@@ -19,7 +19,7 @@ const BRANDS = [{ id: "b-gamarde", name: "Gamarde" }, { id: "b-alpha", name: "Al
 
 function client(over: Partial<ClientIntel>): ClientIntel {
   return {
-    id: "c1", code: "C001", name: "Pharmacie Atlas", type: "PHARMACIE", city: "Marrakech", channel: null, salesRep: null, needsReview: false,
+    id: "c1", code: "C001", name: "Pharmacie Atlas", legalName: null, groupId: null, groupName: null, type: "PHARMACIE", city: "Marrakech", channel: null, salesRep: null, needsReview: false,
     revenue12: 120_000, revenue3: 30_000, revenuePrev3: 25_000, growthPct: 20, orders12: 12, avgBasket: 10_000, avgQtyPerOrder: 30,
     lastOrder: "2026-08-20", prevOrder: "2026-07-20", firstOrder: "2024-01-05", daysSinceLast: 20, avgIntervalDays: 30, nextTheoretical: "2026-09-19", daysUntilNext: 10,
     overdue: false, brands: ["Gamarde"], productCount: 8, segment: "CROISSANCE", highPotential: true, fieldStock: null, fieldSellOut60: 0, lastAnimation: null,

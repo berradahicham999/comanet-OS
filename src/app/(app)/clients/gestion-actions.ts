@@ -35,6 +35,7 @@ async function readClient(fd: FormData): Promise<ClientLegalInput> {
     phone: str(fd, "phone"),
     accountCode: str(fd, "accountCode"),
     legalName: str(fd, "legalName"),
+    groupName: str(fd, "groupName"),
     ice: str(fd, "ice"),
     ifNumber: str(fd, "ifNumber"),
     rc: str(fd, "rc"),

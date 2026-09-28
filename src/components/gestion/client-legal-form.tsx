@@ -6,8 +6,10 @@ import { SECTORS, cityToSector } from "@/lib/sectors";
  * Identité légale et conditions commerciales d'un client (onglet « Identité & conditions »).
  * Formulaire serveur : chaque enregistrement ne journalise que les champs modifiés.
  */
-export function ClientLegalForm({ client, users, paymentModes, action, readOnly, maxPaymentDays, defaultPaymentDays }: {
+export function ClientLegalForm({ client, groupName, groups, users, paymentModes, action, readOnly, maxPaymentDays, defaultPaymentDays }: {
   client: Client;
+  groupName: string | null;
+  groups: { name: string }[];
   users: { id: string; name: string }[];
   paymentModes: PaymentMode[];
   action: (fd: FormData) => Promise<void>;
@@ -30,7 +32,12 @@ export function ClientLegalForm({ client, users, paymentModes, action, readOnly,
           <div className="text-[13px] font-semibold mb-2">Identité légale <span className="font-normal text-muted">— imprimée sur les pièces</span></div>
           <div className="grid sm:grid-cols-2 gap-2">
             {input("legalName", "Raison sociale *", { placeholder: "ex. PHARMACIE AL AMAL SARL" })}
-            {input("name", "Nom commercial (point de vente) *", { required: true })}
+            <label className="block">
+              <span className="label block mb-1">Groupe</span>
+              <input name="groupName" defaultValue={groupName ?? ""} list="client-groups" placeholder="ex. COTE PARA — vide : aucun groupe" className="input h-9" />
+              <datalist id="client-groups">{groups.map((g) => <option key={g.name} value={g.name} />)}</datalist>
+            </label>
+            {input("name", "Nom du point de vente (interne) *", { required: true, title: "Identifiant du point de vente dans les ventes, le terrain et les imports" })}
             {input("accountCode", "Code client Sage COMANET", { placeholder: "ex. 056" })}
             {input("ice", "ICE * (15 chiffres)", { inputMode: "numeric", pattern: "[0-9 .\\-]*", title: "15 chiffres (espaces et points tolérés)" })}
             {input("ifNumber", "Identifiant fiscal (IF)")}

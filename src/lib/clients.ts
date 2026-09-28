@@ -19,6 +19,11 @@ export type ClientIntel = {
   id: string;
   code: string;
   name: string;
+  /** Raison sociale (identité juridique du client). */
+  legalName: string | null;
+  /** Groupe (enseigne) partagé par plusieurs raisons sociales. */
+  groupId: string | null;
+  groupName: string | null;
   type: string;
   city: string | null;
   channel: string | null;
@@ -95,12 +100,13 @@ export async function clientIntel(opts: { clientId?: string; clientIds?: string[
       from animations a join animation_lines al on al.animation_id = a.id
       where a.status = 'DONE' and a.date >= ${d60}::date group by a.client_id
     )
-    select c.id, c.code, c.name, c.type::text as type, c.city, c.channel, c.sales_rep, c.needs_review,
+    select c.id, c.code, c.name, c.legal_name, c.group_id, cg.name as group_name, c.type::text as type, c.city, c.channel, c.sales_rep, c.needs_review,
       coalesce(a.revenue12,0) as revenue12, coalesce(a.revenue3,0) as revenue3, coalesce(a.revenue_prev3,0) as revenue_prev3,
       coalesce(a.orders12,0) as orders12, coalesce(a.qty12,0) as qty12, a.last_order, a.first_order,
       coalesce(a.product_count,0) as product_count, ia.avg_gap, po.prev_order, bn.brands,
       fs.field_stock, coalesce(fso.sold,0) as field_sellout, la.date as last_animation
     from clients c
+    left join client_groups cg on cg.id = c.group_id
     left join agg a on a.client_id = c.id
     left join interval_avg ia on ia.client_id = c.id
     left join prev_order po on po.client_id = c.id
@@ -168,6 +174,8 @@ function intelFromRow(row: Record<string, unknown>, s: ComanetSettings, t: Date,
 
   return {
     id: String(row.id), code: String(row.code), name: String(row.name), type: String(row.type),
+    legalName: row.legal_name ? String(row.legal_name) : null,
+    groupId: row.group_id ? String(row.group_id) : null, groupName: row.group_name ? String(row.group_name) : null,
     city: row.city ? String(row.city) : null, channel: row.channel ? String(row.channel) : null,
     salesRep: row.sales_rep ? String(row.sales_rep) : null, needsReview: Boolean(row.needs_review),
     revenue12, revenue3, revenuePrev3, growthPct, orders12,
