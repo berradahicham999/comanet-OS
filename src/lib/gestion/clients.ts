@@ -101,7 +101,8 @@ async function resolveGroup(tx: Tx, name: string | null): Promise<string | null>
 
 /** Groupes existants (suggestions du champ « Groupe »), avec leur nombre de clients actifs. */
 export async function listClientGroups(): Promise<{ id: string; name: string; n: number }[]> {
-  const r = await db.execute<{ id: string; name: string; n: number }>(sql`n    select g.id, g.name, count(c.id) filter (where c.active)::int as n
+  const r = await db.execute<{ id: string; name: string; n: number }>(sql`
+    select g.id, g.name, count(c.id) filter (where c.active)::int as n
     from client_groups g left join clients c on c.group_id = g.id group by g.id order by g.name`);
   return r.rows;
 }
