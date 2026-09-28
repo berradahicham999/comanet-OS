@@ -225,6 +225,13 @@
       "when": 1789801100000,
       "tag": "0031_pnl",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1789801200000,
+      "tag": "0032_client_groups",
+      "breakpoints": true
     }
   ]
 }

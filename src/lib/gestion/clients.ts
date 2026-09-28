@@ -1,7 +1,7 @@
 import "server-only";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { clientBrandDiscounts, clientDeliveryAddresses, clients } from "@/db/schema";
+import { clientBrandDiscounts, clientDeliveryAddresses, clientGroups, clients } from "@/db/schema";
 import { audit, changedFields, type AuditActor } from "@/lib/audit";
 import { normKey } from "@/lib/import/normalize";
 import { cityToSector } from "@/lib/sectors";
@@ -24,6 +24,8 @@ export type ClientLegalInput = {
   phone: string | null;
   accountCode: string | null;
   legalName: string | null;
+  /** Groupe (enseigne) saisi en clair : rattaché à un groupe existant de même nom, sinon créé ; vide = aucun groupe. */
+  groupName: string | null;
   ice: string | null;
   ifNumber: string | null;
   rc: string | null;
@@ -59,7 +61,8 @@ export async function createClient(input: ClientLegalInput, actor: AuditActor): 
   return db.transaction(async (tx) => {
     const clash = (await tx.execute<{ id: string; name: string }>(sql`select id, name from clients where name_key = ${nameKey} limit 1`)).rows[0];
     if (clash) throw new Error(`Un client porte déjà ce nom : « ${clash.name} ». Ouvrez sa fiche plutôt que d'en créer une seconde.`);
-    const values = { ...toColumns(input), nameKey, needsReview: false, active: true, updatedAt: new Date() };
+    const groupId = await resolveGroup(tx, input.groupName);
+    const values = { ...toColumns(input), groupId, nameKey, needsReview: false, active: true, updatedAt: new Date() };
     const [row] = await tx.insert(clients).values(values).returning({ id: clients.id });
     await audit({ actor, action: "CREATE", module: "clients", entity: "client", entityId: row.id, label: input.name, after: toColumns(input) }, tx);
     return row.id;
@@ -77,12 +80,37 @@ export async function updateClientLegal(id: string, input: ClientLegalInput, act
       const clash = (await tx.execute<{ name: string }>(sql`select name from clients where name_key = ${nameKey} and id <> ${id}::uuid limit 1`)).rows[0];
       if (clash) throw new Error(`Un autre client porte déjà ce nom : « ${clash.name} ».`);
     }
-    const next = toColumns(input);
+    const next = { ...toColumns(input), groupId: await resolveGroup(tx, input.groupName) };
     const diff = changedFields(before as unknown as Record<string, unknown>, next);
     if (!diff) return;
     await tx.update(clients).set({ ...next, nameKey, needsReview: false, updatedAt: new Date() }).where(eq(clients.id, id));
     await audit({ actor, action: "UPDATE", module: "clients", entity: "client", entityId: id, label: input.name, before: diff.before, after: diff.after }, tx);
   });
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** Groupe de ce nom (comparaison normalisée), créé s'il n'existe pas encore. Nom vide : aucun groupe. */
+async function resolveGroup(tx: Tx, name: string | null): Promise<string | null> {
+  const nameKey = normKey(name ?? "");
+  if (!nameKey) return null;
+  await tx.insert(clientGroups).values({ nameKey, name: name!.trim() }).onConflictDoNothing({ target: clientGroups.nameKey });
+  const [g] = await tx.select({ id: clientGroups.id }).from(clientGroups).where(eq(clientGroups.nameKey, nameKey));
+  return g.id;
+}
+
+/** Groupes existants (suggestions du champ « Groupe »), avec leur nombre de clients actifs. */
+export async function listClientGroups(): Promise<{ id: string; name: string; n: number }[]> {
+  const r = await db.execute<{ id: string; name: string; n: number }>(sql`n    select g.id, g.name, count(c.id) filter (where c.active)::int as n
+    from client_groups g left join clients c on c.group_id = g.id group by g.id order by g.name`);
+  return r.rows;
+}
+
+/** Nom du groupe d'un client (pour préremplir la fiche). */
+export async function clientGroupName(groupId: string | null): Promise<string | null> {
+  if (!groupId) return null;
+  const [g] = await db.select({ name: clientGroups.name }).from(clientGroups).where(eq(clientGroups.id, groupId));
+  return g?.name ?? null;
 }
 
 function toColumns(i: ClientLegalInput) {

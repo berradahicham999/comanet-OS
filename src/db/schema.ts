@@ -591,6 +591,14 @@ export const productAliases = pgTable(
 /* Clients (= points de vente)                                         */
 /* ------------------------------------------------------------------ */
 
+/** Groupe (enseigne) : rassemble plusieurs raisons sociales distinctes sous une même entité commerciale. */
+export const clientGroups = pgTable("client_groups", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  nameKey: text("name_key").notNull().unique(),
+  name: text("name").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const clients = pgTable(
   "clients",
   {
@@ -617,8 +625,10 @@ export const clients = pgTable(
      */
     /** Code client du Sage de COMANET (ex. « 056 ») — distinct de `code`, qui vient des fichiers distributeurs. */
     accountCode: text("account_code"),
-    /** Raison sociale imprimée sur les pièces ; `name` reste le nom commercial. */
+    /** Raison sociale imprimée sur les pièces ; `name` reste le nom du point de vente (clé des imports). */
     legalName: text("legal_name"),
+    /** Groupe (enseigne) du client : plusieurs raisons sociales peuvent partager le même groupe. */
+    groupId: uuid("group_id").references((): AnyPgColumn => clientGroups.id, { onDelete: "set null" }),
     ice: text("ice"),
     ifNumber: text("if_number"),
     rc: text("rc"),
@@ -643,6 +653,7 @@ export const clients = pgTable(
     uniqueIndex("clients_account_code_uq").on(t.accountCode).where(sql`account_code is not null`),
     index("clients_ice_idx").on(t.ice),
     index("clients_account_manager_idx").on(t.accountManagerId),
+    index("clients_group_idx").on(t.groupId),
   ],
 );
 

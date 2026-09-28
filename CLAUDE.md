@@ -114,7 +114,7 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Inventaire (théorique figé, compté, écart, fiabilité, pistes d'explication) | `src/lib/gestion/counts-shared.ts` + `counts.ts` | `countedByLine()`, `lineGap()`, `countStats()`, `gapLeads()`, `recurringGaps()`, `validateCount()` (seule validation, seuls ajustements d'inventaire) |
 | Règlement, solde d'une facture, balance âgée, relance, bascule (réel ou simulation) | `src/lib/gestion/receivables-shared.ts` + `payments.ts` + `documents-shared.ts` + `cutover.ts` | `invoiceBalance()`, `agingBucket()`, `agedBalance()`, `reminderLevel()`, `planAllocation()`, `createPayment()` (seule écriture des règlements), `emitsReal()`, `importBlockedByCutover()`, `setCutoverMode()` |
 | P&L de gestion (nature des sites, CA direct / en bloc / commissions, coût des ventes, charges récurrentes, soldes, contribution par marque, point mort) | `src/lib/pnl-shared.ts` + `src/lib/pnl.ts` (+ `budgetConsumptionByMonth()` dans `budget.ts`) | `classifySite()`, `chargeMonths()`, `buildPnl()` (seule définition du compte de résultat), `pnlStatement()`, `createCharge()`, `reviseCharge()`, `createBulkSale()` |
-| Client prêt à facturer, doublons de clients | `src/lib/gestion/clients-shared.ts` + `clients.ts` | `billingReadiness()`, `duplicateCandidates()`, `createClient()`, `updateClientLegal()`, `clientLinks()` |
+| Client prêt à facturer, doublons de clients, groupe (enseigne) | `src/lib/gestion/clients-shared.ts` + `clients.ts` | `billingReadiness()`, `duplicateCandidates()`, `createClient()`, `updateClientLegal()` (seule écriture de `group_id`), `listClientGroups()`, `clientLinks()` |
 
 `tests/definitions-uniques.test.ts` échoue si une seconde définition réapparaît.
 

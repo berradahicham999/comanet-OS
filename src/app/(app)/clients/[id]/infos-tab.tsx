@@ -6,7 +6,7 @@ import { auditTrail } from "@/lib/audit";
 import { getSettings } from "@/lib/settings";
 import { listBrands } from "@/lib/users";
 import { listPaymentModes } from "@/lib/gestion/refs";
-import { clientCommercial, clientLinks } from "@/lib/gestion/clients";
+import { clientCommercial, clientGroupName, clientLinks, listClientGroups } from "@/lib/gestion/clients";
 import { fmtMoney } from "@/lib/gestion/money";
 import { Card, Badge, BrandDot } from "@/components/ui";
 import { ClientLegalForm } from "@/components/gestion/client-legal-form";
@@ -25,11 +25,12 @@ export async function ClientInfosTab({ client, billing, sp }: {
   billing: { ready: boolean; missing: string[]; recommended: string[] };
   sp: { done?: string; error?: string };
 }) {
-  const [settings, modes, brands, users, commercial, history, links, canEdit, canValidate] = await Promise.all([
+  const [settings, modes, brands, users, commercial, history, links, canEdit, canValidate, groupName, groups] = await Promise.all([
     getSettings(), listPaymentModes(), listBrands(),
     db.execute<{ id: string; name: string }>(sql`select id, name from users where active order by name`),
     clientCommercial(client.id), auditTrail("client", client.id), clientLinks(client.id),
     canDo("clients", "edit"), canDo("clients", "validate"),
+    clientGroupName(client.groupId), listClientGroups(),
   ]);
   const g = settings.gestion;
   const discountBrands = new Set(commercial.discounts.map((d) => d.brand_id));
@@ -46,7 +47,7 @@ export async function ClientInfosTab({ client, billing, sp }: {
 
       <div className="grid lg:grid-cols-[1fr_360px] gap-4">
         <Card title="Identité et conditions">
-          <ClientLegalForm client={client} users={users.rows} paymentModes={modes} action={saveClientLegalAction} readOnly={!canEdit} maxPaymentDays={g.maxPaymentDays} defaultPaymentDays={g.defaultPaymentDays} />
+          <ClientLegalForm client={client} groupName={groupName} groups={groups} users={users.rows} paymentModes={modes} action={saveClientLegalAction} readOnly={!canEdit} maxPaymentDays={g.maxPaymentDays} defaultPaymentDays={g.defaultPaymentDays} />
         </Card>
 
         <div className="space-y-4">
