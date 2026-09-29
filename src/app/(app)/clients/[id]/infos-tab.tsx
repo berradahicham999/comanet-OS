@@ -14,6 +14,7 @@ import { AuditTrail } from "@/components/gestion/audit-trail";
 import {
   saveClientLegalAction, blockClientAction, archiveClientAction, deleteClientAction, addAddressAction, removeAddressAction, brandDiscountAction,
 } from "../gestion-actions";
+import { LegalEntitiesCard, MergeCard } from "./entities-merge";
 
 /**
  * Onglet « Identité & conditions » : ce que les pièces imprimeront (raison sociale, ICE, adresse),
@@ -23,7 +24,7 @@ import {
 export async function ClientInfosTab({ client, billing, sp }: {
   client: Client;
   billing: { ready: boolean; missing: string[]; recommended: string[] };
-  sp: { done?: string; error?: string };
+  sp: { done?: string; error?: string; merge?: string; mergeq?: string };
 }) {
   const [settings, modes, brands, users, commercial, history, links, canEdit, canValidate, groupName, groups] = await Promise.all([
     getSettings(), listPaymentModes(), listBrands(),
@@ -38,7 +39,7 @@ export async function ClientInfosTab({ client, billing, sp }: {
   return (
     <>
       {sp.error && <div className="mb-4 rounded-2xl bg-red-soft border border-red/30 px-4 py-3 text-[13px] text-red">{sp.error}</div>}
-      {sp.done && <div className="mb-4 rounded-2xl bg-green-soft border border-green/30 px-4 py-3 text-[13px] text-green">{sp.done === "cree" ? "Client créé. Complétez son identité légale pour pouvoir le facturer." : "Fiche enregistrée."}</div>}
+      {sp.done && <div className="mb-4 rounded-2xl bg-green-soft border border-green/30 px-4 py-3 text-[13px] text-green">{sp.done === "cree" ? "Client créé. Complétez son identité légale pour pouvoir le facturer." : sp.done === "fusion" ? "Fiches fusionnées : l'historique de la fiche absorbée est rattaché à celle-ci (détail dans l'historique)." : "Fiche enregistrée."}</div>}
       <div className={`mb-4 rounded-2xl border px-4 py-3 text-[13px] ${billing.ready ? "border-green/30 bg-green-soft text-green" : "border-orange/30 bg-orange-soft text-orange"}`}>
         {billing.ready
           ? <>Prêt à facturer : les mentions obligatoires sont complètes.{billing.recommended.length > 0 && <span className="text-muted"> Recommandé : {billing.recommended.join(", ")}.</span>}</>
@@ -46,9 +47,12 @@ export async function ClientInfosTab({ client, billing, sp }: {
       </div>
 
       <div className="grid lg:grid-cols-[1fr_360px] gap-4">
-        <Card title="Identité et conditions">
-          <ClientLegalForm client={client} groupName={groupName} groups={groups} users={users.rows} paymentModes={modes} action={saveClientLegalAction} readOnly={!canEdit} maxPaymentDays={g.maxPaymentDays} defaultPaymentDays={g.defaultPaymentDays} />
-        </Card>
+        <div className="space-y-4">
+          <Card title="Identité et conditions">
+            <ClientLegalForm client={client} groupName={groupName} groups={groups} users={users.rows} paymentModes={modes} action={saveClientLegalAction} readOnly={!canEdit} maxPaymentDays={g.maxPaymentDays} defaultPaymentDays={g.defaultPaymentDays} />
+          </Card>
+          <LegalEntitiesCard client={client} canEdit={canEdit} />
+        </div>
 
         <div className="space-y-4">
           <Card title="Adresses de livraison">
@@ -96,6 +100,8 @@ export async function ClientInfosTab({ client, billing, sp }: {
             </div>
           </Card>
 
+          {canValidate && <MergeCard client={client} sp={sp} />}
+
           {canValidate && (
             <Card title="Blocage et archivage">
               <form action={blockClientAction} className="space-y-1.5 text-[13px]">
@@ -113,7 +119,7 @@ export async function ClientInfosTab({ client, billing, sp }: {
               <form action={deleteClientAction} className="space-y-1.5 text-[13px] mt-4 pt-4 border-t border-line">
                 <input type="hidden" name="id" value={client.id} />
                 {links.length
-                  ? <p className="text-muted">Suppression impossible : {links.map((l) => `${l.n} ${l.label}`).join(", ")}. Archivez-le.</p>
+                  ? <p className="text-muted">Suppression impossible : {links.map((l) => `${l.n} ${l.label}`).join(", ")}. Fusionnez-le dans la bonne fiche (ci-dessus) ou archivez-le.</p>
                   : <><p className="text-muted">Aucune donnée rattachée : suppression définitive possible. Tapez <b>SUPPRIMER</b>.</p><input name="confirm" placeholder="SUPPRIMER" autoComplete="off" className="input h-8 text-[12.5px]" /><button className="btn-secondary btn-sm text-red" type="submit">Supprimer définitivement</button></>}
               </form>
             </Card>

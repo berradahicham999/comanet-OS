@@ -11,13 +11,15 @@ import { stockState } from "./ledger";
  * articles actifs avec PPH, TVA et stock disponible, modes de règlement, commerciaux, sites.
  * Aucun calcul ici : le formulaire utilise `calc.ts`, le serveur recalcule à l'enregistrement.
  */
-export type EditorClient = { id: string; name: string; legalName: string | null; city: string | null; blocked: boolean; defaultDiscountPct: string | null; paymentModeKey: string | null; brandDiscounts: Record<string, string> };
+export type EditorClient = { id: string; name: string; legalName: string | null; city: string | null; blocked: boolean; defaultDiscountPct: string | null; paymentModeKey: string | null; brandDiscounts: Record<string, string>;
+  /** Raisons sociales supplémentaires actives (l'identité de la fiche reste proposée en premier). */
+  legalEntities: { id: string; legalName: string; ice: string | null }[] };
 export type EditorProduct = { id: string; name: string; ref: string | null; ean: string | null; kind: string; brandId: string | null; brand: string | null; publicPriceTtc: string | null; taxRate: string; available: string | null; trackLots: boolean };
 
 export async function editorData(opts: { clientIds?: string[] | null } = {}) {
   const g = (await getSettings()).gestion;
   const scope = opts.clientIds ? (opts.clientIds.length ? sql`and c.id = any(${pgArray(opts.clientIds)})` : sql`and false`) : sql``;
-  const [clients, discounts, products, modes, reps, stock, defaultRate, brands] = await Promise.all([
+  const [clients, discounts, products, modes, reps, stock, defaultRate, brands, entities] = await Promise.all([
     db.execute<{ id: string; name: string; legal_name: string | null; city: string | null; blocked: boolean; default_discount_pct: string | null; payment_mode_key: string | null }>(sql`
       select c.id, c.name, c.legal_name, c.city, c.blocked, c.default_discount_pct::text, c.payment_mode_key from clients c where c.active ${scope} order by c.name`),
     db.execute<{ client_id: string; brand_id: string; pct: string }>(sql`select client_id, brand_id, discount_pct::text as pct from client_brand_discounts`),
@@ -29,7 +31,10 @@ export async function editorData(opts: { clientIds?: string[] | null } = {}) {
     stockState(),
     db.execute<{ rate: string }>(sql`select rate::text as rate from tax_rates where key = ${g.defaultTaxRateKey}`),
     db.execute<{ id: string; name: string }>(sql`select id, name from brands where active and merged_into_id is null order by name`),
+    db.execute<{ id: string; client_id: string; legal_name: string; ice: string | null }>(sql`select id, client_id, legal_name, ice from client_legal_entities where active order by legal_name`),
   ]);
+  const entitiesByClient = new Map<string, EditorClient["legalEntities"]>();
+  for (const e of entities.rows) entitiesByClient.set(e.client_id, [...(entitiesByClient.get(e.client_id) ?? []), { id: e.id, legalName: e.legal_name, ice: e.ice }]);
   const byClient = new Map<string, Record<string, string>>();
   for (const d of discounts.rows) {
     const m = byClient.get(d.client_id) ?? {};
@@ -39,7 +44,7 @@ export async function editorData(opts: { clientIds?: string[] | null } = {}) {
   const available = new Map(stock.map((s) => [s.productId, s.byWarehouse.PRINCIPAL ?? "0"]));
   const rate = defaultRate.rows[0]?.rate ?? "20.00";
   return {
-    clients: clients.rows.map((c): EditorClient => ({ id: c.id, name: c.name, legalName: c.legal_name, city: c.city, blocked: c.blocked, defaultDiscountPct: c.default_discount_pct, paymentModeKey: c.payment_mode_key, brandDiscounts: byClient.get(c.id) ?? {} })),
+    clients: clients.rows.map((c): EditorClient => ({ id: c.id, name: c.name, legalName: c.legal_name, city: c.city, blocked: c.blocked, defaultDiscountPct: c.default_discount_pct, paymentModeKey: c.payment_mode_key, brandDiscounts: byClient.get(c.id) ?? {}, legalEntities: entitiesByClient.get(c.id) ?? [] })),
     products: products.rows.map((p): EditorProduct => ({ id: p.id, name: p.name, ref: p.ref, ean: p.ean, kind: p.kind, brandId: p.brand_id, brand: p.brand, publicPriceTtc: p.price_retail, taxRate: p.rate ?? rate, available: p.kind === "PRODUIT" ? available.get(p.id) ?? "0" : null, trackLots: p.track_lots })),
     paymentModes: modes.filter((m) => m.active).map((m) => ({ key: m.key, label: m.label })),
     reps: reps.rows,

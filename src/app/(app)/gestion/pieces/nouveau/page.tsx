@@ -41,7 +41,7 @@ export default async function NewDocumentPage(props: { searchParams: Promise<{ t
         canValidate={await canDo(permModule, "validate")}
         creditReasons={reasons}
         initial={{
-          id: null, clientId, date: iso(today()), site: data.sites[0], salesRepId: null, paymentModeKey: null,
+          id: null, clientId, legalEntityId: null, date: iso(today()), site: data.sites[0], salesRepId: null, paymentModeKey: null,
           globalDiscountPct: "0", notes: "", reasonKey: type === "AVOIR" ? (reasons.find((r) => r.key === "REMISE_OBJECTIFS")?.key ?? null) : null, originDocumentId: null, lines: [],
         }}
       />

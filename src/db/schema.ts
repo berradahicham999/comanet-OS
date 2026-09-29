@@ -835,6 +835,34 @@ export const clientDeliveryAddresses = pgTable(
   (t) => [index("client_delivery_addresses_client_idx").on(t.clientId)],
 );
 
+/**
+ * Raisons sociales supplémentaires d'un client (migration 0034). Le point de vente reste UN client :
+ * ventes, animations, stock et encours lui sont rattachés ; seules les pièces choisissent l'entité
+ * facturée. L'identité portée par la fiche (`clients.legal_name`, `ice`…) reste l'entité principale ;
+ * une pièce sans `legal_entity_id` la facture. On archive une entité, on ne la supprime pas si une
+ * pièce la cite. Écritures : `src/lib/gestion/clients.ts` seulement.
+ */
+export const clientLegalEntities = pgTable(
+  "client_legal_entities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    clientId: uuid("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+    legalName: text("legal_name").notNull(),
+    accountCode: text("account_code"),
+    ice: text("ice"),
+    ifNumber: text("if_number"),
+    rc: text("rc"),
+    patente: text("patente"),
+    billingAddress: text("billing_address"),
+    postalCode: text("postal_code"),
+    city: text("city"),
+    active: boolean("active").notNull().default(true),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("client_legal_entities_client_idx").on(t.clientId)],
+);
+
 /** Remise d'un client sur une marque : remplace sa remise par défaut pour les articles de cette marque. */
 export const clientBrandDiscounts = pgTable(
   "client_brand_discounts",
@@ -1001,6 +1029,8 @@ export const salesDocuments = pgTable(
     isSimulation: boolean("is_simulation").notNull().default(true),
     date: date("date").notNull(),
     clientId: uuid("client_id").notNull().references(() => clients.id, { onDelete: "restrict" }),
+    /** Raison sociale facturée (NULL : identité principale de la fiche client). Copiée dans `client_snapshot` à la validation. */
+    legalEntityId: uuid("legal_entity_id").references((): AnyPgColumn => clientLegalEntities.id, { onDelete: "restrict" }),
     clientSnapshot: jsonb("client_snapshot"),
     companySnapshot: jsonb("company_snapshot"),
     deliveryAddress: text("delivery_address"),
@@ -3551,6 +3581,7 @@ export type User = typeof users.$inferSelect;
 export type Brand = typeof brands.$inferSelect;
 export type Product = typeof products.$inferSelect;
 export type Client = typeof clients.$inferSelect;
+export type ClientLegalEntity = typeof clientLegalEntities.$inferSelect;
 export type Sale = typeof sales.$inferSelect;
 export type StockSnapshot = typeof stockSnapshots.$inferSelect;
 export type ClientStockReading = typeof clientStockReadings.$inferSelect;

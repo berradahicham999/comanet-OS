@@ -99,3 +99,63 @@ export function duplicateCandidates(
   }
   return out.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
 }
+
+/* ------------------------- Raisons sociales et fusion ------------------------- */
+
+/** Identité légale portée par une fiche client ou par une de ses raisons sociales supplémentaires. */
+export type LegalIdentity = {
+  legalName: string | null;
+  accountCode: string | null;
+  ice: string | null;
+  ifNumber: string | null;
+  rc: string | null;
+  patente: string | null;
+  billingAddress: string | null;
+  postalCode: string | null;
+  city: string | null;
+};
+
+/**
+ * Identité imprimée sur une pièce : celle de la raison sociale choisie, sinon celle de la fiche.
+ * Une raison sociale supplémentaire est une autre société : son code Sage n'est jamais emprunté à la
+ * fiche. Seule la ville se reprend de la fiche (même point de vente) si l'entité n'en a pas.
+ */
+export function billingIdentity(client: LegalIdentity & { name: string; code: string | null }, entity: LegalIdentity | null): LegalIdentity & { name: string } {
+  if (!entity) return { ...client, name: client.name, legalName: client.legalName ?? client.name, accountCode: client.accountCode ?? client.code };
+  return { ...entity, name: client.name, city: entity.city ?? client.city };
+}
+
+/**
+ * Raison sociale à ajouter à la fiche gardée lors d'une fusion : l'identité de la fiche absorbée,
+ * sauf si c'est la même société (même ICE, ou même raison sociale sans ICE contradictoire) ou si
+ * elle est vide. Les raisons sociales déjà présentes sur la fiche gardée ne sont pas dupliquées.
+ */
+export function entityFromAbsorbed(
+  kept: LegalIdentity,
+  keptEntities: LegalIdentity[],
+  absorbed: LegalIdentity & { name: string },
+): LegalIdentity | null {
+  const legalName = absorbed.legalName?.trim() || absorbed.name.trim();
+  if (!legalName) return null;
+  const ice = normalizeIce(absorbed.ice);
+  const same = (x: LegalIdentity) => {
+    const xIce = normalizeIce(x.ice);
+    if (ice && xIce) return ice === xIce;
+    return normKey(x.legalName) === normKey(legalName);
+  };
+  if ([kept, ...keptEntities].some(same)) return null;
+  return { ...absorbed, legalName, ice };
+}
+
+/** Données de la fiche absorbée qui empêchent une fusion (pièces validées et règlements sont figés sur leur client). */
+export function mergeBlockers(input: { sameClient: boolean; absorbedValidatedDocs: number; absorbedPayments: number; keptValidatedDocs: number }): string[] {
+  if (input.sameClient) return ["On ne fusionne pas une fiche avec elle-même."];
+  const out: string[] = [];
+  if (input.absorbedValidatedDocs > 0 || input.absorbedPayments > 0) {
+    const what = [input.absorbedValidatedDocs && `${input.absorbedValidatedDocs} pièce(s) validée(s)`, input.absorbedPayments && `${input.absorbedPayments} règlement(s)`].filter(Boolean).join(" et ");
+    out.push(input.keptValidatedDocs > 0
+      ? `Les deux fiches ont des pièces validées (${what} sur la fiche absorbée) : une pièce émise reste attachée à son client, la fusion est impossible.`
+      : `La fiche absorbée a ${what}, figés sur leur client : fusionnez dans l'autre sens (gardez la fiche qui porte les pièces).`);
+  }
+  return out;
+}

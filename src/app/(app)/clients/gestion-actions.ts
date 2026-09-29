@@ -9,8 +9,8 @@ import { SCALE } from "@/lib/gestion/money";
 import { getSettings } from "@/lib/settings";
 import type { DuplicateCandidate } from "@/lib/gestion/clients-shared";
 import {
-  addDeliveryAddress, createClient, deleteClient, findDuplicates, removeDeliveryAddress, setBrandDiscount, setClientArchived,
-  setClientBlocked, updateClientLegal, type ClientLegalInput, type ClientType,
+  addDeliveryAddress, createClient, deleteClient, findDuplicates, mergeClients, removeDeliveryAddress, saveLegalEntity, setBrandDiscount, setClientArchived,
+  setClientBlocked, setLegalEntityActive, updateClientLegal, type ClientLegalInput, type ClientType,
 } from "@/lib/gestion/clients";
 
 /**
@@ -165,4 +165,54 @@ export async function brandDiscountAction(fd: FormData) {
   }
   done(id);
   redirect(`/clients/${id}?tab=infos#remises`);
+}
+
+/* ------------------------------ Raisons sociales ------------------------------ */
+
+export async function saveLegalEntityAction(fd: FormData) {
+  const { user, id } = await guard("edit", fd);
+  const entityId = str(fd, "entityId");
+  try {
+    await saveLegalEntity(id, isUuid(entityId) ? entityId : null, {
+      legalName: str(fd, "legalName") ?? "", accountCode: str(fd, "accountCode"), ice: str(fd, "ice"), ifNumber: str(fd, "ifNumber"), rc: str(fd, "rc"),
+      patente: str(fd, "patente"), billingAddress: str(fd, "billingAddress"), postalCode: str(fd, "postalCode"), city: str(fd, "city"),
+    }, actor(user));
+  } catch (e) {
+    redirect(`/clients/${id}?tab=infos&error=${errorParam(e)}#raisons-sociales`);
+  }
+  done(id);
+  redirect(`/clients/${id}?tab=infos&done=1#raisons-sociales`);
+}
+
+export async function legalEntityActiveAction(fd: FormData) {
+  const { user, id } = await guard("edit", fd);
+  const entityId = str(fd, "entityId");
+  try {
+    if (!isUuid(entityId)) throw new Error("Raison sociale introuvable.");
+    await setLegalEntityActive(id, entityId, fd.get("active") === "1", actor(user));
+  } catch (e) {
+    redirect(`/clients/${id}?tab=infos&error=${errorParam(e)}#raisons-sociales`);
+  }
+  done(id);
+  redirect(`/clients/${id}?tab=infos#raisons-sociales`);
+}
+
+/* ---------------------------------- Fusion ---------------------------------- */
+
+/** Fusionne la fiche `absorbedId` dans la fiche courante (`id`, gardée). « Valider » sur Clients, les deux fiches dans la portée. */
+export async function mergeClientAction(fd: FormData) {
+  const { user, id } = await guard("validate", fd);
+  const absorbedId = str(fd, "absorbedId");
+  try {
+    if (!isUuid(absorbedId)) throw new Error("Choisissez la fiche à absorber.");
+    if (!(await clientInScope(absorbedId))) throw new Error("La fiche à absorber n'est pas dans votre portée.");
+    if (str(fd, "confirm") !== "FUSIONNER") throw new Error("Tapez FUSIONNER pour confirmer.");
+    await mergeClients(id, absorbedId, actor(user));
+  } catch (e) {
+    redirect(`/clients/${id}?tab=infos&merge=${absorbedId ?? ""}&error=${errorParam(e)}#fusion`);
+  }
+  done(id);
+  revalidatePath("/terrain");
+  revalidatePath("/ventes");
+  redirect(`/clients/${id}?tab=infos&done=fusion`);
 }

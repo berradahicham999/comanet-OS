@@ -354,6 +354,62 @@ async function main() {
   assert.equal((await RG.invoiceSettlement(faPay)).balance, "0.00");
   console.log(`✓ nom du client corrigé sur ${renamed.number} (ICE et montants figés), avoir financier ${vAvf.number} par marque (900 TTC) imputé sur une facture`);
 
+  // Fusion de deux fiches d'un même point de vente (PARA LA GLOIRE aux ventes, LA GLOIRE au terrain) et
+  // facturation au nom de la raison sociale absorbée.
+  const CL = await import("@/lib/gestion/clients");
+  const keptC = await one<{ id: string }>(sql`insert into clients (name, name_key, legal_name, ice, billing_address, city, type)
+    values (${"PARA GLOIRE " + tag}, ${"PARA GLOIRE " + tag}, ${"PARA GLOIRE " + tag}, '001234567000089', '1 RUE IT', 'FES', 'PARAPHARMACIE') returning id`);
+  const absC = await one<{ id: string }>(sql`insert into clients (name, name_key, legal_name, city, phone, account_code)
+    values (${"GLOIRE " + tag}, ${"GLOIRE " + tag}, ${"GLOIRE SARL " + tag}, 'FÈS', '0522000000', ${"G" + tag}) returning id`);
+  await db.execute(sql`insert into sales (date, client_id, product_id, quantity, amount, line_hash) values (${day}, ${absC.id}::uuid, ${p2.id}::uuid, 2, 400, ${"IT-M-" + tag})`);
+  await db.execute(sql`insert into user_client_assignments (user_id, client_id) values (${u.id}::uuid, ${absC.id}::uuid), (${u.id}::uuid, ${keptC.id}::uuid)`);
+  const absDraft = await D.saveDraft({ type: "BL", clientId: absC.id, date: day, site: "COMANET", deliveryAddress: null, salesRepId: null, paymentModeKey: null, globalDiscountPct: "0", notes: null,
+    lines: [{ productId: p2.id, quantity: "1", unitPriceHt: "200", discountPct: "0" }] }, who);
+  const absBl = await D.saveDraft({ type: "BL", clientId: absC.id, date: day, site: "COMANET", deliveryAddress: null, salesRepId: null, paymentModeKey: null, globalDiscountPct: "0", notes: null,
+    lines: [{ productId: p2.id, quantity: "1", unitPriceHt: "200", discountPct: "0" }] }, who);
+  await D.validateDocument(absBl, who, { override: true });
+  await refused("fusion d'une fiche qui porte une pièce validée", () => CL.mergeClients(keptC.id, absC.id, who), /autre sens/);
+  await D.cancelBL(absBl, "test fusion", who);
+  await refused("fusion d'une fiche avec pièce annulée (numérotée, figée)", () => CL.mergeClients(keptC.id, absC.id, who), /autre sens/);
+  // Une pièce numérotée reste sur son client : on repart d'une fiche absorbée sans pièce validée.
+  const abs2 = await one<{ id: string }>(sql`insert into clients (name, name_key, legal_name, city, account_code)
+    values (${"LA GLOIRE " + tag}, ${"LA GLOIRE " + tag}, ${"LA GLOIRE SARL " + tag}, 'FÈS', ${"LG" + tag}) returning id`);
+  await db.execute(sql`update sales set client_id = ${abs2.id}::uuid where line_hash = ${"IT-M-" + tag}`);
+  await db.execute(sql`update sales_documents set client_id = ${abs2.id}::uuid where id = ${absDraft}::uuid`);
+  await db.execute(sql`insert into user_client_assignments (user_id, client_id) values (${u.id}::uuid, ${abs2.id}::uuid)`);
+  const prev = await CL.mergePreview(keptC.id, abs2.id);
+  assert.deepEqual(prev.blockers, []);
+  assert.equal(prev.newEntity?.legalName, "LA GLOIRE SARL " + tag);
+  await CL.mergeClients(keptC.id, abs2.id, who);
+  assert.equal((await one<{ n: number }>(sql`select count(*)::int as n from clients where id = ${abs2.id}::uuid`)).n, 0);
+  assert.equal((await one<{ c: string }>(sql`select client_id::text as c from sales where line_hash = ${"IT-M-" + tag}`)).c, keptC.id);
+  assert.equal((await one<{ n: number }>(sql`select count(*)::int as n from user_client_assignments where client_id = ${keptC.id}::uuid`)).n, 1);
+  assert.equal((await one<{ c: string }>(sql`select client_id::text as c from client_aliases where alias = ${"LA GLOIRE " + tag}`)).c, keptC.id);
+  const ent = (await CL.listLegalEntities(keptC.id))[0];
+  assert.equal(ent.legalName, "LA GLOIRE SARL " + tag);
+  assert.equal(ent.accountCode, "LG" + tag);
+  const moved = (await D.getDocument(absDraft))!;
+  assert.equal(moved.clientId, keptC.id);
+  assert.equal(moved.legalEntityId, ent.id);
+  // Validation au nom de la raison sociale : ICE manquant → facture refusée, BL accepté avec l'identité de l'entité.
+  const vMoved = await D.validateDocument(absDraft, who, { override: true });
+  const snap = (await D.getDocument(absDraft))!.clientSnapshot as Record<string, string | null>;
+  assert.equal(snap.legalName, "LA GLOIRE SARL " + tag);
+  assert.equal(snap.accountCode, "LG" + tag);
+  assert.equal(snap.city, "FÈS");
+  assert.equal(snap.ice, null);
+  const invM = await D.createInvoiceFromBLs([absDraft], who);
+  assert.equal((await D.getDocument(invM))!.legalEntityId, ent.id, "la facture reprend la raison sociale du BL");
+  await refused("facture au nom d'une raison sociale sans ICE", () => D.validateDocument(invM, who), /LA GLOIRE SARL.*ICE/);
+  await CL.saveLegalEntity(keptC.id, ent.id, { legalName: ent.legalName, accountCode: ent.accountCode, ice: "002222222000022", ifNumber: null, rc: null, patente: null, billingAddress: "9 BD IT", postalCode: null, city: null }, who);
+  await D.validateDocument(invM, who);
+  const invSnap = (await D.getDocument(invM))!.clientSnapshot as Record<string, string | null>;
+  assert.equal(invSnap.ice, "002222222000022");
+  assert.equal(invSnap.address, "9 BD IT");
+  await refused("une raison sociale d'un autre client", () => D.saveDraft({ type: "BL", clientId: client.id, legalEntityId: ent.id, date: day, site: "COMANET", deliveryAddress: null, salesRepId: null, paymentModeKey: null, globalDiscountPct: "0", notes: null,
+    lines: [{ productId: p2.id, quantity: "1", unitPriceHt: "200", discountPct: "0" }] }, who), /n'appartient pas/);
+  console.log(`✓ fusion : ventes, assignations, brouillon et libellé d'import rattachés à la fiche gardée ; BL ${vMoved.number} puis facture au nom de « LA GLOIRE SARL » (ICE exigé, identité figée)`);
+
   const before = await getSettings();
   try {
     await saveSettings({ ...before, gestion: { ...before.gestion, cutover: { mode: "ACTIF", date: day, sites: ["COMANET"] } } });
