@@ -31,6 +31,7 @@ export type EditorLine = {
 export type EditorInitial = {
   id: string | null;
   clientId: string;
+  legalEntityId: string | null;
   date: string;
   site: string;
   salesRepId: string | null;
@@ -58,6 +59,7 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
 }) {
   const [clientId, setClientId] = useState(initial.clientId);
   const [clientQuery, setClientQuery] = useState("");
+  const [legalEntityId, setLegalEntityId] = useState(initial.legalEntityId ?? "");
   const [date, setDate] = useState(initial.date);
   const [site, setSite] = useState(initial.site);
   const [salesRepId, setSalesRepId] = useState(initial.salesRepId ?? "");
@@ -109,6 +111,7 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
   const pickClient = (id: string) => {
     setClientId(id);
     setClientQuery("");
+    setLegalEntityId("");
     const c = data.clients.find((x) => x.id === id);
     if (c?.paymentModeKey && !paymentModeKey) setPaymentModeKey(c.paymentModeKey);
     // Les remises par défaut suivent le client choisi (lignes saisies, pas les lignes reprises).
@@ -140,7 +143,7 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
   const remove = (key: string) => setLines((ls) => ls.filter((l) => l.key !== key));
 
   const payload = JSON.stringify({
-    id: initial.id, type, clientId, date, site, salesRepId: salesRepId || null, paymentModeKey: paymentModeKey || null, globalDiscountPct: globalDiscountPct || "0",
+    id: initial.id, type, clientId, legalEntityId: legalEntityId || null, date, site, salesRepId: salesRepId || null, paymentModeKey: paymentModeKey || null, globalDiscountPct: globalDiscountPct || "0",
     notes: notes.trim() || null, reasonKey: type === "AVOIR" ? reasonKey || null : null, originDocumentId: initial.originDocumentId,
     lines: lines.map((l) => ({
       productId: l.productId, designation: l.designation, quantity: l.quantity, freeQuantity: l.freeQuantity || "0", unitPriceHt: l.unitPriceHt,
@@ -182,6 +185,15 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
             </div>
           )}
         </div>
+        {client && client.legalEntities.length > 0 && (
+          <label className="block max-w-md">
+            <span className="label block mb-1">Au nom de (raison sociale)</span>
+            <select className="select h-9" value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} disabled={fromOrigin}>
+              <option value="">{client.legalName ?? client.name} — fiche client</option>
+              {client.legalEntities.map((e) => <option key={e.id} value={e.id}>{e.legalName}{e.ice ? ` — ICE ${e.ice}` : " — ICE manquant"}</option>)}
+            </select>
+          </label>
+        )}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <label className="block"><span className="label block mb-1">Date</span><input type="date" className="input h-9" value={date} onChange={(e) => setDate(e.target.value)} required /></label>
           <label className="block"><span className="label block mb-1">Site</span>

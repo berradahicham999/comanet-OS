@@ -25,6 +25,27 @@ Plan complet, décisions et lots : `docs/plan-gestion-commerciale.md`. Ce guide 
   (enseigne) qui rassemble plusieurs raisons sociales (migration 0032). Le champ « Groupe » se saisit en clair sur la
   fiche : un nom inconnu crée le groupe, un champ vide détache le client. Liste : filtre et vue « Regrouper par groupe ».
   `account_code` = code du Sage COMANET (« 056 ») ; `code` reste le code des fichiers distributeurs.
+- **Un point de vente, plusieurs raisons sociales** (migration 0034). Quand un même magasin est facturé sous deux
+  sociétés (ex. PARA LA GLOIRE et LA GLOIRE à Fès), on garde **une seule fiche** : ventes, animations, relevés de stock,
+  encours et objectifs restent ensemble. Les raisons sociales supplémentaires vivent dans `client_legal_entities`
+  (fiche client → « Raisons sociales facturables » : raison sociale, ICE, code Sage, IF, RC, patente, adresse) ; la
+  fiche garde l'identité principale. Sur un BL, une facture ou un avoir, « Au nom de » choisit l'entité ; la facture
+  issue de BL et l'avoir reprennent celle de leur pièce d'origine ; les mentions obligatoires sont exigées sur l'entité
+  choisie et figées dans la pièce (`billingIdentity()`). Une entité ne prête jamais son ICE ni son code Sage à une autre.
+- **Fusionner deux fiches du même point de vente** (fiche client → « Fusionner une fiche en double », droit « Valider »
+  sur Clients). Candidats proposés : même groupe (petits groupes), doublons probables, recherche. L'aperçu liste ce qui
+  sera déplacé ; confirmation en tapant FUSIONNER. `mergeClients()` rattache à la fiche gardée ventes, animations,
+  relevés, activations, matériel, ventes en bloc, adresses, libellés d'import, raisons sociales, brouillons, tâches,
+  assignations et remises (la fiche gardée l'emporte en cas de doublon) ; le nom absorbé devient un libellé d'import
+  (les prochains fichiers tombent au bon endroit), son identité légale une raison sociale facturable (sauf même ICE ou
+  même raison sociale) ; les champs vides de la fiche gardée sont complétés, puis la fiche absorbée est supprimée.
+  Journal : MERGE sur la fiche gardée, MERGED_INTO sur l'absorbée. Refusée si la fiche absorbée porte des pièces
+  numérotées ou des règlements (figés sur leur client) : fusionner dans l'autre sens. Un test vérifie que toute table
+  qui référence `clients` est prise en charge par la fusion.
+- **Groupe ≠ fusion.** Le groupe rassemble des magasins distincts d'une même enseigne (COTE PARA, BIG PARA) et laisse
+  chaque fiche séparée ; la fusion concerne un seul magasin saisi deux fois.
+- **Supprimer** une fiche n'est possible que si rien n'y est rattaché (ventes, animations, pièces, règlements…) ; sinon
+  on la fusionne dans la bonne fiche ou on l'archive.
 - **L'article garde son code distributeur** (`sku`) ; la référence COMANET est `code`. Le matériel marketing
   (PLV, goodies) n'est pas un article : il reste dans `inventory_items` (Activations).
 - **Stock = somme des mouvements.** Le journal `stock_movements` est en écriture seule : la base refuse toute

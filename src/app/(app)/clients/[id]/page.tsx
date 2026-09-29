@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 
 const REC_TONE: Record<string, "red" | "orange" | "blue" | "green" | "accent" | "gray"> = { RELANCE: "blue", REACTIVATION: "red", ANALYSE: "orange", ANIMATION: "accent", DEVELOPPEMENT: "green", NONE: "gray" };
 
-export default async function ClientPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; releve?: string; brand?: string; sort?: string; done?: string; error?: string }> }) {
+export default async function ClientPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; releve?: string; brand?: string; sort?: string; done?: string; error?: string; merge?: string; mergeq?: string }> }) {
   await requireAccess("clients");
   const { id } = await props.params;
   const sp = await props.searchParams;

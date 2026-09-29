@@ -1,11 +1,14 @@
 import "server-only";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { clientBrandDiscounts, clientDeliveryAddresses, clientGroups, clients } from "@/db/schema";
+import { clientBrandDiscounts, clientDeliveryAddresses, clientGroups, clientLegalEntities, clients, type ClientLegalEntity } from "@/db/schema";
 import { audit, changedFields, type AuditActor } from "@/lib/audit";
 import { normKey } from "@/lib/import/normalize";
 import { cityToSector } from "@/lib/sectors";
-import { duplicateCandidates, normalizeIce, type DuplicateCandidate, type ExistingClient } from "./clients-shared";
+import { reassignDrafts } from "./documents";
+import {
+  duplicateCandidates, entityFromAbsorbed, isValidIce, mergeBlockers, normalizeIce, type DuplicateCandidate, type ExistingClient, type LegalIdentity,
+} from "./clients-shared";
 
 /**
  * Fiche client de la gestion commerciale : création, identité légale et conditions, archivage,
@@ -159,11 +162,13 @@ export async function clientLinks(id: string): Promise<{ label: string; n: numbe
       (select count(*)::int from activation_clients where client_id = ${id}::uuid) as activation_clients,
       (select count(*)::int from client_stock_readings where client_id = ${id}::uuid) as readings,
       (select count(*)::int from inventory_movements where client_id = ${id}::uuid) as materiel,
-      (select count(*)::int from tasks where entity_id = ${id}::uuid) as tasks`);
+      (select count(*)::int from tasks where entity_id = ${id}::uuid) as tasks,
+      (select count(*)::int from sales_documents where client_id = ${id}::uuid) as pieces,
+      (select count(*)::int from payments where client_id = ${id}::uuid) as payments`);
   const x = r.rows[0] ?? {};
   const labels: Record<string, string> = {
     sales: "lignes de vente", animations: "animations", activations: "activations", activation_clients: "activations rattachées",
-    readings: "relevés de stock", materiel: "sorties de matériel", tasks: "tâches",
+    readings: "relevés de stock", materiel: "sorties de matériel", tasks: "tâches", pieces: "pièces de vente", payments: "règlements",
   };
   return Object.entries(labels).map(([k, label]) => ({ label, n: Number(x[k] ?? 0) })).filter((l) => l.n > 0);
 }
@@ -171,7 +176,7 @@ export async function clientLinks(id: string): Promise<{ label: string; n: numbe
 /** Suppression définitive, seulement si le client n'est rattaché à rien ; sinon il faut l'archiver. */
 export async function deleteClient(id: string, actor: AuditActor): Promise<void> {
   const links = await clientLinks(id);
-  if (links.length) throw new Error(`Suppression impossible : ce client a ${links.map((l) => `${l.n} ${l.label}`).join(", ")}. Archivez-le : il disparaît des listes, son historique reste.`);
+  if (links.length) throw new Error(`Suppression impossible : ce client a ${links.map((l) => `${l.n} ${l.label}`).join(", ")}. Fusionnez-le dans la bonne fiche, ou archivez-le : il disparaît des listes, son historique reste.`);
   await db.transaction(async (tx) => {
     const [c] = await tx.select().from(clients).where(eq(clients.id, id)).for("update");
     if (!c) throw new Error("Client introuvable.");
@@ -216,4 +221,231 @@ export async function clientCommercial(clientId: string) {
       where d.client_id = ${clientId}::uuid order by b.name`),
   ]);
   return { addresses, discounts: discounts.rows };
+}
+
+/* ------------------------------ Raisons sociales ------------------------------ */
+
+export type LegalEntityInput = Omit<LegalIdentity, "legalName"> & { legalName: string };
+
+/** Raisons sociales supplémentaires d'un client (l'identité de la fiche reste l'entité principale). */
+export async function listLegalEntities(clientId: string, opts: { activeOnly?: boolean } = {}): Promise<(ClientLegalEntity & { documents: number })[]> {
+  const r = await db.execute<Record<string, unknown>>(sql`
+    select e.*, (select count(*)::int from sales_documents d where d.legal_entity_id = e.id) as documents
+    from client_legal_entities e where e.client_id = ${clientId}::uuid ${opts.activeOnly ? sql`and e.active` : sql``}
+    order by e.active desc, e.legal_name`);
+  return r.rows.map((e) => ({
+    id: e.id, clientId: e.client_id, legalName: e.legal_name, accountCode: e.account_code, ice: e.ice, ifNumber: e.if_number, rc: e.rc, patente: e.patente,
+    billingAddress: e.billing_address, postalCode: e.postal_code, city: e.city, active: e.active, updatedAt: e.updated_at, createdAt: e.created_at, documents: e.documents,
+  }) as ClientLegalEntity & { documents: number });
+}
+
+function entityColumns(input: LegalEntityInput) {
+  const legalName = input.legalName.trim();
+  if (!legalName) throw new Error("La raison sociale est obligatoire.");
+  if (input.ice?.trim() && !isValidIce(input.ice)) throw new Error("ICE : 15 chiffres attendus.");
+  const t = (v: string | null) => (v?.trim() ? v.trim() : null);
+  return {
+    legalName, accountCode: t(input.accountCode), ice: normalizeIce(input.ice), ifNumber: t(input.ifNumber), rc: t(input.rc), patente: t(input.patente),
+    billingAddress: t(input.billingAddress), postalCode: t(input.postalCode), city: t(input.city),
+  };
+}
+
+/** Ajoute (id nul) ou modifie une raison sociale. Une pièce validée garde l'identité figée à sa validation. */
+export async function saveLegalEntity(clientId: string, id: string | null, input: LegalEntityInput, actor: AuditActor): Promise<void> {
+  const cols = entityColumns(input);
+  await db.transaction(async (tx) => {
+    if (cols.accountCode) {
+      const clash = (await tx.execute<{ name: string }>(sql`
+        select name from clients where account_code = ${cols.accountCode}
+        union all select legal_name from client_legal_entities where account_code = ${cols.accountCode} and id is distinct from ${id}::uuid limit 1`)).rows[0];
+      if (clash) throw new Error(`Le code Sage ${cols.accountCode} est déjà porté par « ${clash.name} ».`);
+    }
+    if (!id) {
+      const [row] = await tx.insert(clientLegalEntities).values({ ...cols, clientId }).returning({ id: clientLegalEntities.id });
+      await audit({ actor, action: "ADD_LEGAL_ENTITY", module: "clients", entity: "client", entityId: clientId, label: cols.legalName, after: { ...cols, id: row.id } }, tx);
+      return;
+    }
+    const [before] = await tx.select().from(clientLegalEntities).where(sql`${clientLegalEntities.id} = ${id}::uuid and ${clientLegalEntities.clientId} = ${clientId}::uuid`).for("update");
+    if (!before) throw new Error("Raison sociale introuvable.");
+    const diff = changedFields(before as unknown as Record<string, unknown>, cols);
+    if (!diff) return;
+    await tx.update(clientLegalEntities).set({ ...cols, updatedAt: new Date() }).where(eq(clientLegalEntities.id, id));
+    await audit({ actor, action: "UPDATE_LEGAL_ENTITY", module: "clients", entity: "client", entityId: clientId, label: cols.legalName, before: diff.before, after: diff.after }, tx);
+  });
+}
+
+/** Archive (plus proposée sur les nouvelles pièces) ou restaure une raison sociale. Rien n'est supprimé. */
+export async function setLegalEntityActive(clientId: string, id: string, active: boolean, actor: AuditActor): Promise<void> {
+  await db.transaction(async (tx) => {
+    const r = await tx.execute<{ legal_name: string }>(sql`
+      update client_legal_entities set active = ${active}, updated_at = now() where id = ${id}::uuid and client_id = ${clientId}::uuid returning legal_name`);
+    if (!r.rows[0]) throw new Error("Raison sociale introuvable.");
+    await audit({ actor, action: active ? "RESTORE_LEGAL_ENTITY" : "ARCHIVE_LEGAL_ENTITY", module: "clients", entity: "client", entityId: clientId, label: r.rows[0].legal_name }, tx);
+  });
+}
+
+/* ---------------------------------- Fusion ---------------------------------- */
+
+/**
+ * Tables rattachées à un client par `client_id` et déplacées telles quelles par une fusion.
+ * Les tables à clé composée (assignations, remises, activations rattachées) et les pièces sont
+ * traitées à part dans `mergeClients()`. Un test vérifie que chaque référence à `clients` y figure.
+ */
+export const MERGE_MOVED_TABLES = [
+  "sales", "animations", "client_stock_readings", "activations", "inventory_movements", "pnl_bulk_sales",
+  "client_delivery_addresses", "client_aliases", "client_legal_entities",
+] as const;
+/** Pièces, règlements et relances (une relance porte sur une facture validée) : la fusion est refusée s'il y en a. */
+export const MERGE_SPECIAL_TABLES = ["sales_documents", "payments", "payment_reminders", "user_client_assignments", "client_brand_discounts", "activation_clients"] as const;
+
+const MOVE_LABELS: Record<string, string> = {
+  sales: "lignes de vente", animations: "animations", client_stock_readings: "relevés de stock", activations: "activations",
+  inventory_movements: "sorties de matériel", pnl_bulk_sales: "ventes en bloc (P&L)",
+  client_delivery_addresses: "adresses de livraison", client_aliases: "libellés d'import", client_legal_entities: "raisons sociales",
+  activation_clients: "activations rattachées", user_client_assignments: "assignations d'utilisateurs", client_brand_discounts: "remises par marque",
+  drafts: "pièces en brouillon", tasks: "tâches",
+};
+
+type ClientRow = typeof clients.$inferSelect;
+const identityOf = (c: ClientRow): LegalIdentity => ({
+  legalName: c.legalName, accountCode: c.accountCode, ice: c.ice, ifNumber: c.ifNumber, rc: c.rc, patente: c.patente,
+  billingAddress: c.billingAddress, postalCode: c.postalCode, city: c.city,
+});
+
+export type MergePreview = {
+  kept: { id: string; name: string; legalName: string | null; city: string | null; code: string | null };
+  absorbed: { id: string; name: string; legalName: string | null; city: string | null; code: string | null };
+  moves: { label: string; n: number }[];
+  newEntity: LegalIdentity | null;
+  notes: string[];
+  blockers: string[];
+};
+
+async function mergeState(t: Tx | typeof db, kept: ClientRow, absorbed: ClientRow): Promise<MergePreview> {
+  const counts = (await t.execute<Record<string, number>>(sql`
+    select ${sql.join(MERGE_MOVED_TABLES.map((tb) => sql`(select count(*)::int from ${sql.identifier(tb)} where client_id = ${absorbed.id}::uuid) as ${sql.identifier(tb)}`), sql`, `)},
+      (select count(*)::int from activation_clients where client_id = ${absorbed.id}::uuid) as activation_clients,
+      (select count(*)::int from user_client_assignments where client_id = ${absorbed.id}::uuid) as user_client_assignments,
+      (select count(*)::int from client_brand_discounts where client_id = ${absorbed.id}::uuid) as client_brand_discounts,
+      (select count(*)::int from sales_documents where client_id = ${absorbed.id}::uuid and status = 'BROUILLON') as drafts,
+      (select count(*)::int from tasks where entity_id = ${absorbed.id}::uuid) as tasks,
+      (select count(*)::int from sales_documents where client_id = ${absorbed.id}::uuid and status <> 'BROUILLON') as absorbed_docs,
+      (select count(*)::int from payments where client_id = ${absorbed.id}::uuid) as absorbed_payments,
+      (select count(*)::int from sales_documents where client_id = ${kept.id}::uuid and status <> 'BROUILLON') as kept_docs`)).rows[0];
+  const keptEntities = await listLegalEntities(kept.id);
+  const newEntity = entityFromAbsorbed(identityOf(kept), keptEntities, { ...identityOf(absorbed), name: absorbed.name });
+  const notes: string[] = [];
+  if (absorbed.code && kept.code && absorbed.code !== kept.code) notes.push(`Le code distributeur ${absorbed.code} de « ${absorbed.name} » n'est plus reconnu par code : les imports retrouveront la fiche par son nom (libellé d'import).`);
+  if (absorbed.accountCode && newEntity?.accountCode) notes.push(`Code Sage ${absorbed.accountCode} repris sur la raison sociale ajoutée.`);
+  if (newEntity && !billingOk(newEntity)) notes.push(`La raison sociale « ${newEntity.legalName} » est incomplète (ICE, adresse…) : complétez-la avant de la facturer.`);
+  return {
+    kept: { id: kept.id, name: kept.name, legalName: kept.legalName, city: kept.city, code: kept.code },
+    absorbed: { id: absorbed.id, name: absorbed.name, legalName: absorbed.legalName, city: absorbed.city, code: absorbed.code },
+    moves: Object.entries(MOVE_LABELS).map(([k, label]) => ({ label, n: Number(counts[k] ?? 0) })).filter((m) => m.n > 0),
+    newEntity,
+    notes,
+    blockers: mergeBlockers({ sameClient: kept.id === absorbed.id, absorbedValidatedDocs: Number(counts.absorbed_docs), absorbedPayments: Number(counts.absorbed_payments), keptValidatedDocs: Number(counts.kept_docs) }),
+  };
+}
+
+const billingOk = (e: LegalIdentity) => !!(e.legalName && e.ice && isValidIce(e.ice) && e.billingAddress && e.city);
+
+/** Ce que ferait la fusion de `absorbedId` dans `keptId` (rien n'est écrit). */
+export async function mergePreview(keptId: string, absorbedId: string): Promise<MergePreview> {
+  const [kept] = await db.select().from(clients).where(eq(clients.id, keptId));
+  const [absorbed] = await db.select().from(clients).where(eq(clients.id, absorbedId));
+  if (!kept || !absorbed) throw new Error("Client introuvable.");
+  return mergeState(db, kept, absorbed);
+}
+
+/**
+ * Fusionne la fiche `absorbedId` dans `keptId` — un seul point de vente saisi deux fois (ex. LA GLOIRE
+ * au terrain, PARA LA GLOIRE aux ventes). Tout ou rien, dans une transaction :
+ * - tout l'historique (ventes, animations, relevés, activations, matériel, relances, brouillons, tâches,
+ *   assignations, remises) passe sur la fiche gardée ; en cas de doublon (même remise, même assignation),
+ *   la valeur de la fiche gardée l'emporte ;
+ * - le nom de la fiche absorbée devient un libellé d'import de la fiche gardée : les prochains fichiers
+ *   de ventes ou d'animations tombent au bon endroit ;
+ * - son identité légale devient une raison sociale supplémentaire (facturable sur les pièces) ;
+ * - les champs vides de la fiche gardée sont complétés ; puis la fiche absorbée est supprimée.
+ * Refusée si la fiche absorbée porte des pièces validées ou des règlements (figés sur leur client).
+ */
+export async function mergeClients(keptId: string, absorbedId: string, actor: AuditActor): Promise<MergePreview> {
+  return db.transaction(async (tx) => {
+    const locked = await tx.select().from(clients).where(sql`${clients.id} in (${keptId}::uuid, ${absorbedId}::uuid)`).orderBy(clients.id).for("update");
+    const kept = locked.find((c) => c.id === keptId);
+    const absorbed = locked.find((c) => c.id === absorbedId);
+    if (!kept || !absorbed) throw new Error("Client introuvable.");
+    const state = await mergeState(tx, kept, absorbed);
+    if (state.blockers.length) throw new Error(state.blockers.join(" "));
+    const k = keptId, a = absorbedId;
+
+    let newEntityId: string | null = null;
+    if (state.newEntity) {
+      const [row] = await tx.insert(clientLegalEntities).values({ ...state.newEntity, legalName: state.newEntity.legalName!, clientId: k }).returning({ id: clientLegalEntities.id });
+      newEntityId = row.id;
+    }
+    // Brouillons : la raison sociale principale de la fiche absorbée devient l'entité ajoutée.
+    await reassignDrafts(tx, a, k, newEntityId);
+    for (const tb of MERGE_MOVED_TABLES) await tx.execute(sql`update ${sql.identifier(tb)} set client_id = ${k}::uuid where client_id = ${a}::uuid`);
+    await tx.execute(sql`insert into activation_clients (activation_id, client_id) select activation_id, ${k}::uuid from activation_clients where client_id = ${a}::uuid on conflict do nothing`);
+    await tx.execute(sql`delete from activation_clients where client_id = ${a}::uuid`);
+    await tx.execute(sql`insert into user_client_assignments (user_id, client_id) select user_id, ${k}::uuid from user_client_assignments where client_id = ${a}::uuid on conflict do nothing`);
+    await tx.execute(sql`delete from user_client_assignments where client_id = ${a}::uuid`);
+    await tx.execute(sql`insert into client_brand_discounts (client_id, brand_id, discount_pct) select ${k}::uuid, brand_id, discount_pct from client_brand_discounts where client_id = ${a}::uuid on conflict do nothing`);
+    await tx.execute(sql`delete from client_brand_discounts where client_id = ${a}::uuid`);
+    await tx.execute(sql`update tasks set entity_id = ${k}::uuid where entity_id = ${a}::uuid`);
+    await tx.execute(sql`update notifications set entity_id = ${k}::uuid where entity_id = ${a}::uuid`);
+    // Le nom de la fiche absorbée reste reconnu par les imports.
+    await tx.execute(sql`insert into client_aliases (alias, client_id, source) values (${absorbed.nameKey}, ${k}::uuid, 'FUSION')
+      on conflict (alias) do update set client_id = excluded.client_id`);
+
+    // Champs vides de la fiche gardée complétés par la fiche absorbée (la fiche gardée l'emporte toujours).
+    const fill: Partial<ClientRow> = {};
+    const keys = ["code", "groupId", "phone", "email", "contactName", "salesRep", "channel", "sector", "city", "accountManagerId", "paymentModeKey", "paymentDays", "defaultDiscountPct", "creditLimit"] as const;
+    for (const key of keys) if ((kept[key] === null || kept[key] === "") && absorbed[key] !== null && absorbed[key] !== "") (fill as Record<string, unknown>)[key] = absorbed[key];
+    // Même société (aucune raison sociale ajoutée) : son code Sage revient à la fiche gardée si elle n'en a pas.
+    if (!state.newEntity && !kept.accountCode && absorbed.accountCode) fill.accountCode = absorbed.accountCode;
+    if (kept.type === "AUTRE" && absorbed.type !== "AUTRE") fill.type = absorbed.type;
+    if (absorbed.blocked && !kept.blocked) Object.assign(fill, { blocked: true, blockedReason: `${absorbed.blockedReason ?? "Bloqué"} (repris de ${absorbed.name})` });
+    await tx.delete(clients).where(eq(clients.id, a));
+    if (Object.keys(fill).length) await tx.update(clients).set({ ...fill, updatedAt: new Date() }).where(eq(clients.id, k));
+
+    const after = { absorbed: { id: a, name: absorbed.name, legalName: absorbed.legalName, ice: absorbed.ice, code: absorbed.code, accountCode: absorbed.accountCode }, moved: state.moves, newEntity: state.newEntity?.legalName ?? null, filled: Object.keys(fill) };
+    await audit({ actor, action: "MERGE", module: "clients", entity: "client", entityId: k, label: `${absorbed.name} → ${kept.name}`, after }, tx);
+    await audit({ actor, action: "MERGED_INTO", module: "clients", entity: "client", entityId: a, label: `${absorbed.name} → ${kept.name}`, after: { into: k } }, tx);
+    return state;
+  });
+}
+
+/**
+ * Fiches candidates à une fusion avec `clientId` : même groupe, doublons probables (nom, ICE,
+ * téléphone), puis recherche libre. Avec leurs volumes, pour choisir la fiche à garder.
+ */
+export async function mergeCandidates(clientId: string, query: string | null): Promise<{ id: string; name: string; legalName: string | null; city: string | null; reason: string; sales: number; animations: number; docs: number }[]> {
+  const [c] = await db.select().from(clients).where(eq(clients.id, clientId));
+  if (!c) return [];
+  const reasons = new Map<string, string>();
+  if (c.groupId) {
+    // Un grand groupe (enseigne à plusieurs magasins, grossiste) n'est pas un indice de doublon.
+    const g = await db.execute<{ id: string }>(sql`select id from clients where group_id = ${c.groupId}::uuid and id <> ${clientId}::uuid limit 11`);
+    if (g.rows.length <= 10) for (const r of g.rows) reasons.set(r.id, "Même groupe");
+  }
+  for (const d of (await findDuplicates({ name: c.name, legalName: c.legalName, ice: c.ice, phone: c.phone, city: c.city }, clientId)).slice(0, 10)) if (!reasons.has(d.id)) reasons.set(d.id, d.reasons.join(", "));
+  const q = query?.trim();
+  if (q && q.length >= 2) {
+    const like = `%${q}%`;
+    const r = await db.execute<{ id: string }>(sql`
+      select id from clients where id <> ${clientId}::uuid and (name ilike ${like} or legal_name ilike ${like} or code ilike ${like}) order by name limit 15`);
+    for (const x of r.rows) if (!reasons.has(x.id)) reasons.set(x.id, "Recherche");
+  }
+  if (!reasons.size) return [];
+  const ids = [...reasons.keys()];
+  const r = await db.execute<{ id: string; name: string; legal_name: string | null; city: string | null; sales: number; animations: number; docs: number }>(sql`
+    select c.id, c.name, c.legal_name, c.city,
+      (select count(*)::int from sales s where s.client_id = c.id) as sales,
+      (select count(*)::int from animations a where a.client_id = c.id) as animations,
+      (select count(*)::int from sales_documents d where d.client_id = c.id and d.status <> 'BROUILLON') as docs
+    from clients c where c.id in (${sql.join(ids.map((i) => sql`${i}::uuid`), sql`, `)}) order by c.name`);
+  return r.rows.map((x) => ({ id: x.id, name: x.name, legalName: x.legal_name, city: x.city, reason: reasons.get(x.id)!, sales: x.sales, animations: x.animations, docs: x.docs }));
 }

@@ -105,7 +105,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
             creditReasons={reasons.filter((r) => r.active).map((r) => ({ key: r.key, label: r.label, withReturn: r.withReturn }))}
             warehouses={whs.filter((w) => w.active && w.kind === "INTERNE").map((w) => ({ key: w.key, label: w.label }))}
             initial={{
-              id, clientId: doc.clientId, date: doc.date, site: doc.site, salesRepId: doc.salesRepId, paymentModeKey: doc.paymentModeKey,
+              id, clientId: doc.clientId, legalEntityId: doc.legalEntityId, date: doc.date, site: doc.site, salesRepId: doc.salesRepId, paymentModeKey: doc.paymentModeKey,
               globalDiscountPct: doc.globalDiscountPct, notes: doc.notes ?? "", reasonKey: doc.reasonKey, originDocumentId: doc.originDocumentId,
               lines: doc.lines.map((l) => ({
                 key: l.id, productId: l.productId, designation: l.designation, ref: l.ref, quantity: String(Number(l.quantity)), freeQuantity: String(Number(l.freeQuantity)),

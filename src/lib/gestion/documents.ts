@@ -9,7 +9,7 @@ import { pgArray } from "@/lib/sql-array";
 import { iso, today } from "@/lib/format";
 import { getSettings, type GestionSettings } from "@/lib/settings";
 import { amountInWords, computeDocument, netUnitPriceHt } from "./calc";
-import { billingReadiness } from "./clients-shared";
+import { billingIdentity, billingReadiness } from "./clients-shared";
 import {
   DOC_TYPE_LABELS, allowedActions, blStatusAfterInvoicing, commercialIssues, defaultDiscount, dueDateOf, emitsReal, remainingQty, shouldProject,
   type CommercialIssue, type DocStatus, type DocType,
@@ -57,6 +57,8 @@ export type DraftInput = {
   id?: string | null;
   type: DocType;
   clientId: string;
+  /** Raison sociale facturée (NULL : identité principale de la fiche). */
+  legalEntityId?: string | null;
   date: string;
   site: string;
   deliveryAddress: string | null;
@@ -179,6 +181,12 @@ export async function saveDraft(input: DraftInput, actor: AuditActor): Promise<s
     const client = (await tx.execute<{ active: boolean }>(sql`select active from clients where id = ${input.clientId}::uuid`)).rows[0];
     if (!client) throw new DocumentError("Client introuvable.");
     if (!client.active) throw new DocumentError("Ce client est archivé : restaurez-le avant de lui établir une pièce.");
+    const legalEntityId = input.legalEntityId || null;
+    if (legalEntityId) {
+      const e = (await tx.execute<{ active: boolean }>(sql`select active from client_legal_entities where id = ${legalEntityId}::uuid and client_id = ${input.clientId}::uuid`)).rows[0];
+      if (!e) throw new DocumentError("Cette raison sociale n'appartient pas au client choisi.");
+      if (!e.active) throw new DocumentError("Cette raison sociale est archivée : choisissez-en une autre.");
+    }
     const products = await productInfos(tx, input.lines.map((l) => l.productId).filter((x): x is string => !!x));
     const rate = await defaultRate(tx, g);
     const lines = input.lines.map((l, i) => {
@@ -210,7 +218,7 @@ export async function saveDraft(input: DraftInput, actor: AuditActor): Promise<s
       select l.id, d.number, d.date::text as date from sales_document_lines l join sales_documents d on d.id = l.document_id where l.id = any(${pgArray(sourceIds)})`)).rows.map((r) => [r.id, r])) : new Map();
     const rep = input.salesRepId ? (await tx.execute<{ name: string }>(sql`select name from users where id = ${input.salesRepId}::uuid`)).rows[0]?.name ?? null : null;
     const header = {
-      type: input.type, date: input.date, clientId: input.clientId, site: input.site.toUpperCase(), deliveryAddress: input.deliveryAddress,
+      type: input.type, date: input.date, clientId: input.clientId, legalEntityId, site: input.site.toUpperCase(), deliveryAddress: input.deliveryAddress,
       salesRepId: input.salesRepId, salesRepName: rep, paymentModeKey: input.paymentModeKey, globalDiscountPct, notes: input.notes,
       reasonKey: input.reasonKey ?? null, originDocumentId: input.originDocumentId ?? null,
       grossHt: calc.grossHt, netHt: calc.netHt, vatTotal: calc.vatTotal, ttc: calc.ttc, vatBreakdown: calc.vatBreakdown, updatedAt: new Date(),
@@ -254,11 +262,12 @@ export async function deleteDraft(id: string, actor: AuditActor): Promise<void> 
 export async function createInvoiceFromBLs(blIds: string[], actor: AuditActor): Promise<string> {
   if (!blIds.length) throw new DocumentError("Choisissez au moins un bon de livraison.");
   const g = (await getSettings()).gestion;
-  const docs = (await db.execute<{ id: string; number: string; client_id: string; status: DocStatus; is_simulation: boolean; global_discount_pct: string; site: string; sales_rep_id: string | null; payment_mode_key: string | null }>(sql`
-    select id, number, client_id, status, is_simulation, global_discount_pct::text, site, sales_rep_id, payment_mode_key from sales_documents
+  const docs = (await db.execute<{ id: string; number: string; client_id: string; legal_entity_id: string | null; status: DocStatus; is_simulation: boolean; global_discount_pct: string; site: string; sales_rep_id: string | null; payment_mode_key: string | null }>(sql`
+    select id, number, client_id, legal_entity_id, status, is_simulation, global_discount_pct::text, site, sales_rep_id, payment_mode_key from sales_documents
     where id = any(${pgArray(blIds)}) and type = 'BL' order by date, number`)).rows;
   if (docs.length !== new Set(blIds).size) throw new DocumentError("Bon de livraison introuvable.");
   if (new Set(docs.map((d) => d.client_id)).size > 1) throw new DocumentError("Une facture regroupe les BL d'un seul client.");
+  if (new Set(docs.map((d) => d.legal_entity_id)).size > 1) throw new DocumentError("Ces BL ne sont pas établis au nom de la même raison sociale : facturez-les séparément.");
   if (new Set(docs.map((d) => d.is_simulation)).size > 1) throw new DocumentError("On ne mélange pas BL de simulation et BL réels sur une facture.");
   if (new Set(docs.map((d) => d.global_discount_pct)).size > 1) throw new DocumentError("Ces BL n'ont pas la même remise globale : facturez-les séparément.");
   for (const d of docs) if (!allowedActions("BL", d.status, { requireDelivered: g.requireDelivered }).invoice) throw new DocumentError(`${d.number} n'est pas facturable (statut ${d.status}).`);
@@ -269,7 +278,7 @@ export async function createInvoiceFromBLs(blIds: string[], actor: AuditActor): 
   if (!lines.length) throw new DocumentError("Ces BL sont déjà entièrement facturés.");
   const first = docs[0];
   return saveDraft({
-    type: "FACTURE", clientId: first.client_id, date: iso(today()), site: first.site, deliveryAddress: null,
+    type: "FACTURE", clientId: first.client_id, legalEntityId: first.legal_entity_id, date: iso(today()), site: first.site, deliveryAddress: null,
     salesRepId: first.sales_rep_id, paymentModeKey: first.payment_mode_key, globalDiscountPct: first.global_discount_pct, notes: null,
     lines: lines.map((l) => ({
       productId: l.product_id, quantity: remainingQty(l.quantity, l.invoiced_qty),
@@ -289,7 +298,7 @@ export async function createCreditNote(invoiceId: string, actor: AuditActor): Pr
   const open = (await db.execute<{ id: string }>(sql`select id from sales_documents where origin_document_id = ${invoiceId}::uuid and type = 'AVOIR' and status = 'BROUILLON' limit 1`)).rows[0];
   if (open) throw new DocumentError("Un avoir brouillon existe déjà sur cette facture : terminez-le ou supprimez-le.");
   return saveDraft({
-    type: "AVOIR", clientId: inv.clientId, date: iso(today()), site: inv.site, deliveryAddress: null, salesRepId: inv.salesRepId,
+    type: "AVOIR", clientId: inv.clientId, legalEntityId: inv.legalEntityId, date: iso(today()), site: inv.site, deliveryAddress: null, salesRepId: inv.salesRepId,
     paymentModeKey: inv.paymentModeKey, globalDiscountPct: inv.globalDiscountPct, notes: null, reasonKey: "RETOUR", originDocumentId: inv.id,
     lines: lines.map((l) => ({
       productId: l.productId, designation: l.designation, quantity: remainingQty(l.quantity, l.creditedQty), freeQuantity: "0", unitPriceHt: l.unitPriceHt,
@@ -393,9 +402,16 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
     const client = (await tx.execute<Record<string, string | number | boolean | null>>(sql`
       select id, name, legal_name, account_code, code, ice, if_number, rc, patente, billing_address, postal_code, city, phone, email, payment_days, payment_mode_key
       from clients where id = ${doc.clientId}::uuid`)).rows[0];
+    const entity = doc.legalEntityId ? (await tx.execute<Record<string, string | null>>(sql`
+      select legal_name, account_code, ice, if_number, rc, patente, billing_address, postal_code, city from client_legal_entities where id = ${doc.legalEntityId}::uuid`)).rows[0] : null;
+    const s = (v: unknown) => (v ?? null) as string | null;
+    const identity = billingIdentity(
+      { name: String(client.name), code: s(client.code), legalName: s(client.legal_name), accountCode: s(client.account_code), ice: s(client.ice), ifNumber: s(client.if_number), rc: s(client.rc), patente: s(client.patente), billingAddress: s(client.billing_address), postalCode: s(client.postal_code), city: s(client.city) },
+      entity ? { legalName: entity.legal_name, accountCode: entity.account_code, ice: entity.ice, ifNumber: entity.if_number, rc: entity.rc, patente: entity.patente, billingAddress: entity.billing_address, postalCode: entity.postal_code, city: entity.city } : null,
+    );
     if (type !== "BL") {
-      const r = billingReadiness({ legalName: client.legal_name as string | null, ice: client.ice as string | null, billingAddress: client.billing_address as string | null, city: client.city as string | null, accountCode: null, paymentDays: null, paymentModeKey: null });
-      if (!r.ready) throw new DocumentError(`Fiche client incomplète pour facturer : ${r.missing.join(", ")}.`);
+      const r = billingReadiness({ legalName: entity ? identity.legalName : s(client.legal_name), ice: identity.ice, billingAddress: identity.billingAddress, city: identity.city, accountCode: null, paymentDays: null, paymentModeKey: null });
+      if (!r.ready) throw new DocumentError(`${entity ? `Raison sociale « ${identity.legalName} »` : "Fiche client"} incomplète pour facturer : ${r.missing.join(", ")}.`);
     }
 
     // Blocages commerciaux.
@@ -495,8 +511,8 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
     const files = (await tx.execute<{ slot: string; id: string }>(sql`select distinct on (company_slot) company_slot as slot, id from content_assets where company_slot is not null order by company_slot, version desc`)).rows;
     const companySnapshot = { ...g.company, logoAssetId: files.find((f) => f.slot === "LOGO")?.id ?? null, cachetAssetId: files.find((f) => f.slot === "CACHET")?.id ?? null };
     const clientSnapshot = {
-      name: client.name, legalName: client.legal_name ?? client.name, accountCode: client.account_code ?? client.code, ice: client.ice, ifNumber: client.if_number,
-      rc: client.rc, patente: client.patente, address: client.billing_address, postalCode: client.postal_code, city: client.city, phone: client.phone,
+      name: identity.name, legalName: identity.legalName, accountCode: identity.accountCode, ice: identity.ice, ifNumber: identity.ifNumber,
+      rc: identity.rc, patente: identity.patente, address: identity.billingAddress, postalCode: identity.postalCode, city: identity.city, phone: client.phone,
     };
     const due = type === "FACTURE" ? dueDateOf(doc.date, client.payment_days as number | null, g.defaultPaymentDays, g.maxPaymentDays) : null;
     const words = type === "BL" ? null : amountInWords(doc.ttc, g.amountWords.major, g.amountWords.minor);
@@ -632,4 +648,19 @@ export async function renameDocumentClient(id: string, name: string, reason: str
     await tx.update(salesDocuments).set({ clientSnapshot: { ...snap, legalName: next }, pdfAssetId: null, updatedAt: new Date() }).where(eq(salesDocuments.id, id));
     await audit({ actor, action: "RENAME_CLIENT", module: moduleOf(d.type as DocType), entity: "sales_document", entityId: id, label: d.number, before: { legalName: before }, after: { legalName: next, reason: reason.trim() } }, tx);
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* Fusion de clients                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Brouillons d'un client fusionné (`mergeClients()`) : rattachés à la fiche gardée ; ceux qui
+ * facturaient l'identité principale de la fiche absorbée pointent sur la raison sociale qui la
+ * remplace. Une pièce validée ne change jamais de client (triggers) : la fusion la refuse avant.
+ */
+export async function reassignDrafts(tx: Tx, fromClientId: string, toClientId: string, legalEntityId: string | null): Promise<number> {
+  const r = await tx.execute(sql`update sales_documents set client_id = ${toClientId}::uuid, legal_entity_id = coalesce(legal_entity_id, ${legalEntityId}::uuid), updated_at = now()
+    where client_id = ${fromClientId}::uuid and status = 'BROUILLON'`);
+  return r.rowCount ?? 0;
 }

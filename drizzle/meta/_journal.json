@@ -239,6 +239,13 @@
       "when": 1789801300000,
       "tag": "0033_rls_tables_publiques",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1789801400000,
+      "tag": "0034_client_fusion_raisons_sociales",
+      "breakpoints": true
     }
   ]
 }

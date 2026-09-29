@@ -275,3 +275,24 @@ describe("Gestion commerciale — règlements et bascule", () => {
   });
 });
 
+
+describe("Clients — fusion et raisons sociales", () => {
+  test("toute table qui référence `clients` est prise en charge par la fusion", () => {
+    const schema = readFileSync("src/db/schema.ts", "utf8");
+    const merge = readFileSync("src/lib/gestion/clients.ts", "utf8");
+    const listed = new Set([...merge.matchAll(/MERGE_(?:MOVED|SPECIAL)_TABLES = \[([\s\S]*?)\]/g)].flatMap((m) => [...m[1].matchAll(/"([a-z_]+)"/g)].map((x) => x[1])));
+    const referencing: string[] = [];
+    // Chaque définition va de son `pgTable("…"` au suivant.
+    const parts = schema.split(/pgTable\(\s*"/).slice(1);
+    for (const p of parts) if (/=>\s*clients\.id/.test(p)) referencing.push(p.slice(0, p.indexOf('"')));
+    assert.ok(referencing.includes("sales") && referencing.includes("animations"), "lecture du schéma");
+    const missing = referencing.filter((t) => !listed.has(t));
+    assert.deepEqual(missing, [], `Tables rattachées aux clients oubliées par mergeClients() : ${missing.join(", ")}`);
+  });
+  test("seul `src/lib/gestion/clients.ts` écrit les raisons sociales et fusionne", () => {
+    const found = codeHits(/(insert|update|delete)\(clientLegalEntities\)|(insert\s+into|update|delete\s+from)\s+client_legal_entities\b/i, ["lib/gestion/clients.ts"]);
+    assert.deepEqual(found, [], `Écriture de raison sociale hors du module dans : ${found.join(", ")}`);
+    assert.deepEqual(hits(/export async function mergeClients\(/), ["src/lib/gestion/clients.ts"]);
+    assert.deepEqual(hits(/export function billingIdentity\(/), ["src/lib/gestion/clients-shared.ts"]);
+  });
+});

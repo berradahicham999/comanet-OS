@@ -3,7 +3,7 @@
  */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { billingReadiness, duplicateCandidates, isValidIce, normalizeIce, phoneKey, type ExistingClient } from "@/lib/gestion/clients-shared";
+import { billingIdentity, billingReadiness, duplicateCandidates, entityFromAbsorbed, isValidIce, mergeBlockers, normalizeIce, phoneKey, type ExistingClient } from "@/lib/gestion/clients-shared";
 
 describe("identifiants", () => {
   test("ICE : 15 chiffres, séparateurs tolérés", () => {
@@ -68,5 +68,44 @@ describe("doublons à la création", () => {
   });
   test("la fiche elle-même est exclue à la modification", () => {
     assert.deepEqual(duplicateCandidates({ name: "PHARMA SUD", ice: "001234567000089" }, existing, "1"), []);
+  });
+});
+
+describe("un point de vente, plusieurs raisons sociales", () => {
+  const blank = { accountCode: null, ifNumber: null, rc: null, patente: null, billingAddress: null, postalCode: null, city: null };
+  const fiche = { ...blank, name: "PARA LA GLOIRE", code: "C0110", legalName: "PARA LA GLOIRE", accountCode: "056", ice: "000520167000024", billingAddress: "1 RUE EXEMPLE", city: "FES" };
+  test("sans raison sociale choisie, la pièce facture l'identité de la fiche", () => {
+    const id = billingIdentity(fiche, null);
+    assert.equal(id.legalName, "PARA LA GLOIRE");
+    assert.equal(id.accountCode, "056");
+    assert.equal(id.ice, "000520167000024");
+  });
+  test("une raison sociale supplémentaire n'emprunte ni l'ICE ni le code Sage de la fiche, seulement sa ville", () => {
+    const id = billingIdentity(fiche, { ...blank, legalName: "LA GLOIRE SARL", ice: null });
+    assert.equal(id.legalName, "LA GLOIRE SARL");
+    assert.equal(id.name, "PARA LA GLOIRE");
+    assert.equal(id.ice, null);
+    assert.equal(id.accountCode, null);
+    assert.equal(id.city, "FES");
+  });
+  test("fiche sans raison sociale : le nom du point de vente est imprimé, puis le code distributeur à défaut de code Sage", () => {
+    const id = billingIdentity({ ...fiche, legalName: null, accountCode: null }, null);
+    assert.equal(id.legalName, "PARA LA GLOIRE");
+    assert.equal(id.accountCode, "C0110");
+  });
+  test("fusion : l'identité de la fiche absorbée devient une raison sociale, sauf si c'est la même société", () => {
+    const absorbed = { ...blank, name: "LA GLOIRE", legalName: "LA GLOIRE", ice: null };
+    assert.equal(entityFromAbsorbed(fiche, [], absorbed)?.legalName, "LA GLOIRE");
+    assert.equal(entityFromAbsorbed(fiche, [], { ...absorbed, legalName: "Para la Gloire" }), null, "même raison sociale, aucune ICE contradictoire");
+    assert.equal(entityFromAbsorbed(fiche, [], { ...absorbed, legalName: "AUTRE NOM", ice: "000 520 167 000 024" }), null, "même ICE");
+    assert.notEqual(entityFromAbsorbed(fiche, [], { ...absorbed, legalName: "PARA LA GLOIRE", ice: "001234567000089" }), null, "même nom mais ICE différent : deux sociétés");
+    assert.equal(entityFromAbsorbed(fiche, [{ ...blank, legalName: "LA GLOIRE", ice: null }], absorbed), null, "déjà présente");
+    assert.equal(entityFromAbsorbed(fiche, [], { ...absorbed, legalName: null })?.legalName, "LA GLOIRE", "sans raison sociale : son nom");
+  });
+  test("fusion refusée tant que la fiche absorbée porte des pièces validées ou des règlements", () => {
+    assert.deepEqual(mergeBlockers({ sameClient: false, absorbedValidatedDocs: 0, absorbedPayments: 0, keptValidatedDocs: 3 }), []);
+    assert.match(mergeBlockers({ sameClient: false, absorbedValidatedDocs: 2, absorbedPayments: 0, keptValidatedDocs: 0 })[0], /autre sens/);
+    assert.match(mergeBlockers({ sameClient: false, absorbedValidatedDocs: 0, absorbedPayments: 1, keptValidatedDocs: 4 })[0], /impossible/);
+    assert.equal(mergeBlockers({ sameClient: true, absorbedValidatedDocs: 0, absorbedPayments: 0, keptValidatedDocs: 0 }).length, 1);
   });
 });
