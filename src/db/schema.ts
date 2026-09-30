@@ -1883,6 +1883,23 @@ export const taskComments = pgTable(
   (t) => [index("task_comments_task_idx").on(t.taskId), index("task_comments_user_idx").on(t.userId)],
 );
 
+/**
+ * Recommandations de l'Action Center écartées à la main (la réponse est connue hors du logiciel : congés,
+ * accord verbal…). Une ligne par clé de recommandation ; elle revient d'elle-même à `until` ou si sa priorité
+ * s'aggrave. Seul `src/lib/rules/dismissals.ts` écrit cette table.
+ */
+export const recommendationDismissals = pgTable("recommendation_dismissals", {
+  key: text("key").primaryKey(),
+  rule: text("rule").notNull(),
+  title: text("title").notNull(),
+  priority: taskPriorityEnum("priority").notNull(),
+  reason: text("reason"),
+  until: timestamp("until", { withTimezone: true }).notNull(),
+  dismissedById: uuid("dismissed_by_id").references(() => users.id, { onDelete: "set null" }),
+  dismissedByName: text("dismissed_by_name").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /* ------------------------------------------------------------------ */
 /* Marketing : budgets, dépenses, campagnes, contenus                  */
 /* ------------------------------------------------------------------ */

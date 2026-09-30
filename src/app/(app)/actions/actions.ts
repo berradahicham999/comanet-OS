@@ -6,6 +6,10 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { tasks, type TaskPriority } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
+import { requireAnyModule, getUserPermissions } from "@/lib/access";
+import { allRecommendations } from "@/lib/rules";
+import { dismissRecommendation, restoreRecommendation } from "@/lib/rules/dismissals";
+import { canDismiss } from "@/lib/rules/dismissals-shared";
 
 /** Transforme une recommandation de l'Action Center en tâche assignée. */
 export async function createTaskFromRecommendation(formData: FormData): Promise<void> {
@@ -39,4 +43,31 @@ export async function createTaskFromRecommendation(formData: FormData): Promise<
   revalidatePath("/");
   revalidatePath("/taches");
   if (redirectTo) redirect(redirectTo);
+}
+
+function refresh(): void {
+  revalidatePath("/actions");
+  revalidatePath("/");
+}
+
+/** Croix d'une carte : écarte la recommandation (réponse connue hors du logiciel : congés, accord…). */
+export async function dismissRecommendationAction(formData: FormData): Promise<void> {
+  const user = await requireAnyModule();
+  const key = String(formData.get("key") ?? "");
+  const reason = String(formData.get("reason") ?? "").trim() || null;
+  const rec = (await allRecommendations()).find((r) => r.key === key);
+  if (!rec) return refresh(); // déjà disparue d'elle-même
+  if (!canDismiss(await getUserPermissions(), rec.category)) throw new Error("Accès refusé : il faut le droit « Modifier » sur le module concerné pour écarter cette recommandation.");
+  await dismissRecommendation(rec, { id: user.id, name: user.name }, reason);
+  refresh();
+}
+
+/** Fait revenir une recommandation écartée. */
+export async function restoreRecommendationAction(formData: FormData): Promise<void> {
+  const user = await requireAnyModule();
+  const key = String(formData.get("key") ?? "");
+  const rec = (await allRecommendations()).find((r) => r.key === key);
+  if (rec && !canDismiss(await getUserPermissions(), rec.category)) throw new Error("Accès refusé : il faut le droit « Modifier » sur le module concerné.");
+  await restoreRecommendation(key, { id: user.id, name: user.name });
+  refresh();
 }

@@ -1,10 +1,11 @@
 import Link from "next/link";
 import clsx from "clsx";
-import { ArrowUpRight, CheckCircle2, Plus } from "lucide-react";
+import { ArrowUpRight, CheckCircle2, EyeOff, Plus, RotateCcw, X } from "lucide-react";
 import { Badge, PriorityBadge } from "@/components/ui";
 import { CATEGORY_META, type RecommendationWithState } from "@/lib/rules/types";
-import { createTaskFromRecommendation } from "@/app/(app)/actions/actions";
-import { addDays, iso, today } from "@/lib/format";
+import { createTaskFromRecommendation, dismissRecommendationAction, restoreRecommendationAction } from "@/app/(app)/actions/actions";
+import { addDays, fmtDate, iso, today } from "@/lib/format";
+import { DISMISS_DAYS } from "@/lib/rules/dismissals-shared";
 import type { UserRole } from "@/db/schema";
 import { DetailPlanButton } from "@/components/ai/detail-plan-button";
 import { recSummary, type StoredPlan } from "@/lib/ai/plans-shared";
@@ -13,8 +14,10 @@ export type UserOption = { id: string; name: string; role: UserRole };
 
 const BAR: Record<string, string> = { CRITICAL: "bg-red", HIGH: "bg-orange", MEDIUM: "bg-yellow", LOW: "bg-faint" };
 
-export function RecommendationCard({ rec, users, compact = false, redirectTo, copilot = false, plan = null }: {
+export function RecommendationCard({ rec, users, compact = false, redirectTo, copilot = false, plan = null, dismissible = false }: {
   rec: RecommendationWithState; users: UserOption[]; compact?: boolean; redirectTo?: string;
+  /** La personne peut écarter / rétablir cette recommandation (`canDismiss()`). */
+  dismissible?: boolean;
   /** Copilote ouvert à la personne : affiche « Détailler » (plan d'exécution). */
   copilot?: boolean;
   /** Plan déjà enregistré pour cette recommandation. */
@@ -25,12 +28,24 @@ export function RecommendationCard({ rec, users, compact = false, redirectTo, co
   const due = iso(addDays(today(), rec.task.dueInDays));
   const description = `${rec.why}\n\nAction recommandée : ${rec.action}`;
   return (
-    <article className="card overflow-hidden flex">
+    <article className={clsx("card overflow-hidden flex", rec.dismissed && "opacity-70")}>
       <div className={clsx("w-1.5 shrink-0", BAR[rec.priority])} />
-      <div className="flex-1 min-w-0 p-4 sm:p-5">
-        <div className="flex flex-wrap items-center gap-2 mb-2">
+      <div className="relative flex-1 min-w-0 p-4 sm:p-5">
+        {dismissible && !rec.dismissed && !rec.existingTask && (
+          <form action={dismissRecommendationAction} className="absolute top-2 right-2">
+            <input type="hidden" name="key" value={rec.key} />
+            <button type="submit" className="btn-ghost btn-sm !px-1.5 text-muted hover:text-ink" aria-label="Écarter cette recommandation"
+              title={`Écarter : la réponse est connue (congés, accord…). Masquée ${DISMISS_DAYS} jours, elle revient plus tôt si sa priorité s'aggrave.`}>
+              <X size={16} />
+            </button>
+          </form>
+        )}
+        <div className={clsx("flex flex-wrap items-center gap-2 mb-2", dismissible && "pr-8")}>
           <Badge tone={cat.tone}>{cat.label}</Badge>
           <PriorityBadge priority={rec.priority} />
+          {rec.dismissed && (
+            <Badge tone="gray"><EyeOff size={12} /> Écartée par {rec.dismissed.by} jusqu&apos;au {fmtDate(rec.dismissed.until)}</Badge>
+          )}
           {rec.existingTask && (
             <Badge tone="green"><CheckCircle2 size={12} /> Tâche {rec.existingTask.status === "IN_PROGRESS" ? "en cours" : "créée"}{rec.existingTask.assignee ? ` · ${rec.existingTask.assignee}` : ""}</Badge>
           )}
@@ -63,7 +78,14 @@ export function RecommendationCard({ rec, users, compact = false, redirectTo, co
           {rec.entity?.href && (
             <Link href={rec.entity.href} className="btn-secondary btn-sm">Voir <ArrowUpRight size={14} /></Link>
           )}
-          {rec.existingTask ? (
+          {rec.dismissed ? (
+            dismissible && (
+              <form action={restoreRecommendationAction}>
+                <input type="hidden" name="key" value={rec.key} />
+                <button type="submit" className="btn-secondary btn-sm"><RotateCcw size={14} /> Rétablir</button>
+              </form>
+            )
+          ) : rec.existingTask ? (
             <Link href={`/taches/${rec.existingTask.id}`} className="btn-ghost btn-sm">Ouvrir la tâche</Link>
           ) : (
             <details className="group">
