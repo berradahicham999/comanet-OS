@@ -55,6 +55,8 @@ export type Recommendation = {
 export type RecommendationWithState = Recommendation & {
   /** Tâche ouverte déjà créée à partir de cette recommandation. */
   existingTask?: { id: string; status: string; assignee: string | null } | null;
+  /** Écartée à la main et encore masquée (voir `isDismissed()`). */
+  dismissed?: { until: Date; by: string; reason: string | null; at: Date } | null;
 };
 
 export type RuleContext = {

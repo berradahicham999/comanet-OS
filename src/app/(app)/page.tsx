@@ -15,6 +15,7 @@ import { isAiConfigured } from "@/lib/ai/client";
 import { getMorningBrief } from "@/lib/ai/brief";
 import { listPlans } from "@/lib/ai/plans";
 import { isAdmin } from "@/lib/permissions-shared";
+import { canDismiss } from "@/lib/rules/dismissals-shared";
 
 export const dynamic = "force-dynamic";
 
@@ -198,7 +199,7 @@ export default async function CockpitPage() {
           <Card><div className="text-sm text-muted">Aucune action ouverte. Tout est sous contrôle.</div></Card>
         ) : (
           <div className="grid md:grid-cols-2 gap-3">
-            {topRecs.map((r) => <RecommendationCard key={r.key} rec={r} users={users} compact redirectTo="/" copilot={explainOn} plan={plans.get(r.key) ?? null} />)}
+            {topRecs.map((r) => <RecommendationCard key={r.key} rec={r} users={users} compact redirectTo="/" copilot={explainOn} plan={plans.get(r.key) ?? null} dismissible={!access.preview && canDismiss(perms, r.category)} />)}
           </div>
         )}
       </Section>
