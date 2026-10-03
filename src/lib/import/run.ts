@@ -427,6 +427,12 @@ async function importProducts(rows: Record<string, unknown>[], mapping: Mapping,
 
 async function importStock(rows: Record<string, unknown>[], mapping: Mapping, options: ImportOptions, R: Resolver, importId: string, out: ImportSummary) {
   const defaultDate = options.stockDate ?? new Date().toISOString().slice(0, 10);
+  // Une photo décrit un dépôt externe (Cospharma, Pharmafirst) ; sans dépôt, c'est un export Sage global gardé pour le
+  // contrôle de bascule. Le stock de l'entrepôt COMANET ne s'importe pas en photo : il vit dans le journal.
+  if (options.warehouseKey) {
+    const kind = (await db.execute<{ kind: string }>(sql`select kind from warehouses where key = ${options.warehouseKey}`)).rows[0]?.kind;
+    if (kind !== "EXTERNE") throw new Error(kind ? `${options.warehouseKey} est un dépôt interne : son stock se charge en « Stock initial » ou par inventaire, pas en photo.` : `Dépôt inconnu : ${options.warehouseKey}.`);
+  }
   let lastBrand: string | null = null;
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
@@ -438,8 +444,11 @@ async function importStock(rows: Record<string, unknown>[], mapping: Mapping, op
     let brandId = R.brand(brandValue, name);
     if (!brandId && brandValue) brandId = await R.createBrand(brandValue);
     const set: Partial<typeof s.products.$inferInsert> = {};
-    const pw = num(r, mapping, "priceWholesale"); if (pw !== null) set.priceWholesale = pw.toFixed(2);
-    const cp = num(r, mapping, "costPrice"); if (cp !== null) set.costPrice = cp.toFixed(2);
+    // Les prix d'une photo de distributeur sont les siens : seuls les exports Sage globaux mettent à jour les fiches.
+    if (!options.warehouseKey) {
+      const pw = num(r, mapping, "priceWholesale"); if (pw !== null) set.priceWholesale = pw.toFixed(2);
+      const cp = num(r, mapping, "costPrice"); if (cp !== null) set.costPrice = cp.toFixed(2);
+    }
     const before = R.products.length;
     const id = await R.product(name, txt(r, mapping, "sku"), brandId, true, { ...set, shortName: name });
     if (!id) { out.errors.push({ row: i + 2, message: `Produit non résolu : ${name}` }); continue; }

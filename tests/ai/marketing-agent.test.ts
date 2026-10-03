@@ -43,7 +43,7 @@ function stock(over: Partial<ProductStock>): ProductStock {
   return {
     productId: "p1", sku: "SKU1", name: "Crème A", brandId: "b-gamarde", brandName: "Gamarde", brandColor: null, category: null, stock: 850, stockKnown: true, onOrder: 0,
     stockDate: "2026-08-30", avgMonthly: 400, trendPct: 5, coverageMonths: 850 / 400, level: "yellow", stockoutDate: "2026-11-02", leadTimeDays: 60, safetyStockDays: 30, moq: null,
-    recommendedOrder: 0, targetStock: 1600, costPrice: 40, priceWholesale: 80, marginPct: 50, stockValue: 34_000, fieldSellOut30d: 0, fieldStockAvg: null, ...over,
+    recommendedOrder: 0, targetStock: 1600, costPrice: 40, priceWholesale: 80, marginPct: 50, stockValue: 34_000, fieldSellOut30d: 0, fieldStockAvg: null, stockInternal: 0, stockExternal: [], ...over,
   };
 }
 const STOCKS: ProductStock[] = [

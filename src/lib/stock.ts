@@ -27,8 +27,12 @@ export type ProductStock = {
   brandName: string | null;
   brandColor: string | null;
   category: string | null;
-  stock: number;
-  stockKnown: boolean; // false = aucune photo de stock importée pour ce produit
+  stock: number; // stock réel COMANET + dernières photos des dépôts externes
+  stockKnown: boolean; // false = ni mouvement dans le journal, ni photo d'un dépôt externe
+  /** Stock réel de l'entrepôt COMANET (journal, dépôts internes vendables). */
+  stockInternal: number;
+  /** Dernière photo de chaque dépôt externe (Cospharma, Pharmafirst), avec sa date. */
+  stockExternal: { warehouseKey: string; quantity: number; date: string }[];
   onOrder: number;
   stockDate: string | null;
   avgMonthly: number; // ventes moyennes mensuelles (sell-in)
@@ -68,22 +72,30 @@ export async function productStocks(
   const lastMonthStart = iso(addDays(t, -DAYS_PER_MONTH));
   const d30 = iso(addDays(t, -30));
 
-  // Après la bascule, le stock de l'entrepôt est le journal de mouvements (dépôts internes vendables) ; les
-  // dépôts externes (Cospharma, Pharmafirst) restent connus par leur dernière photo. Avant, la dernière photo.
-  const c = s.gestion.cutover;
-  const ledger = c.mode === "ACTIF" && !!c.date && iso(today()) >= c.date;
+  // Stock = journal de l'entrepôt COMANET (dépôts internes vendables : ce qui est physiquement chez nous, échantillons
+  // compris) + dernière photo de chaque dépôt externe (Cospharma, Pharmafirst : connus seulement par import).
+  // Les photos « globales » sans dépôt (anciens exports Sage) n'entrent plus dans le stock : elles ne servent qu'au
+  // contrôle de la bascule.
   const r = await db.execute(sql`
-    with latest as (
-      ${ledger ? sql`
-      select coalesce(l.product_id, e.product_id) as product_id, (coalesce(l.q, 0) + coalesce(e.q, 0))::float8 as quantity, 0::float8 as on_order, ${iso(today())}::text as date
-      from (select m.product_id, sum(m.quantity) as q from stock_movements m join warehouses w on w.key = m.warehouse_key where w.kind = 'INTERNE' and w.sellable group by 1) l
-      full join (
-        select product_id, sum(quantity) as q from (
-          select distinct on (s2.product_id, s2.warehouse_key) s2.product_id, s2.quantity from stock_snapshots s2 join warehouses w on w.key = s2.warehouse_key
-          where w.kind = 'EXTERNE' order by s2.product_id, s2.warehouse_key, s2.date desc, s2.created_at desc) x group by 1
-      ) e on e.product_id = l.product_id` : sql`
-      select distinct on (product_id) product_id, quantity::float8 as quantity, on_order::float8 as on_order, date::text as date
-      from stock_snapshots order by product_id, date desc, created_at desc`}
+    with internal as (
+      select m.product_id, sum(m.quantity)::float8 as q from stock_movements m join warehouses w on w.key = m.warehouse_key
+      where w.kind = 'INTERNE' and w.sellable group by 1
+    ),
+    external_last as (
+      select distinct on (s2.product_id, s2.warehouse_key) s2.product_id, s2.warehouse_key, s2.quantity::float8 as quantity, s2.on_order::float8 as on_order, s2.date::text as date
+      from stock_snapshots s2 join warehouses w on w.key = s2.warehouse_key
+      where w.kind = 'EXTERNE' order by s2.product_id, s2.warehouse_key, s2.date desc, s2.created_at desc
+    ),
+    external as (
+      select product_id, sum(quantity)::float8 as q, sum(on_order)::float8 as on_order, min(date) as date,
+        json_agg(json_build_object('warehouseKey', warehouse_key, 'quantity', quantity, 'date', date) order by warehouse_key) as detail
+      from external_last group by 1
+    ),
+    latest as (
+      select coalesce(i.product_id, e.product_id) as product_id, coalesce(i.q, 0)::float8 as internal_qty, e.detail as external_detail,
+        (coalesce(i.q, 0) + coalesce(e.q, 0))::float8 as quantity, coalesce(e.on_order, 0)::float8 as on_order,
+        coalesce(e.date, ${iso(today())}) as date
+      from internal i full join external e on e.product_id = i.product_id
     ),
     avg_sales as (
       select product_id, sum(quantity)::float8 / ${s.avgSalesMonths} as avg_monthly
@@ -106,6 +118,7 @@ export async function productStocks(
     )
     select p.id as product_id, p.sku, p.name, p.brand_id, b.name as brand_name, b.color as brand_color, p.category,
            coalesce(l.quantity, 0) as stock, coalesce(po.qty, l.on_order, 0) as on_order, l.date as stock_date,
+           coalesce(l.internal_qty, 0) as internal_qty, l.external_detail,
            coalesce(a.avg_monthly, 0) as avg_monthly, lm.qty as last_month_qty,
            p.lead_time_days, p.safety_stock_days, p.moq,
            p.cost_price::float8 as cost_price, p.price_wholesale::float8 as price_wholesale,
@@ -142,6 +155,8 @@ export async function productStocks(
       brandId: row.brand_id ? String(row.brand_id) : null, brandName: row.brand_name ? String(row.brand_name) : null,
       brandColor: row.brand_color ? String(row.brand_color) : null, category: row.category ? String(row.category) : null,
       stock, stockKnown, onOrder, stockDate: row.stock_date ? String(row.stock_date) : null,
+      stockInternal: Number(row.internal_qty),
+      stockExternal: ((row.external_detail ?? []) as { warehouseKey: string; quantity: number; date: string }[]).map((e) => ({ warehouseKey: e.warehouseKey, quantity: Number(e.quantity), date: e.date })),
       avgMonthly: avg, trendPct: trendPct(lastMonthQty, avg),
       coverageMonths: cov.coverageMonths, level: cov.level,
       stockoutDate: cov.daysToStockout === null ? null : iso(addDays(t, cov.daysToStockout)),

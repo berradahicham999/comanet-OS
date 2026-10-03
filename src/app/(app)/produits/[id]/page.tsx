@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { sql, eq, desc } from "drizzle-orm";
@@ -8,6 +9,7 @@ import { getRefDate } from "@/lib/ref-date";
 import { monthlySeries } from "@/lib/analytics";
 import { productStocks, LEVEL_LABEL } from "@/lib/stock";
 import { listBrands } from "@/lib/users";
+import { listWarehouses } from "@/lib/gestion/refs";
 import { PageHeader, Card, Badge, Delta, Section, PriorityBadge, StatusBadge, BrandDot } from "@/components/ui";
 import { MonthlyRevenueChart } from "@/components/charts";
 import { ProductForm } from "@/components/product-form";
@@ -53,6 +55,7 @@ export default async function ProductPage(props: { params: Promise<{ id: string 
       from visit_products vp join doctor_visits v on v.id = vp.visit_id where vp.product_id = ${id}::uuid`),
   ]);
   const st = stockList[0];
+  const externals = (await listWarehouses()).filter((w) => w.kind === "EXTERNE" && w.active);
   const k = kpi.rows[0] as { revenue12: number; qty12: number; clients12: number; revenue_prev12: number; last_sale: string | null; first_sale: string | null };
   const chart = series.map((m, i) => ({ month: m.month, amount: m.amount, prev: seriesN1[i]?.amount ?? 0 }));
   const brand = brands.find((b) => b.id === product.brandId);
@@ -77,15 +80,25 @@ export default async function ProductPage(props: { params: Promise<{ id: string 
 
       <div className="grid lg:grid-cols-3 gap-4 mb-4">
         <Card className="lg:col-span-2" title="CA mensuel — 13 mois vs N-1"><MonthlyRevenueChart data={chart} height={220} /></Card>
-        <Card title="Mettre à jour le stock">
-          <form action={addStockSnapshot} className="space-y-2 text-[13px]">
+        <Card title="Stock">
+          <dl className="grid grid-cols-2 gap-2 text-[12px] mb-3">
+            <dt className="text-muted">Entrepôt COMANET <Link href="/gestion/stock" className="underline text-faint">(stock réel)</Link></dt><dd className="font-medium text-right">{st ? fmtNum(st.stockInternal) : "—"} u.</dd>
+            {externals.map((w) => { const e = st?.stockExternal.find((x) => x.warehouseKey === w.key); return <Fragment key={w.key}><dt className="text-muted">{w.label}{e && <span className="text-faint"> · {fmtDate(e.date)}</span>}</dt><dd className="font-medium text-right">{e ? `${fmtNum(e.quantity)} u.` : "—"}</dd></Fragment>; })}
+            <dt className="font-medium">Stock total</dt><dd className="font-semibold text-right">{st?.stockKnown ? `${fmtNum(st.stock)} u.` : "n/c"}</dd>
+          </dl>
+          <form action={addStockSnapshot} className="space-y-2 text-[13px] border-t border-line pt-3">
             <input type="hidden" name="productId" value={id} />
+            <div className="label">Saisir la photo d&apos;un dépôt externe</div>
+            <label className="block"><span className="label block mb-1">Dépôt</span>
+              <select name="warehouseKey" className="select h-9" required defaultValue="">{[<option key="" value="" disabled>— choisir —</option>, ...externals.map((w) => <option key={w.key} value={w.key}>{w.label}</option>)]}</select>
+            </label>
             <div className="grid grid-cols-2 gap-2">
-              <label className="block"><span className="label block mb-1">Stock (unités)</span><input name="quantity" defaultValue={st?.stockKnown ? st.stock : ""} className="input h-9" inputMode="numeric" required /></label>
-              <label className="block"><span className="label block mb-1">Commande en cours</span><input name="onOrder" defaultValue={st?.onOrder ?? 0} className="input h-9" inputMode="numeric" /></label>
+              <label className="block"><span className="label block mb-1">Stock (unités)</span><input name="quantity" className="input h-9" inputMode="numeric" required /></label>
+              <label className="block"><span className="label block mb-1">Commande en cours</span><input name="onOrder" defaultValue={0} className="input h-9" inputMode="numeric" /></label>
             </div>
             <label className="block"><span className="label block mb-1">Date</span><input type="date" name="date" defaultValue={iso(new Date())} className="input h-9" /></label>
-            <button className="btn-secondary btn-sm w-full" type="submit">Enregistrer la photo de stock</button>
+            <button className="btn-secondary btn-sm w-full" type="submit">Enregistrer la photo</button>
+            <p className="text-[11px] text-faint">Le stock de l&apos;entrepôt COMANET se corrige par inventaire ou mouvement dans le stock réel, jamais par photo.</p>
           </form>
           {st && st.stockKnown && (
             <dl className="mt-4 grid grid-cols-2 gap-2 text-[12px]">

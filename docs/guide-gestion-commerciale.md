@@ -269,8 +269,9 @@ sur le serveur Next : `/gestion/pieces/<id>/pdf`.
   avoirs, plus les BL non facturés ; un chèque en portefeuille reste un risque.
 - **Bascule.** `emitsReal()` : une pièce est légale (séries BL / FA / AV) seulement en mode ACTIF, datée du jour de
   bascule ou après, sur un site qui bascule ; sinon simulation (SIM…). En mode ACTIF : projection des ventes,
-  **refus d'import** des lignes Sage de ces sites datées après la bascule (`importBlockedByCutover()`, C5), et
-  `productStocks()` lit le **journal** (dépôts internes vendables) plus les dernières photos des dépôts externes. Le
+  **refus d'import** des lignes Sage de ces sites datées après la bascule (`importBlockedByCutover()`, C5). (Le
+  stock, lui, n'attend pas la bascule : `productStocks()` lit déjà le **journal** de l'entrepôt COMANET plus les
+  dernières photos de Cospharma et Pharmafirst.) Le
   passage à ACTIF exige qu'aucun contrôle bloquant ne reste (date, identité, logo et cachet, stock de départ) et la
   saisie de « BASCULER » ; il se fait depuis la page Bascule, jamais depuis les paramètres.
 - **Reprise Sage** : état des factures non soldées (code client ou nom, n° pièce, date, échéance, TTC, reste) →

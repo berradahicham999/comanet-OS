@@ -53,7 +53,8 @@ export async function runImportAction(formData: FormData) {
     options: {
       year: Number(formData.get("year")) || undefined,
       stockDate: String(formData.get("stockDate") ?? "") || undefined,
-      warehouseKey: String(formData.get("warehouseKey") ?? "") || undefined,
+      // « GLOBAL » : export Sage sans dépôt, gardé pour le contrôle de bascule (hors stock).
+      warehouseKey: ["", "GLOBAL"].includes(String(formData.get("warehouseKey") ?? "")) ? undefined : String(formData.get("warehouseKey")),
       adPlatform: String(formData.get("adPlatform") ?? "") || undefined,
       createUnknown: formData.get("createUnknown") !== "off",
       // Matrices (animations, objectifs par ville) : les colonnes non mappées portent les données.

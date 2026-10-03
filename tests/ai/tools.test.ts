@@ -31,7 +31,7 @@ function stock(over: Partial<ProductStock>): ProductStock {
   return {
     productId: "p1", sku: "SKU1", name: "Crème A", brandId: "b-gamarde", brandName: "Gamarde", brandColor: null, category: null, stock: 100, stockKnown: true, onOrder: 0,
     stockDate: "2026-09-01", avgMonthly: 50, trendPct: null, coverageMonths: 2, level: "yellow", stockoutDate: "2026-11-01", leadTimeDays: 30, safetyStockDays: 15, moq: null,
-    recommendedOrder: 0, targetStock: 150, costPrice: 40, priceWholesale: 80, marginPct: 50, stockValue: 4000, fieldSellOut30d: 0, fieldStockAvg: null, ...over,
+    recommendedOrder: 0, targetStock: 150, costPrice: 40, priceWholesale: 80, marginPct: 50, stockValue: 4000, fieldSellOut30d: 0, fieldStockAvg: null, stockInternal: 0, stockExternal: [], ...over,
   };
 }
 
