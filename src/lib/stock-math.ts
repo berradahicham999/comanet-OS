@@ -115,10 +115,20 @@ export function trendPct(lastMonthQty: number | null, avgMonthly: number): numbe
   return ((lastMonthQty - avgMonthly) / avgMonthly) * 100;
 }
 
-/** Marge brute en %, `null` si le prix d'achat ou de vente est inconnu ou nul. */
-export function marginPct(costPrice: number | null, priceWholesale: number | null): number | null {
-  if (costPrice === null || priceWholesale === null || priceWholesale <= 0) return null;
-  return ((priceWholesale - costPrice) / priceWholesale) * 100;
+/**
+ * Prix réellement encaissé par unité, HT : le PPH (chez COMANET, égal au prix public TTC) ramené hors taxe, moins la
+ * remise client moyenne de la fiche. Remise non renseignée = aucune remise déduite. `null` si le PPH est inconnu ou nul.
+ */
+export function netSellingPrice(priceWholesale: number | null, taxRatePct: number | null, avgDiscountPct: number | null): number | null {
+  if (priceWholesale === null || !Number.isFinite(priceWholesale) || priceWholesale <= 0) return null;
+  const ht = priceWholesale / (1 + Math.max(0, taxRatePct ?? 0) / 100);
+  return ht * (1 - Math.min(100, Math.max(0, avgDiscountPct ?? 0)) / 100);
+}
+
+/** Marge brute en % du prix encaissé (`netSellingPrice()`), `null` si le coût ou le prix est inconnu ou nul. */
+export function marginPct(costPrice: number | null, netPrice: number | null): number | null {
+  if (costPrice === null || netPrice === null || netPrice <= 0) return null;
+  return ((netPrice - costPrice) / netPrice) * 100;
 }
 
 /** Seuils de tension, tels que stockés dans `settings`. */

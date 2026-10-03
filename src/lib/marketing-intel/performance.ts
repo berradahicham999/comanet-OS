@@ -92,7 +92,7 @@ export function buildProductPerfRows(i: PerfInputs): ProductPerf[] {
     const unitsPrev = i.prev === null ? null : (p?.quantity ?? 0);
     const g = growthPct(revenue, revenuePrev);
     const contributionPct = i.scopeRevenue > 0 ? (revenue / i.scopeRevenue) * 100 : null;
-    const margin = i.internalCosts ? (st?.marginPct ?? (cat ? officialMargin(cat.costPrice, cat.priceWholesale) : null)) : null;
+    const margin = i.internalCosts ? (st?.marginPct ?? (cat ? officialMargin(cat.costPrice, cat.netPriceHt) : null)) : null;
     const { profile, reasons } = salesProfileOf({ revenue, revenuePrev, growthPct: g, contributionPct }, t);
     if (st && st.risk === "RUPTURE_RISQUE") reasons.push(st.daysOfStock === null ? "stock en rupture" : `${st.daysOfStock} jours de stock : risque de rupture`);
     if (st && st.risk === "SURSTOCK") reasons.push(`${st.daysOfStock} jours de stock : surstock`);

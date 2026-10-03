@@ -52,7 +52,7 @@ const STOCKS: ProductStock[] = [
   stock({ productId: "p3", sku: "SKU3", name: "SPF C", stock: 40, avgMonthly: 90, coverageMonths: 40 / 90, level: "red", stockoutDate: "2026-09-13", recommendedOrder: 300, costPrice: 50, priceWholesale: 100, marginPct: 50, stockValue: 2_000 }),
   stock({ productId: "p4", sku: "SKU4", name: "Sans photo D", stock: 0, stockKnown: false, stockDate: null, avgMonthly: 10, coverageMonths: null, level: "unknown", stockoutDate: null, stockValue: 0 }),
 ];
-const catalog = (p: ProductStock): ProductRow => ({ id: p.productId, name: p.name, sku: p.sku, shortName: null, category: null, active: true, needsReview: false, brandId: p.brandId, brandName: p.brandName, brandColor: null, priceWholesale: p.priceWholesale, costPrice: p.costPrice, priceRetail: 150, revenue12: 100_000, qty12: 1_000, revenue3: 30_000, qtyPrev3: 250, qty3: 300, clients12: 20, lastSale: "2026-08-30" });
+const catalog = (p: ProductStock): ProductRow => ({ id: p.productId, name: p.name, sku: p.sku, shortName: null, category: null, active: true, needsReview: false, brandId: p.brandId, brandName: p.brandName, brandColor: null, priceWholesale: p.priceWholesale, costPrice: p.costPrice, priceRetail: 150, netPriceHt: p.priceWholesale, revenue12: 100_000, qty12: 1_000, revenue3: 30_000, qtyPrev3: 250, qty3: 300, clients12: 20, lastSale: "2026-08-30" });
 
 function deps(): ToolDeps {
   const gamarde = (f: { brandId?: string; brandIds?: string[] }) => f.brandId !== "b-alpha" && !(f.brandIds && !f.brandIds.includes("b-gamarde"));
