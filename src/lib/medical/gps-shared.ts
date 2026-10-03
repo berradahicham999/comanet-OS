@@ -235,3 +235,27 @@ export function mapsUrl(p: Point): string {
 export function canProposeCabinet(e: { lat: number | null; lng: number | null; accuracyM: number | null }, s: Pick<MedicalFieldSettings, "maxAccuracyM">): boolean {
   return pointOf(e) !== null && (e.accuracyM === null || e.accuracyM <= s.maxAccuracyM);
 }
+
+/**
+ * Position du cabinet déduite de l'historique des visites (reprise d'un CRM) : le point le plus
+ * « entouré » (le plus de visites dans le rayon), puis le centre des visites de ce rayon. Proposée
+ * seulement si au moins `minPoints` visites et `minShare` des visites positionnées sont dans le rayon ;
+ * sinon rien (pas d'estimation). Elle reste « à valider » comme une position proposée au premier Démarrer.
+ */
+export function cabinetFromHistory(
+  points: Point[],
+  s: { radiusM: number; historyMinPoints: number; historyMinShare: number },
+): { position: Point; support: number; total: number } | null {
+  const pts = points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng) && !(p.lat === 0 && p.lng === 0));
+  if (pts.length < s.historyMinPoints) return null;
+  let best: { idx: number; near: Point[] } | null = null;
+  pts.forEach((p, idx) => {
+    const near = pts.filter((q) => haversineM(p, q) <= s.radiusM);
+    if (!best || near.length > best.near.length) best = { idx, near };
+  });
+  const b = best as { idx: number; near: Point[] } | null;
+  if (!b || b.near.length < s.historyMinPoints || b.near.length / pts.length < s.historyMinShare) return null;
+  const lat = b.near.reduce((a, q) => a + q.lat, 0) / b.near.length;
+  const lng = b.near.reduce((a, q) => a + q.lng, 0) / b.near.length;
+  return { position: { lat, lng }, support: b.near.length, total: pts.length };
+}

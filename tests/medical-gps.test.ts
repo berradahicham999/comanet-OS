@@ -6,7 +6,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   haversineM, eventTime, visitDurationMinutes, impliedSpeedKmh, verifyVisit, canProposeCabinet,
-  type EventForCheck, type Cabinet,
+  cabinetFromHistory, type EventForCheck, type Cabinet,
 } from "@/lib/medical/gps-shared";
 import { DEFAULT_MEDICAL_FIELD as S } from "@/lib/settings";
 
@@ -132,5 +132,32 @@ describe("Proposition de la position du cabinet", () => {
     assert.equal(canProposeCabinet({ lat: 1, lng: 1, accuracyM: 30 }, S), true);
     assert.equal(canProposeCabinet({ lat: 1, lng: 1, accuracyM: 300 }, S), false);
     assert.equal(canProposeCabinet({ lat: null, lng: null, accuracyM: null }, S), false);
+  });
+});
+
+describe("Cabinet déduit de l'historique des visites", () => {
+  test("la majorité des visites au même endroit : centre de ce groupe", () => {
+    const pts = [north(0), north(20), north(40), north(10), north(3000)];
+    const r = cabinetFromHistory(pts, S)!;
+    assert.equal(r.support, 4);
+    assert.equal(r.total, 5);
+    assert.ok(haversineM(r.position, north(17)) < 5);
+  });
+  test("positions dispersées ou trop peu de visites : aucune proposition", () => {
+    assert.equal(cabinetFromHistory([north(0), north(2000), north(4000), north(6000)], S), null);
+    assert.equal(cabinetFromHistory([north(0), north(10)], S), null);
+    assert.equal(cabinetFromHistory([{ lat: 0, lng: 0 }, { lat: 0, lng: 0 }, { lat: 0, lng: 0 }], S), null);
+  });
+});
+
+describe("Durée lue dans un historique CRM", () => {
+  test("minutes, heures et minutes ; heures entières = non mesurée", async () => {
+    const { parseDurationMinutes } = await import("@/lib/import/normalize");
+    assert.equal(parseDurationMinutes("52 min"), 52);
+    assert.equal(parseDurationMinutes("1 h 05 min"), 65);
+    assert.equal(parseDurationMinutes("45"), 45);
+    assert.equal(parseDurationMinutes("1 heure"), null);
+    assert.equal(parseDurationMinutes("2 heure"), null);
+    assert.equal(parseDurationMinutes(""), null);
   });
 });

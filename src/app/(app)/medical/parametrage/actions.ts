@@ -63,6 +63,8 @@ export async function updateMedicalFieldSettings(formData: FormData) {
       none: Math.max(0, num(formData, "tourWeightNone", c.tourWeights.none)),
     },
     tourSize: int("tourSize", 5, 300),
+    historyMinPoints: int("historyMinPoints", 1, 100),
+    historyMinShare: pos("historyMinShare", 0.1, 1),
     workDays: [...new Set(String(formData.get("workDays") ?? c.workDays.join(",")).split(/[^0-9]+/).map(Number).filter((n) => n >= 1 && n <= 7))].sort((a, b) => a - b),
   };
   if (next.potentialTopBPct < next.potentialTopAPct) next.potentialTopBPct = next.potentialTopAPct;

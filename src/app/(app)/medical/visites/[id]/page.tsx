@@ -17,7 +17,7 @@ import { correctVisitAction } from "../../suivi/actions";
 export const dynamic = "force-dynamic";
 
 const EVENT_LABELS: Record<string, string> = { START: "Démarrer", STOP: "Terminer", NON_EFFECTUEE: "Non effectuée", CLOTURE_AUTO: "Clôture automatique", CORRECTION: "Correction" };
-const TIMING_LABELS: Record<string, string> = { CHRONO: "Chronométrée", SAISIE_MANUELLE: "Saisie au formulaire", AVANT_CHRONO: "Saisie avant chrono (hors contrôle GPS)" };
+const TIMING_LABELS: Record<string, string> = { CHRONO: "Chronométrée", SAISIE_MANUELLE: "Saisie au formulaire", AVANT_CHRONO: "Saisie avant chrono (hors contrôle GPS)", HISTORIQUE: "Historique repris du CRM (hors contrôle GPS)" };
 
 export default async function VisiteDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; ok?: string }> }) {
   const user = await requireAccess("medical");

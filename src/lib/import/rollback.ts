@@ -10,6 +10,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import type { ImportType } from "./fields";
+import { pgArray } from "@/lib/sql-array";
 
 export type RollbackPlan = {
   /** Ce que l'annulation retirerait, prêt à afficher. */
@@ -20,7 +21,7 @@ export type RollbackPlan = {
   detail?: string;
 };
 
-const REVERSIBLE: ImportType[] = ["SALES", "STOCK", "ANIMATIONS", "ADS", "STOCK_INITIAL", "PRESCRIPTIONS"];
+const REVERSIBLE: ImportType[] = ["SALES", "STOCK", "ANIMATIONS", "ADS", "STOCK_INITIAL", "PRESCRIPTIONS", "VISITES_MEDICALES"];
 
 export function isReversible(type: string): boolean {
   return REVERSIBLE.includes(type as ImportType);
@@ -68,6 +69,10 @@ export async function rollbackPlan(importId: string, type: string): Promise<Roll
     case "PRESCRIPTIONS": {
       const count = await n(sql`select count(*)::int as n from prescriptions where import_id = ${importId}::uuid`);
       return { label: "lignes d'ordonnance", count };
+    }
+    case "VISITES_MEDICALES": {
+      const count = await n(sql`select count(*)::int as n from doctor_visits where import_id = ${importId}::uuid`);
+      return { label: "visites médicales reprises", count, detail: count ? "Les positions de cabinet proposées par cet historique et pas encore validées sont retirées aussi." : undefined };
     }
     case "ADS": {
       const count = await n(sql`select count(*)::int as n from ad_metrics where import_id = ${importId}::uuid`);
@@ -172,6 +177,23 @@ export async function rollbackRows(importId: string, type: string, actor: { id: 
     }
     case "ADS": {
       const r = await db.execute(sql`delete from ad_metrics where import_id = ${importId}::uuid`);
+      return r.rowCount ?? 0;
+    }
+    case "VISITES_MEDICALES": {
+      // Une visite reprise n'a jamais de journal GPS (visit_events) : elle se supprime sans contre-écriture.
+      const docs = (await db.execute<{ doctor_id: string }>(sql`select distinct doctor_id from doctor_visits where import_id = ${importId}::uuid`)).rows.map((x) => x.doctor_id);
+      const r = await db.execute(sql`delete from doctor_visits where import_id = ${importId}::uuid and timing_source = 'HISTORIQUE'`);
+      if (docs.length) {
+        await db.execute(sql`
+          update doctors set
+            gps_lat = case when gps_source = 'HISTORIQUE' and gps_status = 'A_CONFIRMER' then null else gps_lat end,
+            gps_lng = case when gps_source = 'HISTORIQUE' and gps_status = 'A_CONFIRMER' then null else gps_lng end,
+            gps_status = case when gps_source = 'HISTORIQUE' and gps_status = 'A_CONFIRMER' then null else gps_status end,
+            gps_source = case when gps_source = 'HISTORIQUE' and gps_status = 'A_CONFIRMER' then null else gps_source end,
+            last_visit_at = (select max(v.date) from doctor_visits v where v.doctor_id = doctors.id and v.status = 'REALISEE'),
+            updated_at = now()
+          where id = any(${pgArray(docs)})`);
+      }
       return r.rowCount ?? 0;
     }
     case "PRESCRIPTIONS": {

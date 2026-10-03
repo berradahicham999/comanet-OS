@@ -109,7 +109,7 @@ export async function visitImpactReport(delegateUserId: string | null): Promise<
   const s = (await getSettings()).medicalField;
   const ref = iso(today());
   const r = await db.execute<{ visit_date: string; product: string; product_id: string; brand: string | null; delegate: string | null; dates: string[] | null }>(sql`
-    select v.date::text as visit_date, pr.name as product, pr.id as product_id, b.name as brand, u.name as delegate,
+    select v.date::text as visit_date, pr.name as product, pr.id as product_id, b.name as brand, coalesce(u.name, v.delegate_label) as delegate,
       (select array_agg(p.date::text) from prescriptions p where p.doctor_id = v.doctor_id and p.product_id = vp.product_id
          and p.date between v.date - ${s.impactWindowDays}::int and v.date + ${s.impactWindowDays}::int) as dates
     from doctor_visits v join visit_products vp on vp.visit_id = v.id join products pr on pr.id = vp.product_id

@@ -78,7 +78,7 @@ export async function fieldDelegates(scope: FieldScope): Promise<{ id: string; n
 /** Visites (chrono et saisies) d'une période, avec leurs événements et la position du cabinet. */
 export async function fieldVisits(scope: FieldScope, f: FieldFilters): Promise<FieldVisit[]> {
   const r = await db.execute(sql`
-    select v.id, v.delegate_id, u.name as delegate_name, v.doctor_id, d.first_name || ' ' || d.last_name as doctor_name, d.city as doctor_city,
+    select v.id, v.delegate_id, coalesce(u.name, v.delegate_label) as delegate_name, v.doctor_id, d.first_name || ' ' || d.last_name as doctor_name, d.city as doctor_city,
       v.date::text as date, v.status, v.timing_source, v.started_at, v.ended_at, v.duration_minutes, v.auto_closed, v.synced_late,
       v.verification_status, v.verification_reasons, v.report_status, v.not_done_reason,
       d.gps_lat, d.gps_lng, d.gps_status, d.gps_source

@@ -306,7 +306,9 @@ Un seul moteur pour tous les types : `src/lib/import/`.
 
 Types : `SALES`, `CLIENTS`, `PRODUCTS`, `STOCK`, `OBJECTIVES`, `BUDGETS`, `REGULATORY`,
 `ANIMATIONS`, `ANIM_OBJECTIVES`, `ADS`, `MEDECINS`, `INVENTORY`, `INFLUENCERS`, `STOCK_INITIAL`, `PRESCRIPTIONS`
-(ordonnances : aucune donnée patient, annulable).
+(ordonnances : aucune donnée patient, annulable), `VISITES_MEDICALES` (historique d'un CRM : clé `crm:<réf>`, visites
+`HISTORIQUE` hors contrôle GPS, VM sans compte gardée en `delegate_label`, potentiel repris sur fiche vide, cabinet
+proposé par `cabinetFromHistory()`, durée « 1 heure » = non mesurée ; migration 0039).
 `STOCK` (photo) porte un dépôt : Cospharma et Pharmafirst ne sont connus que par leurs photos.
 
 Pour les publicités, `src/lib/meta/` fait la même chose par API et suit les mêmes conventions

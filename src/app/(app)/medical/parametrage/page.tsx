@@ -69,6 +69,8 @@ export default async function MedicalParametragePage() {
           <Field name="tourWeightB" label="Tournée : poids potentiel B" value={f.tourWeights.B} step="0.5" hint={`Défaut ${D.tourWeights.B}.`} />
           <Field name="tourWeightC" label="Tournée : poids potentiel C" value={f.tourWeights.C} step="0.5" hint={`Défaut ${D.tourWeights.C}.`} />
           <Field name="tourWeightNone" label="Tournée : poids non classé" value={f.tourWeights.none} step="0.5" hint={`Défaut ${D.tourWeights.none}.`} />
+          <Field name="historyMinPoints" label="Cabinet depuis l'historique : visites min." value={f.historyMinPoints} hint={`Défaut ${D.historyMinPoints}.`} />
+          <Field name="historyMinShare" label="… part des visites dans le rayon (0-1)" value={f.historyMinShare} step="0.05" hint={`Défaut ${D.historyMinShare}.`} />
           <Field name="impactWindowDays" label="Impact des visites : fenêtre (j)" value={f.impactWindowDays} hint={`Avant / après. Défaut ${D.impactWindowDays}.`} />
           <div className="sm:col-span-3"><button className="btn-primary" type="submit">Enregistrer</button></div>
         </form>

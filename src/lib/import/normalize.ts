@@ -105,3 +105,20 @@ export function toISODate(v: unknown): string | null {
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 }
+
+/**
+ * Durée lue telle qu'un CRM l'écrit : « 52 min », « 1 h 05 », « 45 ». Une durée en heures entières sans minutes
+ * (« 1 heure ») est un arrondi du CRM (entre 60 et 119 min) : elle reste non mesurée plutôt qu'estimée.
+ */
+export function parseDurationMinutes(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "number") return Number.isFinite(v) && v > 0 ? Math.round(v) : null;
+  const t = String(v).toLowerCase().trim();
+  if (!t) return null;
+  const h = /(\d+)\s*(h|heures?)\b/.exec(t);
+  const m = /(\d+)\s*(min|mn)\b/.exec(t) ?? (h ? /h(?:eures?)?\s*(\d+)/.exec(t) : null);
+  if (h && !m) return null;
+  if (h || m) return (h ? Number(h[1]) * 60 : 0) + (m ? Number(m[1]) : 0) || null;
+  const n = Number(t.replace(",", "."));
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+}

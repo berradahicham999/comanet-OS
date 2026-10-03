@@ -5,7 +5,7 @@
 import { normKey } from "./normalize";
 import type { ModuleKey } from "@/lib/access-shared";
 
-export type ImportType = "SALES" | "CLIENTS" | "PRODUCTS" | "STOCK" | "OBJECTIVES" | "BUDGETS" | "REGULATORY" | "ANIMATIONS" | "ANIM_OBJECTIVES" | "ADS" | "MEDECINS" | "INVENTORY" | "INFLUENCERS" | "STOCK_INITIAL" | "PRESCRIPTIONS";
+export type ImportType = "SALES" | "CLIENTS" | "PRODUCTS" | "STOCK" | "OBJECTIVES" | "BUDGETS" | "REGULATORY" | "ANIMATIONS" | "ANIM_OBJECTIVES" | "ADS" | "MEDECINS" | "INVENTORY" | "INFLUENCERS" | "STOCK_INITIAL" | "PRESCRIPTIONS" | "VISITES_MEDICALES";
 
 /**
  * Module dont relève chaque type d'import : importer = droit « Créer » sur ce module,
@@ -27,6 +27,7 @@ export const IMPORT_MODULE: Record<ImportType, ModuleKey> = {
   INFLUENCERS: "influence",
   STOCK_INITIAL: "stock",
   PRESCRIPTIONS: "medical",
+  VISITES_MEDICALES: "medical",
 };
 
 export type FieldDef = { key: string; label: string; required?: boolean; synonyms: string[]; hint?: string };
@@ -44,6 +45,7 @@ export const IMPORT_TYPES: { key: ImportType; label: string; description: string
   { key: "ANIM_OBJECTIVES", label: "Objectifs animation par ville", description: "Tableau croisé ville × marque (unités par an). Choisir la ligne d'en-tête du bloc YEARLY ; l'objectif mensuel est calculé automatiquement." },
   { key: "ADS", label: "Publicités (Meta / TikTok / Google)", description: "Export de la régie : une ligne par jour × campagne (ou par publicité). Dépense, impressions, clics, achats, CA." },
   { key: "PRESCRIPTIONS", label: "Ordonnances collectées", description: "Une ligne par produit prescrit : date, médecin, produit, quantité (pharmacie, ville, spécialité si présentes). AUCUNE donnée patient n'est lue : les colonnes patient sont ignorées, et refusées si on les associe à un champ. Les médecins non rapprochés attendent dans Médical → Ordonnances." },
+  { key: "VISITES_MEDICALES", label: "Visites médicales (historique CRM)", description: "Reprise de l'historique des visites des déléguées : une ligne par visite avec sa référence d'origine (recharger le même fichier ne duplique rien). Visites marquées « historique », hors contrôle GPS ; une VM sans compte garde son nom sans qu'aucun compte soit créé. Les médecins sont rapprochés (créés s'ils manquent) et la position du cabinet est proposée à partir des visites." },
   { key: "MEDECINS", label: "Médecins (référentiel)", description: "Référentiel des médecins visités : identité, spécialité, ville, secteur, délégué responsable." },
   { key: "INVENTORY", label: "Inventaire matériel (PLV, échantillons, goodies)", description: "Inventaire initial du matériel marketing : une ligne par article avec catégorie, marque, quantité en stock, coût unitaire et seuil d'alerte." },
   { key: "INFLUENCERS", label: "Influenceuses (répertoire)", description: "Liste d'influenceuses déjà identifiées : réseaux, audience, catégorie, ville, tarif habituel, contact. Recharger le même fichier met à jour les fiches (rapprochées par nom), sans dupliquer." },
@@ -218,6 +220,23 @@ export const FIELDS: Record<ImportType, FieldDef[]> = {
     { key: "product", label: "Produit prescrit", required: true, synonyms: ["produit", "produit prescrit", "article", "designation", "medicament", "reference produit"] },
     { key: "brand", label: "Marque", synonyms: ["marque", "laboratoire", "gamme", "brand"] },
     { key: "quantity", label: "Quantité", synonyms: ["quantite", "qte", "qty", "nombre", "nb boites", "boites", "unites"], hint: "Vide : 1." },
+  ],
+  VISITES_MEDICALES: [
+    { key: "visitRef", label: "Réf. visite (origine)", required: true, synonyms: ["ref visite", "id visite", "reference visite", "n visite", "visite id"] },
+    { key: "date", label: "Date", required: true, synonyms: ["date", "date visite", "jour"] },
+    { key: "doctorName", label: "Médecin", required: true, synonyms: ["medecin", "nom medecin", "nom prenom", "nom & prenom", "client"] },
+    { key: "doctorRef", label: "Réf. médecin (origine)", synonyms: ["ref medecin", "ref client", "id medecin", "id client"] },
+    { key: "city", label: "Ville", synonyms: ["ville", "city"] },
+    { key: "specialty", label: "Spécialité", synonyms: ["specialite", "specialty"] },
+    { key: "sector", label: "Secteur", synonyms: ["secteur", "sector"] },
+    { key: "potential", label: "Potentiel (A/B/C)", synonyms: ["potentiel", "pot"] },
+    { key: "delegate", label: "VM / déléguée", synonyms: ["vm", "deleguee", "delegue", "visiteuse", "visiteuse medicale"] },
+    { key: "delegateEmail", label: "Compte COMANET OS de la VM (e-mail)", synonyms: ["compte comanet os", "email vm", "e mail vm", "compte"], hint: "Vide : la visite garde le nom de la VM, sans compte." },
+    { key: "duration", label: "Durée (min)", synonyms: ["duree", "duree min", "duree (min)", "duree minutes"] },
+    { key: "comment", label: "Commentaire", synonyms: ["commentaire", "commentaires", "compte rendu"] },
+    { key: "objections", label: "Objections", synonyms: ["objections", "objection"] },
+    { key: "lat", label: "Latitude de la visite", synonyms: ["latitude", "lat", "lat visite"] },
+    { key: "lng", label: "Longitude de la visite", synonyms: ["longitude", "lng", "lon", "lng visite"] },
   ],
   MEDECINS: [
     { key: "firstName", label: "Prénom", required: true, synonyms: ["prenom", "first name", "prenom medecin"] },

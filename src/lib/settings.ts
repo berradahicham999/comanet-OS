@@ -278,6 +278,9 @@ export type MedicalFieldSettings = {
   tourWeights: { A: number; B: number; C: number; none: number };
   /** Tournée suggérée : nombre de médecins proposés pour la semaine. */
   tourSize: number;
+  /** Cabinet déduit de l'historique des visites : visites minimum, et part minimale des visites dans le rayon. */
+  historyMinPoints: number;
+  historyMinShare: number;
   /** Jours travaillés des déléguées (1 = lundi … 7 = dimanche), pour l'alerte « journée sans visite ». */
   workDays: number[];
 };
@@ -307,6 +310,8 @@ export const DEFAULT_MEDICAL_FIELD: MedicalFieldSettings = {
   impactWindowDays: 60,
   tourWeights: { A: 3, B: 2, C: 1, none: 1 },
   tourSize: 40,
+  historyMinPoints: 3,
+  historyMinShare: 0.6,
   workDays: [1, 2, 3, 4, 5, 6],
 };
 
