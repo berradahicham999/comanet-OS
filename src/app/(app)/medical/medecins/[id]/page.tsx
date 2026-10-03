@@ -11,12 +11,17 @@ import { PageHeader, Card, Badge, Facts, Empty } from "@/components/ui";
 import { DoctorFormFields } from "@/components/medical-doctor-form";
 import { RecommendationCard } from "@/components/recommendation-card";
 import { saveDoctor } from "../actions";
+import { doctorBrief } from "@/lib/medical/prescriptions";
+import { BriefView } from "@/components/medical/brief-view";
+import { fieldScope, hasFieldControl } from "@/lib/medical/field-access";
+import { mapsUrl } from "@/lib/medical/gps-shared";
+import { sql } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
 const STATUS_TONE = { NOUVEAU: "blue", ACTIF: "green", A_REACTIVER: "orange", INACTIF: "gray" } as const;
 const STATUS_LABEL = { NOUVEAU: "Nouveau", ACTIF: "Actif", A_REACTIVER: "À réactiver", INACTIF: "Inactif" } as const;
-const VISIT_STATUS_LABEL: Record<string, string> = { PLANIFIEE: "Planifiée", REALISEE: "Réalisée", ANNULEE: "Annulée", REPORTEE: "Reportée", NON_EFFECTUEE: "Non effectuée" };
+const VISIT_STATUS_LABEL: Record<string, string> = { EN_COURS: "En cours", PLANIFIEE: "Planifiée", REALISEE: "Réalisée", ANNULEE: "Annulée", REPORTEE: "Reportée", NON_EFFECTUEE: "Non effectuée" };
 
 export default async function MedecinFichePage({ params }: { params: Promise<{ id: string }> }) {
   await requireAccess("medical");
@@ -35,6 +40,14 @@ export default async function MedecinFichePage({ params }: { params: Promise<{ i
   ]);
   const ref = today();
   const rec = buildDoctorRecommendation(doctor, settings, ref);
+  const [brief, scope, gps] = await Promise.all([
+    doctorBrief(id),
+    fieldScope(),
+    db.execute<{ gps_lat: string | null; gps_lng: string | null; gps_status: string | null; gps_source: string | null; gps_validated_at: string | null }>(sql`
+      select gps_lat, gps_lng, gps_status, gps_source, gps_validated_at::text as gps_validated_at from doctors where id = ${id}::uuid`),
+  ]);
+  const cab = gps.rows[0];
+  const control = hasFieldControl(scope);
   const existingTask = rec
     ? await db.query.tasks.findFirst({ where: and(eq(tasks.sourceKey, rec.key), inArray(tasks.status, ["TODO", "IN_PROGRESS"])), with: { assignee: true } })
     : null;
@@ -49,7 +62,7 @@ export default async function MedecinFichePage({ params }: { params: Promise<{ i
           {doctor.potential && <Badge tone={doctor.potential === "A" ? "green" : doctor.potential === "B" ? "blue" : "gray"} className="ml-2">Potentiel {doctor.potential}</Badge>}
           {doctor.sectorName && <span className="ml-2">{doctor.sectorName}</span>}
         </>}
-        actions={<a href={`/medical/visites/saisie?doctor=${doctor.id}`} className="btn-primary">Nouvelle visite</a>}
+        actions={<a href={`/medical/journee?doctor=${doctor.id}`} className="btn-primary">Démarrer une visite</a>}
       />
 
       <div className="grid lg:grid-cols-[1fr_360px] gap-4">
@@ -82,6 +95,12 @@ export default async function MedecinFichePage({ params }: { params: Promise<{ i
             {doctor.notes && <p className="text-[13px] text-ink-2 mt-2"><span className="label mr-1.5">Notes</span>{doctor.notes}</p>}
           </Card>
 
+          {brief && (
+            <Card title="Ordonnances, potentiel et produits à présenter">
+              <BriefView brief={brief} compact />
+            </Card>
+          )}
+
           <Card title="Historique des visites">
             {visits.length === 0 ? (
               <Empty title="Aucune visite enregistrée" hint="Enregistrez la première visite depuis « Nouvelle visite »." />
@@ -106,6 +125,17 @@ export default async function MedecinFichePage({ params }: { params: Promise<{ i
           </Card>
         </div>
 
+        <div className="space-y-4">
+        <Card title="Position du cabinet">
+          {cab?.gps_lat ? (
+            <div className="text-[13px] space-y-1">
+              <Badge tone={cab.gps_status === "VALIDEE" ? "green" : "orange"}>{cab.gps_status === "VALIDEE" ? "Validée" : "À valider"}</Badge>
+              <div className="text-muted">{cab.gps_source === "PREMIERE_VISITE" ? "Proposée au premier démarrage d'une visite" : cab.gps_source === "ADRESSE" ? "Déduite de l'adresse" : "Saisie à la main"}{cab.gps_validated_at ? ` · validée le ${fmtDate(cab.gps_validated_at)}` : ""}</div>
+              {control && <a className="text-accent-2 hover:underline" target="_blank" rel="noopener" href={mapsUrl({ lat: Number(cab.gps_lat), lng: Number(cab.gps_lng) })}>Voir sur Google Maps</a>}
+              {control && cab.gps_status !== "VALIDEE" && <div><a className="text-accent-2 hover:underline" href="/medical/suivi">Valider sur la carte du suivi terrain</a></div>}
+            </div>
+          ) : <div className="text-[13px] text-muted">Inconnue : elle sera proposée au premier « Démarrer » d&apos;une visite chez ce médecin, puis validée par la direction ou le manager.</div>}
+        </Card>
         <Card title="Modifier la fiche">
           <form action={saveDoctor}>
             <DoctorFormFields
@@ -115,6 +145,7 @@ export default async function MedecinFichePage({ params }: { params: Promise<{ i
             <div className="mt-4"><button className="btn-secondary btn-sm" type="submit">Enregistrer</button></div>
           </form>
         </Card>
+        </div>
       </div>
     </>
   );

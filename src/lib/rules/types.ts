@@ -50,6 +50,11 @@ export type Recommendation = {
   brandId?: string | null;
   /** Enjeu (MAD) pour ordonner les recommandations de même priorité. */
   score?: number;
+  /**
+   * Alerte de contrôle terrain médical (GPS, présence) sur cette déléguée : visible seulement de la
+   * direction et de son manager (`inFieldScope()`), jamais des autres profils qui voient le module Médical.
+   */
+  fieldDelegateId?: string;
 };
 
 export type RecommendationWithState = Recommendation & {

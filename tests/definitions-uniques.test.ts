@@ -296,3 +296,33 @@ describe("Clients — fusion et raisons sociales", () => {
     assert.deepEqual(hits(/export function billingIdentity\(/), ["src/lib/gestion/clients-shared.ts"]);
   });
 });
+
+describe("Médical v2 — chrono, GPS, ordonnances", () => {
+  test("seul `chrono.ts` écrit le journal des visites", () => {
+    const found = codeHits(/insert\(visitEvents\)|insert\s+into\s+visit_events/i, ["lib/medical/chrono.ts"]);
+    assert.deepEqual(found, [], `Écriture de visit_events hors de chrono.ts : ${found.join(", ")}`);
+  });
+  test("seul `chrono.ts` écrit les heures et le statut de contrôle d'une visite", () => {
+    const found = codeHits(/update\(doctorVisits\)\s*\.set\(\{[^}]*\b(startedAt|endedAt|verificationStatus|autoClosed)\b|update\s+doctor_visits\s+set[^`]*\b(started_at|ended_at|verification_status|auto_closed)\s*=/i, ["lib/medical/chrono.ts"]);
+    assert.deepEqual(found, [], `Heures ou contrôle de visite écrits hors de chrono.ts : ${found.join(", ")}`);
+  });
+  test("une seule distance GPS et un seul statut de contrôle", () => {
+    assert.deepEqual(codeHits(/6_?371_?000|function haversine/i), ["src/lib/medical/gps-shared.ts"]);
+    assert.deepEqual(codeHits(/export function verifyVisit\(/), ["src/lib/medical/gps-shared.ts"]);
+  });
+  test("le potentiel automatique et les recommandations n'ont qu'une définition", () => {
+    assert.deepEqual(codeHits(/export function doctorPotential\(/), ["src/lib/medical/prescriptions-shared.ts"]);
+    assert.deepEqual(codeHits(/export function recommendProducts\(/), ["src/lib/medical/prescriptions-shared.ts"]);
+    const auto = codeHits(/potential_source\s*=\s*'AUTO'|then 'AUTO'/i, ["lib/medical/prescriptions.ts"]);
+    assert.deepEqual(auto, [], `Potentiel automatique écrit hors de prescriptions.ts : ${auto.join(", ")}`);
+  });
+  test("les ordonnances ne s'écrivent que par l'import, la file de résolution et l'annulation", () => {
+    const found = codeHits(/insert\(s?\.?prescriptions\)|insert\s+into\s+prescriptions/i, ["lib/import/run.ts"]);
+    assert.deepEqual(found, [], `Insertion d'ordonnances hors de l'import : ${found.join(", ")}`);
+  });
+  test("aucun champ patient dans la liste blanche de l'import d'ordonnances", () => {
+    const fields = readFileSync("src/lib/import/fields.ts", "utf8");
+    const block = fields.slice(fields.indexOf("PRESCRIPTIONS: ["), fields.indexOf("MEDECINS: ["));
+    assert.doesNotMatch(block, /key: "(patient|age|phone|telephone|cin|patientName)/i);
+  });
+});

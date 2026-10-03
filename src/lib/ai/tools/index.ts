@@ -26,6 +26,7 @@ import { getBrandOverview, getMarketingRecommendations, getSalesTargets } from "
 import { getInventoryStatus, getProductPerformance, getStockRisk, getTopSkus } from "./marketing-products";
 import { getSalesBreakdown, getSalesPerformance } from "./marketing-sales";
 import { getMarketingContext } from "./marketing-context";
+import { getDoctorProfile, getFieldControl } from "./medical";
 
 export type { AiTool, ToolAccess, ToolContext, ToolDeps, ToolResult, ToolCallLog } from "./types";
 
@@ -36,6 +37,8 @@ export const TOOLS: AiTool<any>[] = [
   // Agent marketing (couche `src/lib/marketing-intel/`)
   getBrandOverview, getSalesTargets, getMarketingRecommendations, getInventoryStatus, getStockRisk, getTopSkus, getProductPerformance,
   getSalesPerformance, getSalesBreakdown, getMarketingContext,
+  // Médical v2 (ordonnances, contrôle terrain)
+  getDoctorProfile, getFieldControl,
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 /** Outils de l'Agent marketing, dans l'ordre d'appel conseillé pour « que pousser cette semaine ». */

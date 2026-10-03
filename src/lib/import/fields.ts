@@ -5,7 +5,7 @@
 import { normKey } from "./normalize";
 import type { ModuleKey } from "@/lib/access-shared";
 
-export type ImportType = "SALES" | "CLIENTS" | "PRODUCTS" | "STOCK" | "OBJECTIVES" | "BUDGETS" | "REGULATORY" | "ANIMATIONS" | "ANIM_OBJECTIVES" | "ADS" | "MEDECINS" | "INVENTORY" | "INFLUENCERS" | "STOCK_INITIAL";
+export type ImportType = "SALES" | "CLIENTS" | "PRODUCTS" | "STOCK" | "OBJECTIVES" | "BUDGETS" | "REGULATORY" | "ANIMATIONS" | "ANIM_OBJECTIVES" | "ADS" | "MEDECINS" | "INVENTORY" | "INFLUENCERS" | "STOCK_INITIAL" | "PRESCRIPTIONS";
 
 /**
  * Module dont relève chaque type d'import : importer = droit « Créer » sur ce module,
@@ -26,6 +26,7 @@ export const IMPORT_MODULE: Record<ImportType, ModuleKey> = {
   INVENTORY: "marketing",
   INFLUENCERS: "influence",
   STOCK_INITIAL: "stock",
+  PRESCRIPTIONS: "medical",
 };
 
 export type FieldDef = { key: string; label: string; required?: boolean; synonyms: string[]; hint?: string };
@@ -42,6 +43,7 @@ export const IMPORT_TYPES: { key: ImportType; label: string; description: string
   { key: "ANIMATIONS", label: "Animations POS (feuille quotidienne)", description: "Matrice « Données Journalières » : une ligne par jour × point de vente × animatrice, une colonne par produit. Les colonnes non identifiées sont lues comme des produits." },
   { key: "ANIM_OBJECTIVES", label: "Objectifs animation par ville", description: "Tableau croisé ville × marque (unités par an). Choisir la ligne d'en-tête du bloc YEARLY ; l'objectif mensuel est calculé automatiquement." },
   { key: "ADS", label: "Publicités (Meta / TikTok / Google)", description: "Export de la régie : une ligne par jour × campagne (ou par publicité). Dépense, impressions, clics, achats, CA." },
+  { key: "PRESCRIPTIONS", label: "Ordonnances collectées", description: "Une ligne par produit prescrit : date, médecin, produit, quantité (pharmacie, ville, spécialité si présentes). AUCUNE donnée patient n'est lue : les colonnes patient sont ignorées, et refusées si on les associe à un champ. Les médecins non rapprochés attendent dans Médical → Ordonnances." },
   { key: "MEDECINS", label: "Médecins (référentiel)", description: "Référentiel des médecins visités : identité, spécialité, ville, secteur, délégué responsable." },
   { key: "INVENTORY", label: "Inventaire matériel (PLV, échantillons, goodies)", description: "Inventaire initial du matériel marketing : une ligne par article avec catégorie, marque, quantité en stock, coût unitaire et seuil d'alerte." },
   { key: "INFLUENCERS", label: "Influenceuses (répertoire)", description: "Liste d'influenceuses déjà identifiées : réseaux, audience, catégorie, ville, tarif habituel, contact. Recharger le même fichier met à jour les fiches (rapprochées par nom), sans dupliquer." },
@@ -204,6 +206,18 @@ export const FIELDS: Record<ImportType, FieldDef[]> = {
     { key: "physicalProduct", label: "Produit physique", synonyms: ["produit physique", "echantillon physique", "physique"] },
     { key: "observation", label: "Observation (étape CE)", synonyms: ["observation", "observations", "etape", "commentaire ce"] },
     { key: "notes", label: "Notes / remarques", synonyms: ["remarque", "remarques", "note", "notes", "commentaire", "commentaires"] },
+  ],
+  // Liste blanche : seuls ces champs sont lus. Aucun champ patient n'existe ici, volontairement.
+  PRESCRIPTIONS: [
+    { key: "date", label: "Date de l'ordonnance", required: true, synonyms: ["date", "date ordonnance", "date de l ordonnance", "date prescription", "date de prescription", "jour"] },
+    { key: "doctorName", label: "Médecin (nom, ou nom et prénom)", required: true, synonyms: ["medecin", "nom medecin", "nom du medecin", "medecin prescripteur", "prescripteur", "docteur", "dr", "nom docteur"] },
+    { key: "doctorFirstName", label: "Prénom du médecin", synonyms: ["prenom medecin", "prenom du medecin", "prenom docteur"], hint: "Seulement si le prénom est dans une colonne à part." },
+    { key: "specialty", label: "Spécialité", synonyms: ["specialite", "specialite medecin", "specialty"] },
+    { key: "city", label: "Ville", synonyms: ["ville", "ville medecin", "localite", "city"] },
+    { key: "pharmacy", label: "Pharmacie", synonyms: ["pharmacie", "officine", "point de vente", "pharmacie delivrante", "client"] },
+    { key: "product", label: "Produit prescrit", required: true, synonyms: ["produit", "produit prescrit", "article", "designation", "medicament", "reference produit"] },
+    { key: "brand", label: "Marque", synonyms: ["marque", "laboratoire", "gamme", "brand"] },
+    { key: "quantity", label: "Quantité", synonyms: ["quantite", "qte", "qty", "nombre", "nb boites", "boites", "unites"], hint: "Vide : 1." },
   ],
   MEDECINS: [
     { key: "firstName", label: "Prénom", required: true, synonyms: ["prenom", "first name", "prenom medecin"] },

@@ -15,6 +15,8 @@ import { budgetRule, adsRule, influenceRule, campaignStockRule } from "./marketi
 import { terrainRules, overdueTasksRule } from "./execution-rules";
 import { animationPerformanceRule } from "./animation-rules";
 import { medicalRules } from "./medical-rules";
+import { medicalFieldRules } from "./medical-field-rules";
+import { fieldScope, inFieldScope } from "@/lib/medical/field-access";
 import { contentLateRule } from "./content-rules";
 import { activationRules } from "./activation-rules";
 import { analyticsRules } from "./analytics-rules";
@@ -46,6 +48,7 @@ export const RULES: Rule[] = [
   ...gestionRules,
   dataQualityRule,
   ...medicalRules,
+  ...medicalFieldRules,
 ];
 
 async function buildContext(): Promise<RuleContext> {
@@ -63,7 +66,9 @@ export const allRecommendations = cache(async (): Promise<RecommendationWithStat
   const results = await Promise.all(RULES.map(async (r) => {
     try { return await r.run(ctx); } catch (e) { console.error(`Règle ${r.id} en erreur`, e); return []; }
   }));
-  const recs = results.flat();
+  // Alertes de contrôle terrain : seulement pour la direction et le manager de la déléguée concernée.
+  const scope = await fieldScope().catch(() => ({ all: false, delegateIds: [] as string[] }));
+  const recs = results.flat().filter((r) => !r.fieldDelegateId || inFieldScope(scope, r.fieldDelegateId));
   const keys = recs.map((r) => r.key);
   const [taskRows, dismissals] = await Promise.all([
     keys.length

@@ -33,9 +33,12 @@ export async function saveDoctor(formData: FormData) {
   const brandIds = formData.getAll("brandIds").map(String).filter(Boolean);
   let doctorId = id;
   if (id) {
-    await db.update(doctors).set(values).where(eq(doctors.id, id));
+    // Potentiel : une valeur changée à la main prime sur le calcul ; inchangée, elle garde son origine.
+    const cur = await db.query.doctors.findFirst({ where: eq(doctors.id, id), columns: { potential: true, potentialSource: true } });
+    const potentialSource = cur && cur.potential === values.potential ? cur.potentialSource : values.potential ? ("MANUELLE" as const) : null;
+    await db.update(doctors).set({ ...values, potentialSource }).where(eq(doctors.id, id));
   } else {
-    const [row] = await db.insert(doctors).values(values).returning();
+    const [row] = await db.insert(doctors).values({ ...values, potentialSource: values.potential ? "MANUELLE" : null }).returning();
     doctorId = row.id;
   }
   // Marques concernées : remplacées par la sélection du formulaire.

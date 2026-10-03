@@ -84,6 +84,8 @@ export type ComanetSettings = {
   marketingIntel: MarketingIntelSettings;
   /** Stock chez le client : ancienneté d'un relevé, fenêtres de croisement sell-in / sell-out. */
   clientStock: ClientStockSettings;
+  /** Médical v2 : chrono de visite, contrôle GPS, ordonnances (Paramétrage médical). */
+  medicalField: MedicalFieldSettings;
   /** Gestion commerciale : identité de la société imprimée sur les pièces, politiques, bascule depuis Sage. */
   gestion: GestionSettings;
   /** P&L de gestion : quels sites de vente sont du CA COMANET, lesquels sont des prestations commissionnées. */
@@ -229,6 +231,85 @@ export const DEFAULT_GESTION: GestionSettings = {
  * n'est écrit dans le code : l'ancienneté d'un relevé et la fenêtre de couverture estimée
  * viennent d'ici.
  */
+/**
+ * Médical v2 — aucune règle de contrôle de présence ni d'analyse des ordonnances n'est écrite en dur :
+ * tout se règle dans Médical → Paramétrage médical.
+ */
+export type MedicalFieldSettings = {
+  /** Rayon autour du cabinet validé dans lequel Démarrer / Terminer sont « chez le médecin » (m). */
+  radiusM: number;
+  /** Précision GPS au-delà de laquelle une position ne prouve rien (m). */
+  maxAccuracyM: number;
+  /** Distance maximale entre la position de Démarrer et celle de Terminer (m). */
+  maxStartStopM: number;
+  /** Durée de visite plausible (min). */
+  minDurationMin: number;
+  maxDurationMin: number;
+  /** Une action envoyée plus de N heures après avoir été faite (hors connexion) est à vérifier. */
+  lateSyncHours: number;
+  /** Écart toléré entre l'horloge du téléphone et celle du serveur (min). */
+  clockSkewMin: number;
+  /** Vitesse implicite maximale entre deux visites (km/h) ; au-delà, déplacement impossible. */
+  maxSpeedKmh: number;
+  /** Visite oubliée : clôture automatique après N heures. */
+  autoCloseHours: number;
+  /** Délai d'attente de la position GPS sur le téléphone (s). */
+  gpsTimeoutS: number;
+  /** Rapprochement des noms : score à partir duquel l'association est automatique, et score minimal d'une suggestion (0-1). */
+  matchAutoScore: number;
+  matchSuggestScore: number;
+  /** Potentiel automatique : fenêtre d'observation (mois), part des meilleurs prescripteurs de la spécialité en A puis en A+B (%). */
+  potentialMonths: number;
+  potentialTopAPct: number;
+  potentialTopBPct: number;
+  /** Ordonnances minimales sur la fenêtre pour calculer un potentiel (en dessous : non calculé). */
+  potentialMinPrescriptions: number;
+  /** Tendance : 3 derniers mois vs 3 précédents ; hausse au-delà de X % = un cran de plus, baisse au-delà = un cran de moins. */
+  trendMonths: number;
+  trendPct: number;
+  /** Recommandation produit : médecins pairs minimum (même spécialité, même ville) avant de se replier sur la spécialité nationale. */
+  recoMinPeers: number;
+  /** Nombre minimal de médecins pairs derrière une association « X → Y » pour qu'elle soit proposée. */
+  recoMinSupport: number;
+  recoTopN: number;
+  /** Impact des visites : fenêtre avant / après (jours). */
+  impactWindowDays: number;
+  /** Tournée suggérée : poids du potentiel (A, B, C, non classé) dans la priorité d'un médecin. */
+  tourWeights: { A: number; B: number; C: number; none: number };
+  /** Tournée suggérée : nombre de médecins proposés pour la semaine. */
+  tourSize: number;
+  /** Jours travaillés des déléguées (1 = lundi … 7 = dimanche), pour l'alerte « journée sans visite ». */
+  workDays: number[];
+};
+
+export const DEFAULT_MEDICAL_FIELD: MedicalFieldSettings = {
+  radiusM: 150,
+  maxAccuracyM: 100,
+  maxStartStopM: 300,
+  minDurationMin: 3,
+  maxDurationMin: 90,
+  lateSyncHours: 2,
+  clockSkewMin: 10,
+  maxSpeedKmh: 80,
+  autoCloseHours: 3,
+  gpsTimeoutS: 20,
+  matchAutoScore: 0.92,
+  matchSuggestScore: 0.75,
+  potentialMonths: 12,
+  potentialTopAPct: 20,
+  potentialTopBPct: 50,
+  potentialMinPrescriptions: 3,
+  trendMonths: 3,
+  trendPct: 20,
+  recoMinPeers: 5,
+  recoMinSupport: 3,
+  recoTopN: 3,
+  impactWindowDays: 60,
+  tourWeights: { A: 3, B: 2, C: 1, none: 1 },
+  tourSize: 40,
+  workDays: [1, 2, 3, 4, 5, 6],
+};
+
 export type ClientStockSettings = {
   /** Relevé « frais » (vert) s'il a strictement moins de N jours. */
   freshDays: number;
@@ -532,6 +613,7 @@ export const DEFAULT_SETTINGS: ComanetSettings = {
   ai: DEFAULT_AI_SETTINGS,
   marketingIntel: DEFAULT_MARKETING_INTEL,
   clientStock: DEFAULT_CLIENT_STOCK,
+  medicalField: DEFAULT_MEDICAL_FIELD,
   gestion: DEFAULT_GESTION,
   pnl: DEFAULT_PNL,
 };
@@ -558,6 +640,7 @@ export function mergeSettings(stored: Partial<ComanetSettings> | null | undefine
     ai: { ...DEFAULT_AI_SETTINGS, ...(stored.ai ?? {}) },
     marketingIntel: { ...DEFAULT_MARKETING_INTEL, ...(stored.marketingIntel ?? {}) },
     clientStock: { ...DEFAULT_CLIENT_STOCK, ...(stored.clientStock ?? {}) },
+    medicalField: { ...DEFAULT_MEDICAL_FIELD, ...(stored.medicalField ?? {}), tourWeights: { ...DEFAULT_MEDICAL_FIELD.tourWeights, ...(stored.medicalField?.tourWeights ?? {}) } },
     gestion: mergeGestion(stored.gestion),
     pnl: { ...DEFAULT_PNL, ...(stored.pnl ?? {}) },
   };

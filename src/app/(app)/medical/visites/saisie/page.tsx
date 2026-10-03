@@ -28,11 +28,18 @@ export default async function SaisieVisitePage(props: { searchParams: Promise<{ 
 
   return (
     <>
-      <PageHeader eyebrow="Médical" title="Saisie de visite" subtitle="Médecin, produits présentés, échantillons remis, résultat — en moins d'une minute." />
+      <PageHeader
+        eyebrow="Médical"
+        title={isDelegate ? "Planifier une visite" : "Saisie de visite"}
+        subtitle={isDelegate
+          ? "Planifiez une visite ; le jour J, démarrez-la depuis « Ma journée » (chrono et position)."
+          : "Saisie au formulaire (hors chrono) : la visite n'aura ni heure ni contrôle GPS. Les déléguées passent par « Ma journée »."}
+        actions={<Link href="/medical/journee" className="btn-primary">Ma journée</Link>}
+      />
       {sp.done && <div className="mb-4 rounded-2xl bg-green-soft border border-green/30 px-4 py-3 text-[13px] text-green font-medium">Visite enregistrée. Merci !</div>}
       <div className="grid lg:grid-cols-[minmax(0,560px)_1fr] gap-4">
         <Card>
-          <MedicalVisitForm action={saveVisitAction} doctors={doctors} products={products} initial={{ doctorId: sp.doctor ?? "" }} today={iso(new Date())} />
+          <MedicalVisitForm mode={isDelegate ? "planning" : "full"} action={saveVisitAction} doctors={doctors} products={products} initial={{ doctorId: sp.doctor ?? "", status: isDelegate ? "PLANIFIEE" : undefined }} today={iso(new Date())} submitLabel={isDelegate ? "Planifier la visite" : undefined} />
         </Card>
         <div>
           <Card title="Mes dernières visites">
