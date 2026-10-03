@@ -90,6 +90,7 @@ recalculer une de ces notions à la main dans une page ou une requête :
 |---|---|---|
 | CA sell-out (TTC, prix public) | `src/lib/sellout.ts` | `selloutAmountSql()`, `selloutSumSql()`, `lineSellout()` |
 | Couverture de stock, commande conseillée | `src/lib/stock-math.ts` + `src/lib/stock.ts` | `computeCoverage()`, `productStocks()`, `isUnderTension()` |
+| Marge brute d'un produit (prix encaissé HT = PPH, égal au prix public TTC, ramené HT moins la remise client moyenne) | `src/lib/stock-math.ts` | `netSellingPrice()`, `marginPct()` |
 | Budget marketing consommé | `src/lib/budget.ts` | `budgetConsumption()`, `budgetConsumptionByBrand()` |
 | Dépense publicitaire (priorité régie → saisie) | `src/lib/ad-spend.ts` | `adSpend()` |
 | Verdict publicitaire | `src/lib/ads.ts` | `diagnose(cur, ref, brandAvg, settings.ads)` |

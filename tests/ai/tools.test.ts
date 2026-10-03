@@ -57,8 +57,8 @@ function makeDeps(calls: Calls, over: Partial<ToolDeps> = {}): ToolDeps {
     salesObjective: async () => 120_000,
     annualObjective: async () => 1_400_000,
     productCatalog: async (_ref, opts) => [
-      { id: "p1", name: "Crème A", sku: "SKU1", shortName: null, category: null, active: true, needsReview: false, brandId: "b-gamarde", brandName: "Gamarde", brandColor: null, priceWholesale: 80, costPrice: 40, priceRetail: 120, revenue12: 300_000, qty12: 3_000, revenue3: 90_000, qtyPrev3: 800, qty3: 900, clients12: 40, lastSale: "2026-08-30" },
-      { id: "p2", name: "Sérum B", sku: "SKU2", shortName: null, category: null, active: true, needsReview: false, brandId: "b-alpha", brandName: "Alphascience", brandColor: null, priceWholesale: 150, costPrice: 90, priceRetail: 220, revenue12: 50_000, qty12: 400, revenue3: 10_000, qtyPrev3: 100, qty3: 80, clients12: 12, lastSale: "2026-08-15" },
+      { id: "p1", name: "Crème A", sku: "SKU1", shortName: null, category: null, active: true, needsReview: false, brandId: "b-gamarde", brandName: "Gamarde", brandColor: null, priceWholesale: 80, costPrice: 40, priceRetail: 120, netPriceHt: 80, revenue12: 300_000, qty12: 3_000, revenue3: 90_000, qtyPrev3: 800, qty3: 900, clients12: 40, lastSale: "2026-08-30" },
+      { id: "p2", name: "Sérum B", sku: "SKU2", shortName: null, category: null, active: true, needsReview: false, brandId: "b-alpha", brandName: "Alphascience", brandColor: null, priceWholesale: 150, costPrice: 90, priceRetail: 220, netPriceHt: 150, revenue12: 50_000, qty12: 400, revenue3: 10_000, qtyPrev3: 100, qty3: 80, clients12: 12, lastSale: "2026-08-15" },
     ].filter((p) => !opts.brandId || p.brandId === opts.brandId),
     adsProductsToPush: async () => [{ productId: "p1", decision: "PUSH", costPerResult: 5, why: ["Coût par résultat -20 % vs moyenne Gamarde"] }],
     marketingActivity: async () => ({ campaigns: [], contents: [], collaborations: [], activations: [], brandObjectives: null }),

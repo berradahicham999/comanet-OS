@@ -100,7 +100,7 @@ describe("profil commercial d'un produit", () => {
     const rows = buildProductPerfRows({
       cur: [{ id: "p1", name: "Crème A", extra: "Gamarde", amount: 30_000, quantity: 375, orders: 20, clients: 15 }, { id: "p9", name: "Nouveau", extra: "Gamarde", amount: 4_000, quantity: 40, orders: 3, clients: 3 }],
       prev: [{ id: "p1", name: "Crème A", extra: "Gamarde", amount: 22_000, quantity: 280, orders: 15, clients: 12 }],
-      catalog: [{ id: "p1", name: "Crème A", sku: "SKU1", shortName: null, category: null, active: true, needsReview: false, brandId: "b1", brandName: "Gamarde", brandColor: null, priceWholesale: 80, costPrice: 40, priceRetail: 120, revenue12: 300_000, qty12: 3_000, revenue3: 90_000, qtyPrev3: 800, qty3: 900, clients12: 40, lastSale: "2026-08-30" }],
+      catalog: [{ id: "p1", name: "Crème A", sku: "SKU1", shortName: null, category: null, active: true, needsReview: false, brandId: "b1", brandName: "Gamarde", brandColor: null, priceWholesale: 80, costPrice: 40, priceRetail: 120, netPriceHt: 80, revenue12: 300_000, qty12: 3_000, revenue3: 90_000, qtyPrev3: 800, qty3: 900, clients12: 40, lastSale: "2026-08-30" }],
       inventory: inv, scopeRevenue: 34_000, settings: S, internalCosts: true,
     });
     assert.equal(rows[0].productId, "p1");

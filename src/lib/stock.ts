@@ -7,6 +7,7 @@ import {
   coverageLevel,
   isUnderTension,
   marginPct,
+  netSellingPrice,
   trendPct,
   DAYS_PER_MONTH,
   LEVEL_LABEL,
@@ -108,9 +109,11 @@ export async function productStocks(
            coalesce(a.avg_monthly, 0) as avg_monthly, lm.qty as last_month_qty,
            p.lead_time_days, p.safety_stock_days, p.moq,
            p.cost_price::float8 as cost_price, p.price_wholesale::float8 as price_wholesale,
+           tr.rate::float8 as tax_rate, p.avg_client_discount_pct::float8 as avg_discount,
            coalesce(f.sold, 0) as field_sold, f.stock_avg as field_stock_avg
     from products p
     left join brands b on b.id = p.brand_id
+    left join tax_rates tr on tr.key = coalesce(p.tax_rate_key, ${s.gestion.defaultTaxRateKey})
     left join latest l on l.product_id = p.id
     left join open_po po on po.product_id = p.id
     left join avg_sales a on a.product_id = p.id
@@ -145,7 +148,7 @@ export async function productStocks(
       leadTimeDays, safetyStockDays: safety, moq,
       recommendedOrder: cov.recommendedOrder, targetStock: cov.targetStock,
       costPrice: cost, priceWholesale: pw,
-      marginPct: marginPct(cost, pw),
+      marginPct: marginPct(cost, netSellingPrice(pw, row.tax_rate === null ? null : Number(row.tax_rate), row.avg_discount === null ? null : Number(row.avg_discount))),
       stockValue: stock * (cost ?? 0),
       fieldSellOut30d: Number(row.field_sold), fieldStockAvg: row.field_stock_avg === null ? null : Number(row.field_stock_avg),
     };

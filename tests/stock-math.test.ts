@@ -1,7 +1,7 @@
 /** Couverture de stock : la définition officielle (`src/lib/stock-math.ts`). */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { computeCoverage, coverageLevel, isUnderTension, trendPct, marginPct } from "@/lib/stock-math";
+import { computeCoverage, coverageLevel, isUnderTension, trendPct, marginPct, netSellingPrice } from "@/lib/stock-math";
 
 const T = { green: 4, yellow: 2, orange: 1 };
 const TENSION = { stockTightCoverageMonths: 1.5, stockTightMinMonthlyUnits: 30 };
@@ -110,5 +110,14 @@ describe("trendPct et marginPct", () => {
     assert.equal(marginPct(60, 100), 40);
     assert.equal(marginPct(null, 100), null);
     assert.equal(marginPct(60, 0), null);
+  });
+
+  test("netSellingPrice : PPH TTC ramené HT puis remise client moyenne", () => {
+    // Crème Réconfort : PPH 205 TTC, TVA 20 %, remise 40 % → 102,50 HT encaissés.
+    assert.equal(Math.round(netSellingPrice(205, 20, 40)! * 100) / 100, 102.5);
+    assert.equal(Math.round(marginPct(37.25, netSellingPrice(205, 20, 40))!), 64);
+    assert.equal(netSellingPrice(120, 20, null), 100); // remise non renseignée : aucune remise déduite
+    assert.equal(netSellingPrice(null, 20, 40), null);
+    assert.equal(netSellingPrice(0, 20, 40), null);
   });
 });
