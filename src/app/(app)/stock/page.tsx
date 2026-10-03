@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { requireAccess, hasFlag } from "@/lib/access";
+import { requireAccessContext, can } from "@/lib/permissions";
+import { suppliersByBrand } from "@/lib/forecast";
+import { orderPrefillHref } from "@/lib/forecast-shared";
 import { getRefDate } from "@/lib/ref-date";
 import { productStocks, stockSummary, LEVEL_LABEL, type CoverageLevel } from "@/lib/stock";
 import { getSettings } from "@/lib/settings";
 import { listBrands } from "@/lib/users";
 import { listWarehouses } from "@/lib/gestion/refs";
 import { PageHeader, Card, Badge, BrandDot, Tabs, Delta } from "@/components/ui";
-import { fmtMAD, fmtNum, fmtDate, fmtDateShort, months } from "@/lib/format";
+import { fmtMAD, fmtNum, fmtDate, fmtDateShort, fmtMonth, months } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Stock & achats" };
@@ -15,10 +18,13 @@ const LEVEL_TONE: Record<CoverageLevel, "green" | "yellow" | "orange" | "red" | 
 
 export default async function StockPage(props: { searchParams: Promise<{ brand?: string; view?: string; sort?: string }> }) {
   await requireAccess("stock");
+  const a = await requireAccessContext();
+  const canOrder = !a.preview && can(a.perms, "achats", "create");
   const seeMargins = await hasFlag("seeMargins");
   const sp = await props.searchParams;
   const { ref, lastSale } = await getRefDate();
-  const [all, settings, brands, warehouses] = await Promise.all([productStocks({ brandId: sp.brand || undefined }, ref), getSettings(), listBrands(), listWarehouses()]);
+  const [all, settings, brands, warehouses, bySupplier] = await Promise.all([productStocks({ brandId: sp.brand || undefined }, ref), getSettings(), listBrands(), listWarehouses(), suppliersByBrand()]);
+  const nextMonths = all[0]?.forecast.months.slice(0, 3).map((m) => m.month) ?? [];
   // Une colonne par dépôt externe actif (Cospharma, Pharmafirst) : leur stock n'est connu que par la dernière photo importée.
   const externals = warehouses.filter((w) => w.kind === "EXTERNE" && w.active);
   const sum = stockSummary(all);
@@ -40,8 +46,8 @@ export default async function StockPage(props: { searchParams: Promise<{ brand?:
 
   return (
     <>
-      <PageHeader eyebrow="Purchase forecast" title="Stock & achats" subtitle={<>Couverture = stock ÷ ventes moyennes des {settings.avgSalesMonths} derniers mois (au {fmtDate(lastSale ?? ref)}). Stock cible = délai fournisseur + sécurité + 1 mois. Stock = entrepôt COMANET (stock réel){externals.map((w) => { const d = photoDate(w.key); return <span key={w.key}> + {w.label} ({d ? `photo du ${fmtDate(d)}` : "aucune photo"})</span>; })}.</>}
-        actions={<><Link href="/gestion/stock" className="btn-secondary btn-sm">Stock réel</Link><Link href="/imports?type=STOCK" className="btn-secondary btn-sm">Importer une photo de dépôt</Link><Link href="/parametres" className="btn-ghost btn-sm">Seuils</Link></>}>
+      <PageHeader eyebrow="Purchase forecast" title="Stock & achats" subtitle={<>Ventes/mois = moyenne des {settings.avgSalesMonths} derniers mois (au {fmtDate(lastSale ?? ref)}). Couverture, stock cible (délai fournisseur + sécurité + 1 mois) et commande conseillée reposent sur la <Link href="/stock/prevision" className="underline">prévision mensuelle modélisée</Link> (saisonnalité : {settings.forecast.events.map((e) => e.label).join(", ")}). Stock = entrepôt COMANET (stock réel){externals.map((w) => { const d = photoDate(w.key); return <span key={w.key}> + {w.label} ({d ? `photo du ${fmtDate(d)}` : "aucune photo"})</span>; })}.</>}
+        actions={<><Link href="/stock/prevision" className="btn-primary btn-sm">Prévision & commandes</Link><Link href="/gestion/stock" className="btn-secondary btn-sm">Stock réel</Link><Link href="/imports?type=STOCK" className="btn-secondary btn-sm">Importer une photo de dépôt</Link><Link href="/parametres" className="btn-ghost btn-sm">Seuils</Link></>}>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-3">
           <Link href={qs({ view: "risk" })} className={`card px-3 py-2.5 ${view === "risk" ? "ring-2 ring-accent/40" : ""}`}><div className="text-[11px] text-muted">🔴 Critique &lt; {settings.coverage.orange} mois</div><div className="text-[20px] font-semibold text-red">{sum.red}</div></Link>
           <Link href={qs({ view: "risk" })} className={`card px-3 py-2.5`}><div className="text-[11px] text-muted">🟠 Tendu {settings.coverage.orange}–{settings.coverage.yellow} mois</div><div className="text-[20px] font-semibold text-orange">{sum.orange}</div></Link>
@@ -63,7 +69,7 @@ export default async function StockPage(props: { searchParams: Promise<{ brand?:
 
       <div className="table-wrap">
         <table className="tbl">
-          <thead><tr><th>Produit</th><th className="num">COMANET</th>{externals.map((w) => <th key={w.key} className="num">{w.label.replace(/^Dépôt /, "")}</th>)}<th className="num">Stock total</th><th className="num">En cours</th><th className="num">Ventes/mois</th><th className="num">Tendance</th><th>Couverture</th><th>Rupture estimée</th><th className="num">Lead time</th><th className="num">Stock cible</th><th className="num">Commande conseillée</th>{seeMargins && <th className="num">Valeur stock</th>}</tr></thead>
+          <thead><tr><th>Produit</th><th className="num">COMANET</th>{externals.map((w) => <th key={w.key} className="num">{w.label.replace(/^Dépôt /, "")}</th>)}<th className="num">Stock total</th><th className="num">En cours</th><th className="num">Ventes/mois</th><th className="num">Tendance</th><th className="num" title={nextMonths.map((m) => fmtMonth(`${m}-01`)).join(" · ")}>Prév. 3 mois<div className="text-[10px] font-normal text-faint">modélisée</div></th><th>Couverture</th><th>Rupture estimée</th><th className="num">Lead time</th><th className="num">Stock cible</th><th className="num">Commande conseillée</th>{seeMargins && <th className="num">Valeur stock</th>}</tr></thead>
           <tbody>
             {list.map((p) => (
               <tr key={p.productId}>
@@ -74,22 +80,23 @@ export default async function StockPage(props: { searchParams: Promise<{ brand?:
                 <td className="num text-muted">{p.onOrder ? fmtNum(p.onOrder) : "—"}</td>
                 <td className="num">{fmtNum(p.avgMonthly)}</td>
                 <td className="num"><Delta value={p.trendPct} size="xs" /></td>
+                <td className="num text-muted" title={p.forecast.months.slice(0, 3).map((m) => `${fmtMonth(`${m.month}-01`)} : ${fmtNum(m.qty)}${m.events.length ? ` (${m.events.map((e) => e.label).join(", ")})` : ""}`).join(" · ")}>{p.forecast.baseline > 0 ? p.forecast.months.slice(0, 3).map((m) => <span key={m.month} className={m.index !== 1 ? "font-medium text-ink" : ""}>{fmtNum(m.qty)}</span>).reduce<React.ReactNode[]>((acc, el, i) => (i ? [...acc, " · ", el] : [el]), []) : "—"}</td>
                 <td><Badge tone={LEVEL_TONE[p.level]}>{p.coverageMonths === null ? LEVEL_LABEL[p.level] : months(p.coverageMonths)}</Badge></td>
                 <td className={p.level === "red" ? "text-red font-medium" : ""}>{fmtDateShort(p.stockoutDate)}</td>
                 <td className="num text-muted">{p.leadTimeDays} j</td>
                 <td className="num text-muted">{p.stockKnown ? fmtNum(p.targetStock) : "—"}</td>
-                <td className="num font-semibold">{p.recommendedOrder > 0 ? `${fmtNum(p.recommendedOrder)} u.` : <span className="text-faint">—</span>}</td>
+                <td className="num font-semibold">{p.recommendedOrder > 0 ? <>{fmtNum(p.recommendedOrder)} u.{canOrder && p.brandId && bySupplier.get(p.brandId) && <Link href={orderPrefillHref(bySupplier.get(p.brandId)!.id, [{ productId: p.productId, qty: p.recommendedOrder }])} className="ml-2 text-[11px] font-medium text-accent hover:underline" title={`Commande fournisseur pré-remplie chez ${bySupplier.get(p.brandId)!.name}`}>Commander</Link>}</> : <span className="text-faint">—</span>}</td>
                 {seeMargins && <td className="num text-muted">{p.stockKnown ? fmtMAD(p.stockValue, { compact: true, suffix: false }) : "—"}</td>}
               </tr>
             ))}
-            {list.length === 0 && <tr><td colSpan={12 + externals.length} className="text-center text-muted py-8">{view === "all" && sum.unknown > 0 ? <>Aucun stock connu. Le stock réel de COMANET se charge dans <Link href="/imports?type=STOCK_INITIAL" className="underline">Stock initial</Link> (puis vit au fil des réceptions, BL et inventaires) ; Cospharma et Pharmafirst par <Link href="/imports?type=STOCK" className="underline">photo de dépôt</Link> (colonnes Marque, Nom produit, Stock).</> : "Aucun produit dans cette vue."}</td></tr>}
+            {list.length === 0 && <tr><td colSpan={13 + externals.length} className="text-center text-muted py-8">{view === "all" && sum.unknown > 0 ? <>Aucun stock connu. Le stock réel de COMANET se charge dans <Link href="/imports?type=STOCK_INITIAL" className="underline">Stock initial</Link> (puis vit au fil des réceptions, BL et inventaires) ; Cospharma et Pharmafirst par <Link href="/imports?type=STOCK" className="underline">photo de dépôt</Link> (colonnes Marque, Nom produit, Stock).</> : "Aucun produit dans cette vue."}</td></tr>}
           </tbody>
         </table>
       </div>
       <Card className="mt-4">
         <div className="label mb-2">Lecture</div>
         <p className="text-[13px] text-ink-2 mb-2"><b>Stock total</b> = stock réel de l&apos;entrepôt COMANET (journal : stock initial, réceptions, BL, échantillons, inventaires) + dernière photo importée de chaque dépôt externe. Un produit stocké uniquement chez un distributeur affiche « — » dans la colonne COMANET.</p>
-        <p className="text-[13px] text-ink-2">La commande conseillée ramène le stock (+ commandes en cours) au <b>stock cible</b> = ventes moyennes × (lead time + stock de sécurité + 1 mois de revue), arrondie au MOQ. Modifiez lead time, sécurité et MOQ dans la fiche produit ; les seuils de couverture dans Paramètres. Les ventes moyennes sont du sell-in ; le sell-out terrain constaté en animation s&apos;affiche dans la fiche produit.</p>
+        <p className="text-[13px] text-ink-2">La commande conseillée ramène le stock (+ commandes en cours) au <b>stock cible</b> = demande <b>modélisée</b> sur lead time + stock de sécurité + 1 mois de revue, arrondie au MOQ. La demande modélisée = base désaisonnalisée des derniers mois complets × indice saisonnier (Ramadan, saison solaire, rentrée… réglés dans Paramètres) ; le détail mois par mois et le bouton « Commander » sont dans <Link href="/stock/prevision" className="underline">Prévision & commandes</Link>. Modifiez lead time, sécurité et MOQ dans la fiche produit ; les seuils de couverture dans Paramètres. Les ventes moyennes sont du sell-in ; le sell-out terrain constaté en animation s&apos;affiche dans la fiche produit.</p>
       </Card>
     </>
   );

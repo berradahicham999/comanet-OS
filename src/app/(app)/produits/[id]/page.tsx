@@ -13,7 +13,7 @@ import { listWarehouses } from "@/lib/gestion/refs";
 import { PageHeader, Card, Badge, Delta, Section, PriorityBadge, StatusBadge, BrandDot } from "@/components/ui";
 import { MonthlyRevenueChart } from "@/components/charts";
 import { ProductForm } from "@/components/product-form";
-import { fmtMAD, fmtNum, fmtDate, fmtDateShort, addDays, iso, months, delta } from "@/lib/format";
+import { fmtMAD, fmtNum, fmtDate, fmtDateShort, fmtMonth, addDays, iso, months, delta } from "@/lib/format";
 import { mergeProduct, addStockSnapshot } from "../actions";
 import { ProductTradeSection } from "./trade-section";
 
@@ -75,7 +75,7 @@ export default async function ProductPage(props: { params: Promise<{ id: string 
         <Card><div className="label">CA 12 mois</div><div className="kpi mt-2">{fmtMAD(k.revenue12, { compact: true })}</div><div className="mt-2 text-[12px] text-muted flex items-center gap-1"><Delta value={delta(k.revenue12, k.revenue_prev12)} /> vs 12 mois précédents</div></Card>
         <Card><div className="label">Unités 12 mois</div><div className="kpi mt-2">{fmtNum(k.qty12)}</div><div className="mt-2 text-[12px] text-muted">{k.clients12} clients · {fmtNum(st?.avgMonthly ?? 0)} u./mois en moyenne (3 m)</div></Card>
         <Card href="/stock"><div className="label">Stock</div><div className="kpi mt-2">{st?.stockKnown ? fmtNum(st.stock) : "n/c"}</div><div className="mt-2 text-[12px] text-muted flex items-center gap-2">{st && <Badge tone={LEVEL_TONE[st.level]}>{st.coverageMonths === null ? LEVEL_LABEL[st.level] : months(st.coverageMonths)}</Badge>}{st?.stockDate && <span>au {fmtDateShort(st.stockDate)}</span>}</div></Card>
-        <Card><div className="label">Purchase forecast</div><div className="kpi mt-2">{st && st.recommendedOrder > 0 ? `${fmtNum(st.recommendedOrder)} u.` : "—"}</div><div className="mt-2 text-[12px] text-muted">{st?.stockoutDate ? `rupture estimée ${fmtDateShort(st.stockoutDate)}` : "pas de rupture prévue"} · lead time {product.leadTimeDays} j</div></Card>
+        <Card><div className="label">Purchase forecast</div><div className="kpi mt-2">{st && st.recommendedOrder > 0 ? `${fmtNum(st.recommendedOrder)} u.` : "—"}</div><div className="mt-2 text-[12px] text-muted">{st?.stockoutDate ? `rupture estimée ${fmtDateShort(st.stockoutDate)}` : "pas de rupture prévue"} · lead time {product.leadTimeDays} j{st && st.forecast.baseline > 0 && <div title={st.forecast.months.slice(0, 3).map((m) => `${fmtMonth(`${m.month}-01`)} : ${fmtNum(m.qty)}${m.events.length ? ` (${m.events.map((e) => e.label).join(", ")})` : ""}`).join(" · ")}>prévision 3 mois (modélisée) : {st.forecast.months.slice(0, 3).map((m) => fmtNum(m.qty)).join(" · ")} · <Link href="/stock/prevision" className="underline">détail</Link></div>}</div></Card>
       </div>
 
       <div className="grid lg:grid-cols-3 gap-4 mb-4">

@@ -90,6 +90,7 @@ recalculer une de ces notions à la main dans une page ou une requête :
 |---|---|---|
 | CA sell-out (TTC, prix public) | `src/lib/sellout.ts` | `selloutAmountSql()`, `selloutSumSql()`, `lineSellout()` |
 | Couverture de stock, commande conseillée | `src/lib/stock-math.ts` + `src/lib/stock.ts` | `computeCoverage()`, `productStocks()`, `isUnderTension()` |
+| Prévision mensuelle modélisée (saisonnalité : Ramadan, solaire, rentrée), ratio observé d'un événement, lien « Commander » | `src/lib/forecast-shared.ts` + `src/lib/forecast.ts` | `buildForecast()`, `demandSeries()`, `seasonIndex()`, `observedEventRatio()`, `observedEventRatios()`, `suppliersByBrand()`, `orderPrefillHref()` |
 | Marge brute d'un produit (prix encaissé HT = PPH, égal au prix public TTC, ramené HT moins la remise client moyenne) | `src/lib/stock-math.ts` | `netSellingPrice()`, `marginPct()` |
 | Budget marketing consommé | `src/lib/budget.ts` | `budgetConsumption()`, `budgetConsumptionByBrand()` |
 | Dépense publicitaire (priorité régie → saisie) | `src/lib/ad-spend.ts` | `adSpend()` |
@@ -278,6 +279,16 @@ irréversible ou externe ; tout ce qui touche l'argent (enveloppes annuelles, en
 passe par Administration ou l'interrupteur « Valider une dépense » ; personne ne modifie ses propres
 droits ; le dernier administrateur ne peut être ni rétrogradé ni suspendu. La prévisualisation
 « en tant que » pose un cookie signé et refuse toute server action.
+
+**Prévision saisonnière** (`docs/guide-prevision-saisonniere.md`). Le stock cible et la commande conseillée ne reposent
+plus sur la moyenne plate de 3 mois mais sur une **prévision mensuelle modélisée** : base désaisonnalisée des
+`settings.forecast.baseMonths` derniers mois civils complets × indice saisonnier des événements de `settings.forecast.events`
+(Ramadan à fenêtres explicites par année, saison solaire et rentrée récurrentes, coefficient et mots-clés de portée). Étiquetée
+« modélisée » partout, jamais présentée comme une mesure ; aucune tendance n'est extrapolée ; un produit sans vente a une
+prévision nulle. `avgMonthly` reste la rotation constatée. La page Paramètres affiche le **ratio observé** de chaque
+événement (corrélation observée dans l'historique) à côté du coefficient saisi. `/stock/prevision` : tableau mensuel par
+référence, regroupé par fournisseur (`supplier_brands`), bouton « Commander » qui ouvre `/gestion/achats/nouveau` pré-remplie
+(quantités conseillées, dernier prix payé ou prix Exwork EUR) — la pièce n'est créée qu'à l'enregistrement.
 
 **Seuils dans `settings`**, pas en dur dans les règles. Les **secrets** (jetons de régie)
 restent en variables d'environnement, jamais en base.

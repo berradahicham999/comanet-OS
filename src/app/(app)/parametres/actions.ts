@@ -5,8 +5,43 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { requireAdmin, requirePermission } from "@/lib/access";
 import { getSettings, saveSettings, type ComanetSettings } from "@/lib/settings";
+import type { ForecastSettings, SeasonEvent } from "@/lib/forecast-shared";
 
 const num = (fd: FormData, k: string, fallback: number) => { const n = Number(String(fd.get(k) ?? "").replace(",", ".")); return Number.isFinite(n) && String(fd.get(k) ?? "") !== "" ? n : fallback; };
+
+const slug = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+const isoDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s + "T00:00:00Z"));
+
+/** Événements saisonniers du formulaire : libellé vide = pas d'événement, case « supprimer » = retiré, dates illisibles ignorées. */
+function parseForecast(fd: FormData, cur: ForecastSettings): ForecastSettings {
+  const count = Math.max(0, Math.min(50, Math.round(num(fd, "fc_ev_count", 0))));
+  const events: SeasonEvent[] = [];
+  for (let i = 0; i < count; i++) {
+    const g = (k: string) => String(fd.get(`fc_ev_${i}_${k}`) ?? "").trim();
+    const label = g("label");
+    if (!label || g("delete") === "1") continue;
+    const key = g("key") || slug(label) || `evenement-${i}`;
+    if (events.some((e) => e.key === key)) continue;
+    const mult = Number(g("multiplier").replace(",", "."));
+    const windows = g("windows").split(/\r?\n/).map((line) => {
+      const m = line.match(/(\d{4}-\d{2}-\d{2})\s*(?:→|->|>|-|à|au)\s*(\d{4}-\d{2}-\d{2})/);
+      return m && isoDate(m[1]) && isoDate(m[2]) && m[2] >= m[1] ? { start: m[1], end: m[2] } : null;
+    }).filter((w): w is { start: string; end: string } => w !== null);
+    const rm = g("recurring").match(/(\d{1,2})\/(\d{1,2})\s*(?:→|->|>|-|à|au)\s*(\d{1,2})\/(\d{1,2})/);
+    const recurring = rm ? { startDay: Number(rm[1]), startMonth: Number(rm[2]), endDay: Number(rm[3]), endMonth: Number(rm[4]) } : null;
+    const okRec = recurring && [recurring.startMonth, recurring.endMonth].every((m) => m >= 1 && m <= 12) && [recurring.startDay, recurring.endDay].every((d) => d >= 1 && d <= 31);
+    events.push({
+      key, label, multiplier: Number.isFinite(mult) && mult > 0 ? mult : 1,
+      keywords: g("keywords").split(",").map((k) => k.trim()).filter(Boolean),
+      windows, recurring: okRec ? recurring : null,
+    });
+  }
+  return {
+    baseMonths: Math.max(1, Math.min(24, Math.round(num(fd, "fc_baseMonths", cur.baseMonths)))),
+    horizonMonths: Math.max(1, Math.min(18, Math.round(num(fd, "fc_horizonMonths", cur.horizonMonths)))),
+    events: fd.has("fc_ev_count") ? events : cur.events,
+  };
+}
 
 export async function updateSettings(formData: FormData) {
   await requireAdmin();
@@ -39,6 +74,7 @@ export async function updateSettings(formData: FormData) {
       lowMarginPct: num(formData, "mi_lowMarginPct", cur.marketingIntel.lowMarginPct),
       maxDecisions: Math.max(1, Math.round(num(formData, "mi_maxDecisions", cur.marketingIntel.maxDecisions))),
     },
+    forecast: parseForecast(formData, cur.forecast),
   };
   if (!next.regulatoryAlertDays.length) next.regulatoryAlertDays = cur.regulatoryAlertDays;
   await saveSettings(next);

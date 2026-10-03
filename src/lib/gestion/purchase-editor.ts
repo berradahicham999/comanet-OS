@@ -6,7 +6,8 @@ import { getSettings } from "@/lib/settings";
 /**
  * Données de la saisie d'une pièce d'achat : fournisseurs actifs (devise, marques), articles avec
  * TVA et suivi des lots, matériel marketing, dépôts internes, et dernier prix payé par article,
- * fournisseur et devise (proposé par défaut, jamais converti d'une devise à l'autre).
+ * fournisseur et devise (proposé par défaut, jamais converti d'une devise à l'autre). Le prix Exwork EUR
+ * de la fiche sert de repli au pré-remplissage « Commander » quand le fournisseur facture en euros.
  */
 export async function purchaseEditorData() {
   const g = (await getSettings()).gestion;
@@ -14,8 +15,8 @@ export async function purchaseEditorData() {
     db.execute<{ id: string; legal_name: string; currency: string; nature: string; brand_ids: string[] | null }>(sql`
       select s.id, s.legal_name, s.currency, s.nature, array_agg(sb.brand_id) filter (where sb.brand_id is not null) as brand_ids
       from suppliers s left join supplier_brands sb on sb.supplier_id = s.id where s.active group by s.id order by s.legal_name`),
-    db.execute<{ id: string; name: string; ref: string | null; ean: string | null; kind: string; brand_id: string | null; brand: string | null; rate: string | null; track_lots: boolean }>(sql`
-      select p.id, p.name, coalesce(p.code, p.sku) as ref, p.ean, p.kind, p.brand_id, b.name as brand, tr.rate::text as rate, p.track_lots
+    db.execute<{ id: string; name: string; ref: string | null; ean: string | null; kind: string; brand_id: string | null; brand: string | null; rate: string | null; track_lots: boolean; exw_price_eur: string | null }>(sql`
+      select p.id, p.name, coalesce(p.code, p.sku) as ref, p.ean, p.kind, p.brand_id, b.name as brand, tr.rate::text as rate, p.track_lots, p.exw_price_eur::text as exw_price_eur
       from products p left join brands b on b.id = p.brand_id left join tax_rates tr on tr.key = p.tax_rate_key where p.active order by b.name nulls last, p.name`),
     db.execute<{ id: string; name: string; sku: string | null; brand_id: string | null; unit_cost: string }>(sql`
       select id, name, sku, brand_id, unit_cost::text from inventory_items where active order by name`),
@@ -31,7 +32,7 @@ export async function purchaseEditorData() {
   const rate = defaultRate.rows[0]?.rate ?? "20.00";
   return {
     suppliers: suppliers.rows.map((s) => ({ id: s.id, name: s.legal_name, currency: s.currency, nature: s.nature, brandIds: s.brand_ids ?? [] })),
-    products: products.rows.map((p) => ({ id: p.id, name: p.name, ref: p.ref, ean: p.ean, kind: p.kind, brandId: p.brand_id, brand: p.brand, taxRate: p.rate ?? rate, trackLots: p.track_lots })),
+    products: products.rows.map((p) => ({ id: p.id, name: p.name, ref: p.ref, ean: p.ean, kind: p.kind, brandId: p.brand_id, brand: p.brand, taxRate: p.rate ?? rate, trackLots: p.track_lots, exwPriceEur: p.exw_price_eur })),
     items: items.rows.map((i) => ({ id: i.id, name: i.name, sku: i.sku, brandId: i.brand_id, unitCost: i.unit_cost })),
     warehouses: warehouses.rows,
     lastPrices: Object.fromEntries(lastPrices.rows.map((r) => [r.k, r.price])) as Record<string, string>,
