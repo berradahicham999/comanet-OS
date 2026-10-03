@@ -141,10 +141,15 @@ function intelFromRow(row: Record<string, unknown>, s: ComanetSettings, t: Date,
   const isNew = firstOrder ? daysBetween(new Date(firstOrder + "T12:00:00Z"), t) < 90 : false;
   const overdue = daysUntilNext !== null && daysUntilNext < -s.reorderGraceDays;
 
+  // Deux motifs distincts mènent au segment « À risque » : le CA recule, ou le rythme de commande est rompu
+  // (retard supérieur à 1,5 fois l'intervalle habituel). La recommandation doit nommer le bon motif.
+  const dropping = growthPct !== null && growthPct < -s.clientRiskDropPct;
+  const rhythmBroken = overdue && avgInterval !== null && daysSinceLast !== null && daysSinceLast > avgInterval * 1.5;
+
   let segment: Segment;
   if (daysSinceLast === null || daysSinceLast > s.clientInactiveDays) segment = "INACTIF";
   else if (isNew) segment = "NOUVEAU";
-  else if ((growthPct !== null && growthPct < -s.clientRiskDropPct) || (overdue && avgInterval !== null && daysSinceLast > avgInterval * 1.5)) segment = "A_RISQUE";
+  else if (dropping || rhythmBroken) segment = "A_RISQUE";
   else if (growthPct !== null && growthPct > s.clientGrowthPct) segment = "CROISSANCE";
   else segment = "STABLE";
 
@@ -160,8 +165,10 @@ function intelFromRow(row: Record<string, unknown>, s: ComanetSettings, t: Date,
     recommendation = { kind: "REACTIVATION", title: "Réactivation commerciale", detail: `Aucune commande depuis ${daysSinceLast === null ? "toujours" : daysSinceLast + " jours"}. Visite ou appel du commercial avec offre de réassort ciblée sur les marques historiques${brands.length ? ` (${brands.slice(0, 3).join(", ")})` : ""}.` };
   } else if (highFieldStock) {
     recommendation = { kind: "ANIMATION", title: "Ne pas pousser de commande — activer le sell-out", detail: `Stock rayon constaté élevé (${fieldStock} u.) pour un sell-out faible (${fieldSellOut60} u. / 60 j). Programmer une animation ou une activation marketing locale et analyser les produits concernés avant toute relance.` };
+  } else if (segment === "A_RISQUE" && dropping) {
+    recommendation = { kind: "ANALYSE", title: "Analyser la baisse et visiter", detail: `CA 3 mois ${Math.round(growthPct!)} % vs 3 mois précédents. Vérifier stock dormant, concurrence et visibilité rayon ; proposer animation si la rotation est bonne.` };
   } else if (segment === "A_RISQUE") {
-    recommendation = { kind: "ANALYSE", title: "Analyser la baisse et visiter", detail: `CA 3 mois ${growthPct !== null ? Math.round(growthPct) + " %" : "en baisse"} vs 3 mois précédents. Vérifier stock dormant, concurrence et visibilité rayon ; proposer animation si la rotation est bonne.` };
+    recommendation = { kind: "RELANCE", title: "Rythme de commande rompu : relancer et visiter", detail: `Dernière commande il y a ${daysSinceLast} j pour un rythme habituel de ${Math.round(avgInterval!)} j (commande théorique dépassée de ${Math.abs(daysUntilNext!)} j). CA 3 mois ${growthPct === null ? "non comparable" : (growthPct > 0 ? "+" : "") + Math.round(growthPct) + " %"} vs 3 mois précédents : ce n'est pas une baisse constatée, c'est le silence qui alerte. Appeler puis visiter pour sécuriser le réassort.` };
   } else if (overdue) {
     recommendation = { kind: "RELANCE", title: "Relance commerciale", detail: `Commande théorique dépassée de ${Math.abs(daysUntilNext!)} j (rythme habituel : tous les ${Math.round(avgInterval!)} j). Rotation ${growthPct !== null && growthPct > 0 ? "en hausse" : "normale"} → proposer le réassort.` };
   } else if (daysUntilNext !== null && daysUntilNext <= 5) {

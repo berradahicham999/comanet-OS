@@ -30,11 +30,15 @@ export function fmtPct(v: unknown, digits = 0, signed = false) {
   return `${signed && x > 0 ? "+" : ""}${s} %`;
 }
 
-/** Variation en % entre a (nouveau) et b (référence). null si b = 0. */
+/**
+ * Variation en % entre a (nouveau) et b (référence). null si b = 0.
+ * Bornée à -100 % : quand les avoirs et retours rendent la valeur nette négative
+ * (quantité ou CA), « -261 % » n'a pas de sens métier ; tout est parti, soit -100 %.
+ */
 export function delta(a: unknown, b: unknown): number | null {
   const x = n(a), y = n(b);
   if (!y) return null;
-  return ((x - y) / Math.abs(y)) * 100;
+  return Math.max(-100, ((x - y) / Math.abs(y)) * 100);
 }
 
 const df = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", year: "numeric" });

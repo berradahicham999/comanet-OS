@@ -24,9 +24,6 @@ export default async function LoginPage(props: { searchParams: Promise<{ next?: 
           <p className="text-sm text-muted mb-5">Accédez à votre cockpit et à vos tâches.</p>
           <LoginForm next={next} />
         </div>
-        <p className="text-[12px] text-faint mt-6 text-center">
-          Démo : hicham@comanet.ma / comanet2026
-        </p>
       </div>
     </main>
   );
