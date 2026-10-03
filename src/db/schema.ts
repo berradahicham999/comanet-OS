@@ -538,6 +538,12 @@ export const products = pgTable(
     priceRetail: numeric("price_retail", { precision: 12, scale: 2 }), // PVC
     priceWholesale: numeric("price_wholesale", { precision: 12, scale: 2 }), // prix COMANET → client
     costPrice: numeric("cost_price", { precision: 12, scale: 2 }), // prix d'achat
+    /** Conditions fournisseur (migration 0040) : prix Exwork HT en euros, tel que facturé par la marque. */
+    exwPriceEur: numeric("exw_price_eur", { precision: 12, scale: 4 }),
+    /** Remise client moyenne accordée sur le prix public, en % (ex. 25). Repère de marge, jamais appliqué automatiquement. */
+    avgClientDiscountPct: numeric("avg_client_discount_pct", { precision: 5, scale: 2 }),
+    /** Taux de gratuités fournisseur (FOC, free of charge), en % (ex. 10). */
+    focRatePct: numeric("foc_rate_pct", { precision: 5, scale: 2 }),
     leadTimeDays: integer("lead_time_days").notNull().default(60),
     moq: integer("moq"),
     safetyStockDays: integer("safety_stock_days").notNull().default(30),

@@ -10,6 +10,9 @@ import { normKey } from "@/lib/import/normalize";
 
 const numOrNull = (v: FormDataEntryValue | null) => { const s = String(v ?? "").replace(",", ".").trim(); return s === "" ? null : Number(s); };
 const money = (v: FormDataEntryValue | null) => { const n = numOrNull(v); return n === null || Number.isNaN(n) ? null : n.toFixed(2); };
+const decimal = (v: FormDataEntryValue | null, digits: number) => { const n = numOrNull(v); return n === null || Number.isNaN(n) ? null : n.toFixed(digits); };
+/** Pourcentage saisi « 25 » pour 25 % ; hors 0–100, la valeur est ignorée (vide). */
+const pct = (v: FormDataEntryValue | null) => { const n = numOrNull(v); return n === null || Number.isNaN(n) || n < 0 || n > 100 ? null : n.toFixed(2); };
 
 export async function saveProduct(formData: FormData) {
   const id = String(formData.get("id") ?? "");
@@ -25,6 +28,9 @@ export async function saveProduct(formData: FormData) {
     priceRetail: money(formData.get("priceRetail")),
     priceWholesale: money(formData.get("priceWholesale")),
     costPrice: money(formData.get("costPrice")),
+    exwPriceEur: decimal(formData.get("exwPriceEur"), 4),
+    avgClientDiscountPct: pct(formData.get("avgClientDiscountPct")),
+    focRatePct: pct(formData.get("focRatePct")),
     leadTimeDays: Math.round(numOrNull(formData.get("leadTimeDays")) ?? 60),
     safetyStockDays: Math.round(numOrNull(formData.get("safetyStockDays")) ?? 30),
     moq: numOrNull(formData.get("moq")) ? Math.round(numOrNull(formData.get("moq"))!) : null,

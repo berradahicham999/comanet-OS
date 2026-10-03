@@ -390,7 +390,12 @@ async function importProducts(rows: Record<string, unknown>[], mapping: Mapping,
     const set: Partial<typeof s.products.$inferInsert> = {};
     const pr = num(r, mapping, "priceRetail"); if (pr !== null) set.priceRetail = pr.toFixed(2);
     const pw = num(r, mapping, "priceWholesale"); if (pw !== null) set.priceWholesale = pw.toFixed(2);
-    const cp = num(r, mapping, "costPrice"); if (cp !== null) set.costPrice = cp.toFixed(2);
+    const cp = num(r, mapping, "costPrice"); if (cp !== null && cp > 0) set.costPrice = cp.toFixed(2);
+    // Un coût ou un Exwork à 0 dans une liste de prix veut dire « non renseigné » : on n'écrase rien. Un taux à 0 (FOC nul) est une vraie valeur.
+    const exw = num(r, mapping, "exwPriceEur"); if (exw !== null && exw > 0) set.exwPriceEur = exw.toFixed(4);
+    const asPct = (v: number | null) => (v === null || v < 0 ? null : v > 0 && v < 1 ? v * 100 : v); // 0,25 lu comme 25 %
+    const disc = asPct(num(r, mapping, "avgClientDiscountPct")); if (disc !== null && disc <= 100) set.avgClientDiscountPct = disc.toFixed(2);
+    const foc = asPct(num(r, mapping, "focRatePct")); if (foc !== null && foc <= 100) set.focRatePct = foc.toFixed(2);
     const lt = num(r, mapping, "leadTime"); if (lt !== null) set.leadTimeDays = Math.round(lt);
     const moq = num(r, mapping, "moq"); if (moq !== null) set.moq = Math.round(moq);
     const cat = txt(r, mapping, "category"); if (cat) set.category = cat;
