@@ -32,7 +32,8 @@ function TaskCard({ t, me }: { t: TaskRow; me: string }) {
       </div>
       {next && (
         <form action={setTaskStatus} className="mt-2 flex gap-1">
-          <input type="hidden" name="id" value={t.id} /><input type="hidden" name="status" value={next} /><input type="hidden" name="redirectTo" value="/taches" />
+          {/* Pas de redirection : la page se rafraîchit en place et garde l'onglet et les filtres en cours. */}
+          <input type="hidden" name="id" value={t.id} /><input type="hidden" name="status" value={next} />
           <button className="btn-ghost btn-sm text-[12px]" type="submit">{next === "IN_PROGRESS" ? <><Play size={12} /> Démarrer</> : <><Check size={12} /> Terminer</>}</button>
           {t.status === "IN_PROGRESS" && <button className="btn-ghost btn-sm text-[12px]" type="submit" name="status" value="TODO"><RotateCcw size={12} /></button>}
         </form>
