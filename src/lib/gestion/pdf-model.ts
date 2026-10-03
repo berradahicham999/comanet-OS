@@ -31,7 +31,7 @@ export type PdfRow =
 
 /**
  * Lignes imprimées : en-tête « BL n° … du … » quand la facture regroupe des BL. Les UG ne s'impriment
- * que sur le BL (le magasin doit les livrer) : jamais sur une facture ni un avoir, qui vont au
+ * que sur la commande et le BL (le magasin doit les livrer) : jamais sur une facture ni un avoir, qui vont au
  * comptable (décision d'Hicham). Elles restent enregistrées sur la pièce, dans le stock et les ventes.
  */
 export function pdfRows(type: DocType, lines: PdfLine[]): PdfRow[] {
@@ -47,7 +47,7 @@ export function pdfRows(type: DocType, lines: PdfLine[]): PdfRow[] {
     const qty = parseDecimal(l.quantity, SCALE.qty) ?? 0n, gross = parseDecimal(l.grossHt, SCALE.money) ?? 0n;
     const lot = l.lotAllocations.map((a) => `${a.lotNumber}${a.expiryDate ? ` (${fmtDateFr(a.expiryDate)})` : ""}`).join(", ");
     rows.push({
-      kind: "line", ref: l.ref ?? "", designation: l.designation, lot, quantity: fmtSage(l.quantity), free: type === "BL" && parseDecimal(l.freeQuantity, SCALE.qty) ? fmtSage(l.freeQuantity) : "",
+      kind: "line", ref: l.ref ?? "", designation: l.designation, lot, quantity: fmtSage(l.quantity), free: (type === "BL" || type === "COMMANDE") && parseDecimal(l.freeQuantity, SCALE.qty) ? fmtSage(l.freeQuantity) : "",
       // P.U. TTC (imprimé sur le BL, demande d'Hicham) = P.U. HT × (1 + TVA), arrondi au centime.
       unitPriceHt: fmtSage(l.unitPriceHt), unitPriceTtc: fmtSage(formatScaled(roundDiv((parseDecimal(l.unitPriceHt, SCALE.money) ?? 0n) * (10000n + (parseDecimal(l.taxRate, SCALE.pct) ?? 0n)), 10000n), SCALE.money)), publicPriceTtc: fmtSage(l.publicPriceTtc), discount: parseDecimal(l.discountPct, SCALE.pct) ? fmtSage(l.discountPct) : "",
       netHt: fmtSage(l.grossHt), netUnit: qty ? fmtSage(formatScaled(roundDiv(gross * 1000n, qty), 2)) : "", vat: fmtSage(l.vatAmount), ttc: fmtSage(l.ttc), amount: gross, amountTtc: parseDecimal(l.ttc, 2) ?? 0n,

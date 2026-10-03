@@ -51,8 +51,8 @@ export async function searchEntities(q: string, limit = 10): Promise<SearchResul
     campaigns: campaigns.map((r) => ({ id: String(r.id), label: String(r.name), sub: [s(r.brand), s(r.status)].filter(Boolean).join(" · ") || null, href: `/marketing/campagnes/${r.id}` })),
     contents: contents.map((r) => ({ id: String(r.id), label: String(r.title), sub: [s(r.brand), s(r.date)].filter(Boolean).join(" · ") || null, href: `/marketing/planning?month=${String(r.date).slice(0, 7)}` })),
     users: users.map((r) => ({ id: String(r.id), label: String(r.name), sub: s(r.role), href: `/parametres/utilisateurs` })),
-    deliveries: pieces.filter((r) => r.type === "BL").map(pieceHit),
-    invoices: pieces.filter((r) => r.type !== "BL").map(pieceHit),
+    deliveries: pieces.filter((r) => r.type === "BL" || r.type === "COMMANDE").map(pieceHit),
+    invoices: pieces.filter((r) => r.type === "FACTURE" || r.type === "AVOIR").map(pieceHit),
     purchases: purchases.map((r) => ({ id: String(r.id), label: String(r.number), sub: [s(r.supplier), r.supplier_ref ? `réf. ${r.supplier_ref}` : null, s(r.date), `${r.net} MAD HT`].filter(Boolean).join(" · "), href: `/gestion/achats/${r.id}` })),
     suppliers: suppliers.map((r) => ({ id: String(r.id), label: String(r.legal_name), sub: [s(r.city), s(r.currency)].filter(Boolean).join(" · ") || null, href: `/gestion/fournisseurs/${r.id}` })),
   };

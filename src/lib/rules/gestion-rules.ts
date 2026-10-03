@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { fmtDate, fmtMAD, fmtNum, iso, plural } from "@/lib/format";
 import type { Rule, Recommendation } from "./types";
+import { stockState } from "@/lib/gestion/ledger";
 
 /**
  * Règles de la gestion commerciale : BL validés restés sans facture, pièces en attente de
@@ -41,6 +42,79 @@ export const uninvoicedBLRule: Rule = {
       entity: { type: "client", id: r.client_id, href: `/gestion/pieces/facturer?client=${r.client_id}` },
       score: Number(r.ttc),
     }));
+  },
+};
+
+/** Commandes clients confirmées dont une partie reste à livrer depuis plus de N jours, par client. */
+export const ordersToPrepareRule: Rule = {
+  id: "gestion-commandes-a-preparer",
+  label: "Commandes clients à préparer",
+  description: "Commandes clients confirmées (numéro BC) dont une partie reste à livrer au-delà du délai réglé (settings.gestion.orderPrepAlertDays) : le BL n'a pas été préparé.",
+  async run({ settings, now }) {
+    const days = settings.gestion.orderPrepAlertDays;
+    const limit = iso(new Date(now.getTime() - days * 86400000));
+    const rows = (await db.execute<{ client_id: string; client: string; n: number; oldest: string; ttc: string; numbers: string; first_id: string }>(sql`
+      select d.client_id, c.name as client, count(*)::int as n, min(d.date)::text as oldest, sum(d.ttc)::text as ttc,
+        string_agg(d.number, ', ' order by d.date) as numbers, (array_agg(d.id::text order by d.date))[1] as first_id
+      from sales_documents d join clients c on c.id = d.client_id
+      where d.type = 'COMMANDE' and d.status in ('VALIDE', 'LIVRE_PARTIEL') and d.date <= ${limit}::date
+      group by d.client_id, c.name order by min(d.date) limit 20`)).rows;
+    return rows.map((r): Recommendation => ({
+      key: `gestion-commandes-a-preparer:${r.client_id}`,
+      rule: "gestion-commandes-a-preparer",
+      category: "GESTION",
+      priority: Number(r.ttc) >= 20000 ? "HIGH" : "MEDIUM",
+      title: `${r.client} — ${r.n} ${plural(r.n, "commande")} à livrer`,
+      subtitle: "Commandes clients confirmées sans BL",
+      facts: [
+        { label: "Commandes", value: r.numbers },
+        { label: "Plus ancienne", value: fmtDate(r.oldest) },
+        { label: "Montant TTC commandé", value: fmtMAD(r.ttc) },
+      ],
+      why: `${fmtNum(r.n)} ${plural(r.n, "commande")} de ${r.client} ${r.n > 1 ? "attendent" : "attend"} depuis plus de ${days} ${plural(days, "jour")} : le client a commandé, la marchandise n'est pas partie.`,
+      action: "Ouvrir la commande et « Préparer le BL » (quantités et remises restent modifiables), ou l'annuler si le client s'est rétracté.",
+      task: { title: `Préparer les BL de ${r.client}`, dueInDays: 1, role: "ADMIN" },
+      entity: { type: "client", id: r.client_id, href: r.n === 1 ? `/gestion/pieces/${r.first_id}` : `/gestion/pieces?type=COMMANDE` },
+      score: Number(r.ttc),
+    }));
+  },
+};
+
+/** Commandes clients ouvertes dont le reste à livrer dépasse le stock disponible du dépôt principal. */
+export const ordersStockShortRule: Rule = {
+  id: "gestion-commandes-stock-insuffisant",
+  label: "Commandes clients sans stock",
+  description: "Articles dont le reste à livrer des commandes clients confirmées dépasse le stock disponible de l'entrepôt COMANET.",
+  async run() {
+    const rows = (await db.execute<{ product_id: string; product: string; remaining: string; n: number; clients: string }>(sql`
+      select l.product_id, p.name as product, sum(l.quantity - l.delivered_qty)::text as remaining, count(distinct d.id)::int as n,
+        string_agg(distinct c.name, ', ') as clients
+      from sales_document_lines l join sales_documents d on d.id = l.document_id join products p on p.id = l.product_id join clients c on c.id = d.client_id
+      where d.type = 'COMMANDE' and d.status in ('VALIDE', 'LIVRE_PARTIEL') and l.quantity > l.delivered_qty
+      group by l.product_id, p.name`)).rows;
+    if (!rows.length) return [];
+    const stock = new Map((await stockState({ productIds: rows.map((r) => r.product_id) })).map((s) => [s.productId, s.byWarehouse.PRINCIPAL ?? "0"]));
+    return rows.flatMap((r): Recommendation[] => {
+      const available = Number(stock.get(r.product_id) ?? "0"), remaining = Number(r.remaining);
+      if (available >= remaining) return [];
+      return [{
+        key: `gestion-commandes-stock-insuffisant:${r.product_id}`,
+        rule: "gestion-commandes-stock-insuffisant",
+        category: "GESTION",
+        priority: available <= 0 ? "HIGH" : "MEDIUM",
+        title: `${r.product} — ${fmtNum(remaining - available)} u. manquantes pour les commandes`,
+        subtitle: `${r.n} ${plural(r.n, "commande")} : ${r.clients}`,
+        facts: [
+          { label: "Reste à livrer", value: `${fmtNum(remaining)} u.` },
+          { label: "Stock disponible (COMANET)", value: `${fmtNum(available)} u.` },
+        ],
+        why: `Les commandes clients confirmées demandent ${fmtNum(remaining)} unités de ${r.product} et l'entrepôt n'en a que ${fmtNum(available)} : un BL complet est impossible.`,
+        action: "Vérifier les réceptions attendues, livrer en partie (le reste suit sur un second BL) ou prévenir le client.",
+        task: { title: `Stock insuffisant pour les commandes de ${r.product}`, dueInDays: 1, role: "ADMIN" },
+        entity: { type: "product", id: r.product_id, href: `/produits/${r.product_id}` },
+        score: remaining - available,
+      }];
+    });
   },
 };
 
@@ -338,4 +412,4 @@ export const cutoverReminderRule: Rule = {
   },
 };
 
-export const gestionRules: Rule[] = [overdueInvoicesRule, portfolioRule, cutoverReminderRule, uninvoicedBLRule, approvalPendingRule, expiringLotsRule, lateOrdersRule, uninvoicedReceptionsRule, staleCountRule, noRecentCountRule, recurringGapsRule];
+export const gestionRules: Rule[] = [overdueInvoicesRule, portfolioRule, cutoverReminderRule, ordersToPrepareRule, ordersStockShortRule, uninvoicedBLRule, approvalPendingRule, expiringLotsRule, lateOrdersRule, uninvoicedReceptionsRule, staleCountRule, noRecentCountRule, recurringGapsRule];

@@ -4,15 +4,12 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { clientInScope, hasFlag, requirePermission } from "@/lib/access";
 import { errorParam, isUuid, str } from "@/lib/gestion/form";
-import { DOC_TYPES, type DocType } from "@/lib/gestion/documents-shared";
+import { DOC_TYPES, moduleOfType as moduleOf, type DocType } from "@/lib/gestion/documents-shared";
 import {
-  CommercialBlockError, cancelBL, renameDocumentClient, createCreditNote, createInvoiceFromBLs, deleteDraft, getDocument, markDelivered, requestApproval,
-  saveDraft, validateDocument, type DraftInput,
+  CommercialBlockError, cancelBL, cancelOrder, createBLFromOrder, renameDocumentClient, createCreditNote, createInvoiceFromBLs, deleteDraft, getDocument, markDelivered,
+  requestApproval, saveDraft, validateDocument, type DraftInput,
 } from "@/lib/gestion/documents";
 import { storedPdf } from "@/lib/gestion/pdf";
-
-/** Module de droits d'une pièce : le BL relève des livraisons, facture et avoir de la facturation. */
-const moduleOf = (t: DocType) => (t === "BL" ? "livraisons" : "facturation") as "livraisons" | "facturation";
 
 function done(id?: string) {
   revalidatePath("/gestion/pieces");
@@ -27,9 +24,13 @@ async function docOrThrow(id: string | null) {
   return d;
 }
 
-/** Validation + PDF figé. Le PDF est rendu hors transaction : s'il échoue, il sera rendu à la première ouverture. */
+/**
+ * Validation + PDF figé. Le PDF est rendu hors transaction : s'il échoue, il sera rendu à la première ouverture.
+ * Confirmer une commande client ne sort pas de stock : le droit « Créer » suffit (le commercial confirme
+ * ce qu'il a saisi) ; BL, facture et avoir demandent « Valider ».
+ */
 async function validateAndRender(id: string, type: DocType, override: boolean) {
-  const user = await requirePermission(moduleOf(type), "validate");
+  const user = await requirePermission(moduleOf(type), type === "COMMANDE" ? "create" : "validate");
   if (override && !(await hasFlag("overrideCommercial"))) throw new Error("Accès refusé : le droit « Lever un blocage commercial » n'est pas activé sur votre compte.");
   const r = await validateDocument(id, { id: user.id, name: user.name }, { override });
   try {
@@ -141,6 +142,34 @@ export async function cancelBLAction(fd: FormData) {
     const d = await docOrThrow(id);
     const user = await requirePermission("livraisons", "validate");
     await cancelBL(d.id, str(fd, "reason") ?? "", { id: user.id, name: user.name });
+  } catch (e) {
+    redirect(`/gestion/pieces/${id}?error=${errorParam(e)}`);
+  }
+  done(id!);
+  redirect(`/gestion/pieces/${id}?done=1`);
+}
+
+/** Commande confirmée → BL brouillon (lignes au reste à livrer), ouvert dans l'éditeur. */
+export async function prepareBLAction(fd: FormData) {
+  const orderId = str(fd, "id");
+  let id: string;
+  try {
+    const order = await docOrThrow(orderId);
+    const user = await requirePermission("livraisons", "create");
+    id = await createBLFromOrder(order.id, { id: user.id, name: user.name });
+  } catch (e) {
+    redirect(`/gestion/pieces/${orderId}?error=${errorParam(e)}`);
+  }
+  done(id);
+  redirect(`/gestion/pieces/${id}?done=1`);
+}
+
+export async function cancelOrderAction(fd: FormData) {
+  const id = str(fd, "id");
+  try {
+    const d = await docOrThrow(id);
+    const user = await requirePermission("livraisons", "edit");
+    await cancelOrder(d.id, str(fd, "reason") ?? "", { id: user.id, name: user.name });
   } catch (e) {
     redirect(`/gestion/pieces/${id}?error=${errorParam(e)}`);
   }

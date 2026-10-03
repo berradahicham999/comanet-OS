@@ -42,6 +42,12 @@ export const PDF_GREY = GREY;
 
 type Col = { key: string; label: string; width: number; align?: "left" | "right" | "center" };
 function columns(type: DocType, model: "PPH_REMISE" | "NET"): Col[] {
+  // La commande s'imprime comme un BL (P.U. TTC, remise, montant HT), sans colonne de lot.
+  if (type === "COMMANDE") return [
+    { key: "ref", label: "REF", width: 50 }, { key: "designation", label: "Désignation", width: 200 },
+    { key: "quantity", label: "Qté", width: 40, align: "right" }, { key: "free", label: "UG", width: 32, align: "right" }, { key: "unitPriceTtc", label: "P.U. TTC", width: 54, align: "right" },
+    { key: "discount", label: "REMISE", width: 40, align: "right" }, { key: "netHt", label: "Montant HT", width: 62, align: "right" },
+  ];
   if (type === "BL") return [
     { key: "ref", label: "REF", width: 48 }, { key: "designation", label: "Désignation", width: 150 }, { key: "lot", label: "Lot (péremption)", width: 82 },
     { key: "quantity", label: "Qté", width: 38, align: "right" }, { key: "free", label: "UG", width: 30, align: "right" }, { key: "unitPriceTtc", label: "P.U. TTC", width: 50, align: "right" },
@@ -67,7 +73,7 @@ export type PdfInput = {
 };
 
 function Header({ d }: { d: PdfInput }) {
-  const title = d.type === "FACTURE" ? "Facture N°" : d.type === "AVOIR" ? "Avoir N°" : "Bon de livraison N°";
+  const title = d.type === "FACTURE" ? "Facture N°" : d.type === "AVOIR" ? "Avoir N°" : d.type === "COMMANDE" ? "Commande N°" : "Bon de livraison N°";
   const stamp = d.status === "BROUILLON" ? "Provisoire" : d.isSimulation ? "Simulation" : null;
   const c = d.company;
   return (
@@ -105,7 +111,7 @@ function Header({ d }: { d: PdfInput }) {
           <Text style={s.bold}>{[d.client.postalCode, d.client.city].filter(Boolean).join(" ")}</Text>
         </View>
       </View>
-      {d.originNumber && <Text style={{ marginTop: 8 }}>Avoir sur la facture n° {d.originNumber}</Text>}
+      {d.originNumber && <Text style={{ marginTop: 8 }}>{d.type === "BL" ? `Suivant commande n° ${d.originNumber}` : `Avoir sur la facture n° ${d.originNumber}`}</Text>}
     </View>
   );
 }

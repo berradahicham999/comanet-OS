@@ -91,6 +91,36 @@ GESTION_IT=1 DATABASE_URL=postgresql://…/base_jetable node --conditions=react-
 Le script refuse de tourner sans `GESTION_IT=1` ou sur une URL Supabase : il écrit dans le journal, qui ne
 s'efface pas.
 
+## Commandes clients : le bon de commande saisi par le commercial (livré)
+
+Le commercial saisit la commande du client sur son téléphone, au comptoir ; l'administration la
+transforme en bon de livraison en un clic. Un quatrième type de pièce de vente, `COMMANDE`, dans les
+mêmes tables que BL, factures et avoirs (migration 0042 : série `BC`, colonne `delivered_qty`).
+
+| Écran | Rôle |
+|---|---|
+| **Commandes clients** (`/gestion/pieces?type=COMMANDE`, entrée de menu dédiée) | Liste des commandes : brouillons, confirmées, livrées en partie, livrées, annulées. |
+| **+ Commande client** (`/gestion/pieces/nouveau?type=COMMANDE`) | Même éditeur que le BL : client, raison sociale, date, site, commercial ; **produits habituels du client** (12 mois, un appui ajoute la quantité moyenne commandée), recherche d'article, stock disponible, prix et remise pré-remplis depuis la fiche client ; « Brouillon » ou « Confirmer ». |
+| **Fiche commande** | Confirmée : numéro `BC`, PDF, envoi WhatsApp / e-mail avec lien public, colonne « Livré x / y » par ligne, **Préparer le BL**, Annuler la commande, pièces liées (ses BL), historique. |
+| **BL préparé depuis une commande** | Brouillon de BL avec l'en-tête et les lignes au reste à livrer (UG sur la première livraison). **Tout reste modifiable** avant validation : quantités, prix, remises, remise globale, raison sociale, articles ajoutés. Le BL imprime « Suivant commande n° BC… ». |
+| **Action Center** | « Commandes clients à préparer » (confirmées sans BL au-delà de `settings.gestion.orderPrepAlertDays`, 2 jours par défaut) et « Commandes clients sans stock » (reste à livrer supérieur au stock de l'entrepôt). |
+
+Règles :
+
+- **Cycle.** Brouillon → Confirmée (`VALIDE`, numéro BC) → Livrée en partie (`LIVRE_PARTIEL`) → Livrée (`LIVRE`) ;
+  ou Annulée. Le statut suit les quantités livrées (`orderStatusAfterDelivery()`), recalculées à chaque validation
+  ou annulation de BL. Livrer plus que commandé est permis : la commande est une intention, le BL engage.
+- **Ni stock, ni vente, ni encours.** Seul le BL sort le stock et, en mode actif, alimente les ventes. La série `BC`
+  est réelle avant comme après la bascule : une commande n'est pas une pièce fiscale, elle sert dès aujourd'hui.
+- **Blocages commerciaux** à la confirmation comme sur un BL (client bloqué, remise, vente à perte, encours si
+  contrôlé) : le commercial demande le déblocage, une personne habilitée le lève.
+- **Droits.** Module Livraisons : Créer = saisir et **confirmer** (le commercial confirme sa propre saisie, rien ne
+  sort du stock) ; Modifier = annuler une commande ; Valider reste réservé au BL. Portée client respectée.
+- **Un seul BL brouillon à la fois par commande** ; une commande annulée ne se livre plus (le BL en cours est
+  refusé à la validation) ; une commande ne s'annule pas tant qu'un BL brouillon en dépend.
+- `createBLFromOrder()` et `cancelOrder()` vivent dans `src/lib/gestion/documents.ts`, seule écriture des pièces.
+  Scénario complet dans `scripts/gestion-integration.ts`.
+
 ## Lot 2 — ventes : BL, factures, avoirs, PDF (livré)
 
 ### Ce que l'on trouve dans l'application

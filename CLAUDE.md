@@ -109,7 +109,7 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Statut d'un contenu éditorial, transitions, retards | `src/lib/content/workflow.ts` + `src/lib/content/shared.ts` | `transition()` (seule écriture du statut), `checkTransition()`, `nextTransitions()`, `lateness()`, `canValidateBrand()` |
 | Statut d'une activation, budget, retards, retour | `src/lib/activations/workflow.ts` + `shared.ts` + `budget.ts` + `roi.ts` | `transitionActivation()` (seule écriture du statut), `budgetTotals()`, `expenseRowsFor()`, `syncActivationExpenses()` (seul reflet dans `marketing_expenses`), `activationLateness()`, `compareSales()`, `roiVerdict()`, `canValidateActivation()` |
 | Stock d'un article d'inventaire | `src/lib/activations/inventory.ts` + `shared.ts` | `recordMovement()` (seule écriture du stock), `consumeMaterial()`, `inventoryStatus()` |
-| Pièce de vente (montants, blocages, cycle, PDF, projection dans les ventes) | `src/lib/gestion/calc.ts` + `documents-shared.ts` + `documents.ts` + `pdf.tsx` + `projection.ts` | `computeDocument()`, `amountInWords()`, `commercialIssues()`, `validateDocument()` (seule validation), `storedPdf()`, `projectDocument()` (seule écriture des ventes COMANET_OS) |
+| Pièce de vente (montants, blocages, cycle, PDF, projection dans les ventes, commande client → BL) | `src/lib/gestion/calc.ts` + `documents-shared.ts` + `documents.ts` + `pdf.tsx` + `projection.ts` | `computeDocument()`, `amountInWords()`, `commercialIssues()`, `validateDocument()` (seule validation), `createBLFromOrder()`, `orderStatusAfterDelivery()`, `storedPdf()`, `projectDocument()` (seule écriture des ventes COMANET_OS) |
 | Lecture marketing d'une marque (statut de stock par SKU, profil / catégorie produit, objectifs et écart, contexte marketing, décisions) | `src/lib/marketing-intel/` | `buildBrandOverview()`, `buildInventory()`, `buildProductPerformance()`, `buildSalesTargets()`, `buildMarketingContext()`, `buildRecommendations()`, `stockStatusOf()`, `stockRiskOf()`, `salesProfileOf()`, `decide()` |
 | Montants, quantités, coûts exacts (jamais de float), CMUP, valeur de stock | `src/lib/gestion/money.ts` | `parseDecimal()`, `roundDiv()`, `formatScaled()`, `nextCmup()`, `valueOf()`, `fmtQty()`, `fmtMoney()` |
 | Numéro d'une pièce (séries, reprise Sage, sans trou) | `src/lib/gestion/numbering.ts` + `numbering-shared.ts` | `allocateNumber()` (seule écriture, dans la transaction de validation), `setNextNumber()`, `formatNumber()`, `patternError()`, `nextNumberError()` |
@@ -205,7 +205,7 @@ archiver / bloquer / supprimer = « Valider ». Stock (depuis le 03/10/2026, san
 chaque dépôt externe (`stockInternal`, `stockExternal`) ; « Stock réel » (`/gestion/stock`) ne montre que l'entrepôt
 COMANET, « Stock & achats » (`/stock`) une colonne par dépôt et le total. Une photo exige un dépôt externe ; un export
 Sage global sans dépôt n'entre plus dans le stock (contrôle de bascule seulement) ; une photo de distributeur ne touche plus aux prix des fiches.
-Lot 2 livré : ventes. `sales_documents` + `sales_document_lines` (BL, FACTURE, AVOIR), figées par triggers dès la
+Lot 2 livré : ventes. `sales_documents` + `sales_document_lines` (COMMANDE, BL, FACTURE, AVOIR), figées par triggers dès la
 validation ; seul `src/lib/gestion/documents.ts` crée, valide, livre, annule ou facture (`validateDocument()` : blocages
 `commercialIssues()`, numéro, identités figées, sortie FEFO / retour, compteurs facturé / crédité). Montants :
 `calc.ts` (`computeDocument()`, `amountInWords()`), seule définition. Avant la bascule (mode OFF / PARALLELE) les pièces
@@ -231,6 +231,12 @@ facture) + `payment_reminders` ; seul `src/lib/gestion/payments.ts` les écrit. 
 proposée : `receivables-shared.ts`. Un avoir s'impute sur sa facture à la validation. Bascule : `emitsReal()` (seule
 source du « réel ou simulation »), `importBlockedByCutover()` (C5), page `/gestion/bascule` (`cutover.ts` : contrôles,
 mode, rapport), reprise Sage (`importOpeningInvoices()`, source SAGE_REPRISE). Envoi au comptable : sélection multiple des pièces et ZIP de leurs PDF assemblé dans le navigateur (`piece-exporter.tsx`) + récapitulatif Excel du mois (`exports.ts`). Retours de tests : P.U. TTC sur le BL, nom du client imprimé corrigeable sur une pièce validée (`renameDocumentClient()`, seule clé `legalName` de l'identité figée, migration 0030), avoir financier sans origine (lignes libres par marque, motif sans retour).
+Commandes clients (migration 0042) : type `COMMANDE`, série `BC` toujours réelle (pas une pièce fiscale), statuts
+VALIDE (confirmée) → LIVRE_PARTIEL → LIVRE, `delivered_qty` par ligne ; saisie mobile avec produits habituels du client
+(`/api/gestion/produits-habituels/[clientId]`) ; `createBLFromOrder()` prépare un BL brouillon **entièrement modifiable**
+(lignes `source_line_id` libres sur un BL, figées sur facture et avoir) ; la validation du BL fait avancer la quantité
+livrée, son annulation la rend. Confirmer = Créer sur `livraisons` (le commercial confirme sa saisie). Règles Action
+Center `gestion-commandes-a-preparer`, `gestion-commandes-stock-insuffisant` ; seuil `settings.gestion.orderPrepAlertDays`.
 Un point de vente, plusieurs raisons sociales (migration 0034) : `client_legal_entities` porte les raisons sociales
 supplémentaires d'un client (l'identité de la fiche reste la principale) ; une pièce choisit l'entité facturée
 (`sales_documents.legal_entity_id`, NULL = fiche), figée dans `client_snapshot` par `billingIdentity()`. Deux fiches du

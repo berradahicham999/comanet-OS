@@ -5,42 +5,97 @@
  */
 import { SCALE, formatScaled, parseDecimal, rescale, roundDiv } from "./money";
 
-export const DOC_TYPES = ["BL", "FACTURE", "AVOIR"] as const;
+/**
+ * COMMANDE : bon de commande client saisi par le commercial (souvent sur le téléphone), confirmé
+ * avec un numéro BC, puis transformé en BL en un clic. Ni stock ni vente : seul le BL en fait.
+ * Sa série est toujours réelle (ce n'est pas une pièce fiscale) : utile avant même la bascule.
+ */
+export const DOC_TYPES = ["COMMANDE", "BL", "FACTURE", "AVOIR"] as const;
 export type DocType = (typeof DOC_TYPES)[number];
 export const DOC_TYPE_LABELS: Record<DocType, { one: string; many: string; series: string; simSeries: string }> = {
+  COMMANDE: { one: "Commande client", many: "Commandes clients", series: "BC", simSeries: "BC" },
   BL: { one: "Bon de livraison", many: "Bons de livraison", series: "BL", simSeries: "SIMBL" },
   FACTURE: { one: "Facture", many: "Factures", series: "FA", simSeries: "SIMFA" },
   AVOIR: { one: "Avoir", many: "Avoirs", series: "AV", simSeries: "SIMAV" },
 };
 
-export const DOC_STATUSES = ["BROUILLON", "VALIDE", "LIVRE", "FACTURE_PARTIEL", "FACTURE", "ANNULE"] as const;
+/** Module de droits d'une pièce : commande et BL relèvent des livraisons, facture et avoir de la facturation. */
+export function moduleOfType(type: DocType): "livraisons" | "facturation" {
+  return type === "COMMANDE" || type === "BL" ? "livraisons" : "facturation";
+}
+
+/** Type de la pièce d'où viennent les lignes reprises (`source_line_id`) : BL ← commande, facture ← BL, avoir ← facture. */
+export function sourceTypeOf(type: DocType): DocType | null {
+  return type === "BL" ? "COMMANDE" : type === "FACTURE" ? "BL" : type === "AVOIR" ? "FACTURE" : null;
+}
+/** Préfixe imprimé devant un numéro d'origine sur une ligne (« BC 2026… », « BL 2026… »). */
+export function sourceLabel(type: DocType): string {
+  const t = sourceTypeOf(type);
+  return t ? DOC_TYPE_LABELS[t].series : "";
+}
+/** Référence d'origine lisible : le préfixe n'est ajouté que si le numéro ne le porte pas déjà (« BC202600003 », « BL SIM… » → « SIMBL… »). */
+export function sourceRef(type: DocType, number: string | null | undefined): string | null {
+  if (!number) return null;
+  const label = sourceLabel(type);
+  return !label || number.toUpperCase().includes(label) ? number : `${label} ${number}`;
+}
+
+export const DOC_STATUSES = ["BROUILLON", "VALIDE", "LIVRE_PARTIEL", "LIVRE", "FACTURE_PARTIEL", "FACTURE", "ANNULE"] as const;
 export type DocStatus = (typeof DOC_STATUSES)[number];
 export const STATUS_META: Record<DocStatus, { label: string; tone: "gray" | "blue" | "accent" | "orange" | "green" | "red" }> = {
   BROUILLON: { label: "Brouillon", tone: "gray" },
   VALIDE: { label: "Validé", tone: "blue" },
+  LIVRE_PARTIEL: { label: "Livrée en partie", tone: "orange" },
   LIVRE: { label: "Livré", tone: "accent" },
   FACTURE_PARTIEL: { label: "Facturé en partie", tone: "orange" },
   FACTURE: { label: "Facturé", tone: "green" },
   ANNULE: { label: "Annulé", tone: "red" },
 };
-/** Libellé du statut selon le type (une facture « validée », un BL « validé »). */
+/** Statuts que peut prendre chaque type (filtres des listes). */
+export function statusesOf(type: DocType): DocStatus[] {
+  if (type === "COMMANDE") return ["BROUILLON", "VALIDE", "LIVRE_PARTIEL", "LIVRE", "ANNULE"];
+  if (type === "BL") return ["BROUILLON", "VALIDE", "LIVRE", "FACTURE_PARTIEL", "FACTURE", "ANNULE"];
+  return ["BROUILLON", "VALIDE"];
+}
+/** Libellé du statut selon le type (une facture « validée », un BL « validé », une commande « confirmée »). */
 export function statusLabel(type: DocType, status: DocStatus): string {
+  if (type === "COMMANDE") {
+    if (status === "VALIDE") return "Confirmée";
+    if (status === "LIVRE") return "Livrée";
+    if (status === "ANNULE") return "Annulée";
+  }
   if (type !== "BL" && status === "VALIDE") return type === "FACTURE" ? "Validée" : "Validé";
   return STATUS_META[status].label;
 }
 
 /** Actions possibles sur une pièce, selon son type et son statut. */
-export function allowedActions(type: DocType, status: DocStatus, opts: { anyInvoiced?: boolean; requireDelivered?: boolean } = {}) {
+export function allowedActions(type: DocType, status: DocStatus, opts: { anyInvoiced?: boolean; requireDelivered?: boolean; remainingToDeliver?: boolean } = {}) {
   const draft = status === "BROUILLON";
+  const openOrder = type === "COMMANDE" && (status === "VALIDE" || status === "LIVRE_PARTIEL");
   return {
     edit: draft,
     delete: draft,
     validate: draft,
     deliver: type === "BL" && status === "VALIDE",
-    cancel: type === "BL" && (status === "VALIDE" || status === "LIVRE") && !opts.anyInvoiced,
+    /** Commande confirmée : préparer le BL de ce qui reste à livrer. */
+    prepareBL: openOrder && opts.remainingToDeliver !== false,
+    /** Un BL non facturé s'annule ; une commande ouverte aussi (les BL déjà validés restent). */
+    cancel: (type === "BL" && (status === "VALIDE" || status === "LIVRE") && !opts.anyInvoiced) || openOrder,
     invoice: type === "BL" && invoiceable(status, !!opts.requireDelivered),
     credit: type === "FACTURE" && status === "VALIDE",
   };
+}
+
+/** Statut d'une commande d'après ses lignes livrées : rien → confirmée, tout → livrée, sinon livrée en partie. */
+export function orderStatusAfterDelivery(lines: { quantity: string; deliveredQty: string }[]): DocStatus {
+  let any = false, all = lines.length > 0;
+  for (const l of lines) {
+    const qn = parseDecimal(l.quantity, SCALE.qty) ?? 0n, done = parseDecimal(l.deliveredQty, SCALE.qty) ?? 0n;
+    if (done > 0n) any = true;
+    if (done < qn) all = false;
+  }
+  if (all) return "LIVRE";
+  return any ? "LIVRE_PARTIEL" : "VALIDE";
 }
 
 /** Un BL peut être facturé s'il est validé (ou livré, si l'étape « Livré » est exigée) et pas entièrement facturé. */

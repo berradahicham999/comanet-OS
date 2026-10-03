@@ -6,7 +6,8 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { amountInWords, baseUnitPriceHt, computeDocument, computeLine, netUnitPriceHt, numberToWords } from "@/lib/gestion/calc";
 import {
-  allowedActions, blStatusAfterInvoicing, commercialIssues, defaultDiscount, dueDateOf, paginate, projectionRows, remainingQty, shouldProject, waPhone,
+  allowedActions, blStatusAfterInvoicing, commercialIssues, defaultDiscount, dueDateOf, moduleOfType, orderStatusAfterDelivery, paginate, projectionRows, remainingQty,
+  shouldProject, sourceLabel, sourceRef, statusLabel, statusesOf, waPhone,
 } from "@/lib/gestion/documents-shared";
 import { fmtSage, globalDiscountAmount, pdfPages, pdfRows, type PdfLine } from "@/lib/gestion/pdf-model";
 import { formatScaled } from "@/lib/gestion/money";
@@ -89,12 +90,43 @@ describe("montant en lettres", () => {
 
 describe("règles des pièces", () => {
   test("actions selon type et statut", () => {
-    assert.deepEqual(allowedActions("BL", "BROUILLON"), { edit: true, delete: true, validate: true, deliver: false, cancel: false, invoice: false, credit: false });
+    assert.deepEqual(allowedActions("BL", "BROUILLON"), { edit: true, delete: true, validate: true, deliver: false, prepareBL: false, cancel: false, invoice: false, credit: false });
     assert.equal(allowedActions("BL", "VALIDE").invoice, true);
     assert.equal(allowedActions("BL", "VALIDE", { requireDelivered: true }).invoice, false);
     assert.equal(allowedActions("BL", "LIVRE", { anyInvoiced: true }).cancel, false);
     assert.equal(allowedActions("FACTURE", "VALIDE").credit, true);
     assert.equal(allowedActions("FACTURE", "VALIDE").cancel, false);
+  });
+  test("commande client : confirmer, préparer le BL, annuler ; jamais de stock ni de facture", () => {
+    assert.equal(allowedActions("COMMANDE", "BROUILLON").validate, true);
+    assert.equal(allowedActions("COMMANDE", "BROUILLON").prepareBL, false);
+    assert.equal(allowedActions("COMMANDE", "VALIDE").prepareBL, true);
+    assert.equal(allowedActions("COMMANDE", "LIVRE_PARTIEL").prepareBL, true);
+    assert.equal(allowedActions("COMMANDE", "LIVRE_PARTIEL", { remainingToDeliver: false }).prepareBL, false);
+    assert.equal(allowedActions("COMMANDE", "LIVRE").prepareBL, false);
+    assert.equal(allowedActions("COMMANDE", "VALIDE").cancel, true);
+    assert.equal(allowedActions("COMMANDE", "LIVRE").cancel, false);
+    assert.equal(allowedActions("COMMANDE", "VALIDE").invoice, false);
+    assert.equal(allowedActions("COMMANDE", "VALIDE").deliver, false);
+    assert.equal(moduleOfType("COMMANDE"), "livraisons");
+    assert.equal(moduleOfType("AVOIR"), "facturation");
+    assert.equal(sourceLabel("BL"), "BC");
+    assert.equal(sourceLabel("FACTURE"), "BL");
+    assert.equal(sourceLabel("COMMANDE"), "");
+    assert.equal(sourceRef("BL", "BC202600003"), "BC202600003");
+    assert.equal(sourceRef("FACTURE", "SIMBL202600025"), "SIMBL202600025");
+    assert.equal(sourceRef("FACTURE", "202600025"), "BL 202600025");
+    assert.equal(sourceRef("BL", null), null);
+    assert.equal(statusLabel("COMMANDE", "VALIDE"), "Confirmée");
+    assert.equal(statusLabel("COMMANDE", "LIVRE_PARTIEL"), "Livrée en partie");
+    assert.deepEqual(statusesOf("COMMANDE"), ["BROUILLON", "VALIDE", "LIVRE_PARTIEL", "LIVRE", "ANNULE"]);
+  });
+  test("statut d'une commande après livraison : rien, en partie, tout (livrer plus que commandé = livrée)", () => {
+    assert.equal(orderStatusAfterDelivery([{ quantity: "10", deliveredQty: "0" }, { quantity: "5", deliveredQty: "0" }]), "VALIDE");
+    assert.equal(orderStatusAfterDelivery([{ quantity: "10", deliveredQty: "4" }, { quantity: "5", deliveredQty: "0" }]), "LIVRE_PARTIEL");
+    assert.equal(orderStatusAfterDelivery([{ quantity: "10", deliveredQty: "10" }, { quantity: "5", deliveredQty: "0" }]), "LIVRE_PARTIEL");
+    assert.equal(orderStatusAfterDelivery([{ quantity: "10", deliveredQty: "10" }, { quantity: "5", deliveredQty: "6" }]), "LIVRE");
+    assert.equal(orderStatusAfterDelivery([]), "VALIDE");
   });
   test("statut d'un BL après facturation", () => {
     assert.equal(blStatusAfterInvoicing("VALIDE", [{ quantity: "6", invoicedQty: "0" }]), "VALIDE");

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { canDo, clientFilter, requireAccessContext } from "@/lib/access";
 import { editorData } from "@/lib/gestion/editor";
+import { moduleOfType } from "@/lib/gestion/documents-shared";
 import { listCreditReasons } from "@/lib/gestion/refs";
 import { iso, today } from "@/lib/format";
 import { PageHeader } from "@/components/ui";
@@ -14,9 +15,9 @@ export const metadata = { title: "Nouvelle pièce" };
 export default async function NewDocumentPage(props: { searchParams: Promise<{ type?: string; client?: string; error?: string }> }) {
   const a = await requireAccessContext();
   const sp = await props.searchParams;
-  // Un avoir naît d'une facture ; une facture d'articles naît de ses BL.
-  const type = sp.type === "FACTURE" ? "FACTURE" : sp.type === "AVOIR" ? "AVOIR" : "BL";
-  const permModule = type === "BL" ? "livraisons" : "facturation";
+  // Un avoir naît d'une facture ; une facture d'articles naît de ses BL ; un BL naît souvent d'une commande.
+  const type = sp.type === "FACTURE" ? "FACTURE" : sp.type === "AVOIR" ? "AVOIR" : sp.type === "COMMANDE" ? "COMMANDE" : "BL";
+  const permModule = moduleOfType(type);
   if (!(await canDo(permModule, "create"))) redirect(a.home);
   const data = await editorData({ clientIds: await clientFilter() });
   const reasons = type === "AVOIR" ? (await listCreditReasons()).filter((r) => r.active && !r.withReturn).map((r) => ({ key: r.key, label: r.label, withReturn: r.withReturn })) : [];
@@ -26,8 +27,10 @@ export default async function NewDocumentPage(props: { searchParams: Promise<{ t
     <>
       <PageHeader
         eyebrow={<Link href={`/gestion/pieces?type=${type}`} className="hover:underline">Pièces de vente</Link>}
-        title={type === "BL" ? "Nouveau bon de livraison" : type === "AVOIR" ? "Nouvel avoir financier" : "Nouvelle facture de services"}
-        subtitle={type === "BL"
+        title={type === "COMMANDE" ? "Nouvelle commande client" : type === "BL" ? "Nouveau bon de livraison" : type === "AVOIR" ? "Nouvel avoir financier" : "Nouvelle facture de services"}
+        subtitle={type === "COMMANDE"
+          ? "Ce que le client commande, saisi sur place. Prix et remises pré-remplis depuis sa fiche, stock disponible affiché. Confirmer donne un numéro BC ; le BL se prépare ensuite en un clic et reste modifiable."
+          : type === "BL"
           ? "Prix de base = PPH ÷ (1 + TVA), remise par défaut du client sur la marque. Le stock sort à la validation, lot au plus proche de la péremption."
           : type === "AVOIR"
             ? "Remise accordée hors facture (objectifs atteints, geste commercial) : une ligne par marque avec son montant HT. Sans effet sur le stock ; le montant devient un crédit client à imputer sur ses factures."

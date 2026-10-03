@@ -7,8 +7,8 @@ import { pgArray } from "@/lib/sql-array";
 import { requireAccessContext, can, clientFilter, clientInScope, hasFlag } from "@/lib/access";
 import { getSettings } from "@/lib/settings";
 import { auditTrail } from "@/lib/audit";
-import { documentIssues, getDocument } from "@/lib/gestion/documents";
-import { allowedActions, DOC_TYPE_LABELS, STATUS_META, statusLabel, waPhone, type DocStatus, type DocType } from "@/lib/gestion/documents-shared";
+import { documentIssues, getDocument, orderRemaining } from "@/lib/gestion/documents";
+import { allowedActions, DOC_TYPE_LABELS, STATUS_META, moduleOfType, sourceRef, statusLabel, waPhone, type DocStatus, type DocType } from "@/lib/gestion/documents-shared";
 import { editorData } from "@/lib/gestion/editor";
 import { listCreditReasons, listWarehouses } from "@/lib/gestion/refs";
 import { shareToken } from "@/lib/gestion/share";
@@ -22,7 +22,7 @@ import { PageHeader, Card, Badge, Facts } from "@/components/ui";
 import { DocumentEditor } from "@/components/gestion/document-editor";
 import { AuditTrail } from "@/components/gestion/audit-trail";
 import {
-  renameClientAction, cancelBLAction, creditNoteAction, deleteDraftAction, deliverAction, requestApprovalAction, saveDocumentAction, validateDocumentAction,
+  renameClientAction, cancelBLAction, cancelOrderAction, creditNoteAction, deleteDraftAction, deliverAction, prepareBLAction, requestApprovalAction, saveDocumentAction, validateDocumentAction,
 } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -40,23 +40,26 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
   if (!doc) notFound();
   const type = doc.type as DocType;
   const status = doc.status as DocStatus;
-  const permModule = type === "BL" ? "livraisons" : "facturation";
+  const permModule = moduleOfType(type);
   if (!can(a.perms, permModule, "view") || !(await clientInScope(doc.clientId))) redirect(a.home);
   const canEdit = can(a.perms, permModule, "edit");
-  const canValidate = can(a.perms, permModule, "validate");
+  // Confirmer une commande ne sort pas de stock : « Créer » suffit (le commercial confirme sa saisie).
+  const canValidate = type === "COMMANDE" ? can(a.perms, "livraisons", "create") : can(a.perms, permModule, "validate");
   const settings = await getSettings();
   const g = settings.gestion;
   const draft = status === "BROUILLON";
   const anyInvoiced = doc.lines.some((l) => (parseDecimal(l.invoicedQty, SCALE.qty) ?? 0n) > 0n);
-  const actions = allowedActions(type, status, { anyInvoiced, requireDelivered: g.requireDelivered });
+  const remaining = type === "COMMANDE" ? orderRemaining(doc.lines) : 0n;
+  const actions = allowedActions(type, status, { anyInvoiced, requireDelivered: g.requireDelivered, remainingToDeliver: remaining > 0n });
   const label = DOC_TYPE_LABELS[type].one;
+  const originTitle = doc.origin ? (type === "AVOIR" ? `Sur la facture ${doc.origin.number}` : type === "BL" ? `Depuis la commande ${doc.origin.number}` : `Depuis ${doc.origin.number}`) : null;
   const [issues, history, canOverride] = await Promise.all([draft ? documentIssues(doc) : Promise.resolve([]), auditTrail("sales_document", id), hasFlag("overrideCommercial")]);
 
   const banners = (
     <>
       {sp.error && <Banner tone="red">{sp.error}</Banner>}
       {sp.done && <Banner tone="green">Enregistré.</Banner>}
-      {sp.validated && <Banner tone="green">{label} validé{type === "FACTURE" ? "e" : ""} : {doc.number}{doc.isSimulation ? " (simulation)" : ""}.</Banner>}
+      {sp.validated && <Banner tone="green">{type === "COMMANDE" ? "Commande confirmée" : `${label} validé${type === "FACTURE" ? "e" : ""}`} : {doc.number}{doc.isSimulation ? " (simulation)" : ""}.{type === "COMMANDE" && " Envoyez-la au client, puis « Préparer le BL » quand la marchandise part."}</Banner>}
       {sp.requested && <Banner tone="green">Demande de déblocage envoyée aux personnes habilitées.</Banner>}
     </>
   );
@@ -84,13 +87,13 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
     const [reasons, whs] = type === "AVOIR" ? await Promise.all([listCreditReasons(), listWarehouses()]) : [[], []];
     const sourceIds = doc.lines.map((l) => l.sourceLineId).filter((x): x is string => !!x);
     const sources = sourceIds.length ? new Map((await db.execute<{ id: string; left: string }>(sql`
-      select id, (quantity - ${type === "AVOIR" ? sql`credited_qty` : sql`invoiced_qty`})::text as left from sales_document_lines where id = any(${pgArray(sourceIds)})`)).rows.map((r) => [r.id, r.left])) : new Map<string, string>();
+      select id, (quantity - ${type === "AVOIR" ? sql`credited_qty` : type === "BL" ? sql`delivered_qty` : sql`invoiced_qty`})::text as left from sales_document_lines where id = any(${pgArray(sourceIds)})`)).rows.map((r) => [r.id, r.left])) : new Map<string, string>();
     return (
       <>
         <PageHeader
           eyebrow={<Link href={`/gestion/pieces?type=${type}`} className="hover:underline">Pièces de vente</Link>}
           title={<span className="flex items-center gap-2 flex-wrap">{label} — brouillon<Badge tone="gray">Brouillon</Badge></span>}
-          subtitle={doc.origin ? `Sur la facture ${doc.origin.number}` : doc.sources.length ? `Depuis ${doc.sources.map((s) => s.number).join(", ")}` : undefined}
+          subtitle={originTitle ?? (doc.sources.length ? `Depuis ${doc.sources.map((s) => s.number).join(", ")}` : undefined)}
           actions={<a href={`/gestion/pieces/${id}/pdf`} target="_blank" className="btn-secondary btn-sm">Aperçu PDF</a>}
         />
         {banners}
@@ -170,6 +173,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
               { label: "Commercial", value: doc.salesRepName ?? "—" },
               ...(type === "FACTURE" ? [{ label: "Échéance", value: doc.dueDate ? `${fmtDate(doc.dueDate)} (${doc.paymentDays} j)` : "—" }] : []),
               ...(type === "AVOIR" && doc.origin ? [{ label: "Facture d'origine", value: <Link href={`/gestion/pieces/${doc.origin.id}`} className="font-mono hover:underline">{doc.origin.number}</Link> }] : []),
+              ...(type === "BL" && doc.origin ? [{ label: "Commande d'origine", value: <Link href={`/gestion/pieces/${doc.origin.id}`} className="font-mono hover:underline">{doc.origin.number}</Link> }] : []),
             ]} />
           </Card>
 
@@ -180,13 +184,14 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
                   <th className="px-3 py-2 font-medium">Article</th><th className="px-3 py-2 font-medium text-right">Qté</th><th className="px-3 py-2 font-medium text-right">UG</th>
                   <th className="px-3 py-2 font-medium text-right">P.U. HT</th><th className="px-3 py-2 font-medium text-right">Remise</th><th className="px-3 py-2 font-medium text-right">Net HT</th>
                   {type === "BL" && <th className="px-3 py-2 font-medium text-right">Facturé</th>}
+                  {type === "COMMANDE" && !draft && <th className="px-3 py-2 font-medium text-right">Livré</th>}
                 </tr></thead>
                 <tbody>
                   {doc.lines.map((l) => (
                     <tr key={l.id} className="border-b border-line last:border-0 align-top">
                       <td className="px-3 py-2">
                         <div className="font-medium">{l.designation}</div>
-                        <div className="text-faint text-[11px]">{[l.ref, l.sourceNumber ? `BL ${l.sourceNumber}` : null, ...(l.lotAllocations ?? []).map((x) => `lot ${x.lotNumber}${x.expiryDate ? ` (${fmtDate(x.expiryDate)})` : ""} × ${fmtNum(Number(x.qty))}`)].filter(Boolean).join(" · ")}</div>
+                        <div className="text-faint text-[11px]">{[l.ref, sourceRef(type, l.sourceNumber), ...(l.lotAllocations ?? []).map((x) => `lot ${x.lotNumber}${x.expiryDate ? ` (${fmtDate(x.expiryDate)})` : ""} × ${fmtNum(Number(x.qty))}`)].filter(Boolean).join(" · ")}</div>
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">{fmtNum(Number(l.quantity), 0)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted">{Number(l.freeQuantity) ? fmtNum(Number(l.freeQuantity)) : ""}</td>
@@ -194,6 +199,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
                       <td className="px-3 py-2 text-right tabular-nums text-muted">{Number(l.discountPct) ? `${Number(l.discountPct).toLocaleString("fr-FR")} %` : ""}</td>
                       <td className="px-3 py-2 text-right tabular-nums font-medium">{fmtMoney(l.netHt)}</td>
                       {type === "BL" && <td className="px-3 py-2 text-right tabular-nums text-muted">{fmtNum(Number(l.invoicedQty))} / {fmtNum(Number(l.quantity))}</td>}
+                      {type === "COMMANDE" && !draft && <td className={`px-3 py-2 text-right tabular-nums ${Number(l.deliveredQty) >= Number(l.quantity) ? "text-green" : "text-muted"}`}>{fmtNum(Number(l.deliveredQty))} / {fmtNum(Number(l.quantity))}</td>}
                     </tr>
                   ))}
                 </tbody>
@@ -212,7 +218,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
         </div>
 
         <div className="space-y-4">
-          {!draft && can(a.perms, type === "BL" ? "livraisons" : "facturation", "validate") && (
+          {!draft && can(a.perms, permModule, "validate") && (
             <Card title="Nom du client imprimé">
               <form action={renameClientAction} className="space-y-2 text-[13px]">
                 <input type="hidden" name="id" value={id} />
@@ -236,11 +242,18 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
             </Card>
           )}
 
-          {(actions.deliver || actions.invoice || actions.credit || actions.cancel || (draft && canValidate)) && (
+          {(actions.deliver || actions.invoice || actions.credit || actions.cancel || actions.prepareBL || (draft && canValidate)) && (
             <Card title="Actions">
               <div className="space-y-3 text-[13px]">
                 {draft && canValidate && issues.length === 0 && (
-                  <form action={validateDocumentAction}><input type="hidden" name="id" value={id} /><button className="btn-primary btn-sm" type="submit">Valider</button></form>
+                  <form action={validateDocumentAction}><input type="hidden" name="id" value={id} /><button className="btn-primary btn-sm" type="submit">{type === "COMMANDE" ? "Confirmer la commande" : "Valider"}</button></form>
+                )}
+                {actions.prepareBL && can(a.perms, "livraisons", "create") && (
+                  <form action={prepareBLAction} className="space-y-1">
+                    <input type="hidden" name="id" value={id} />
+                    <button className="btn-primary btn-sm" type="submit">Préparer le BL</button>
+                    <p className="text-[11.5px] text-faint">Un BL brouillon reprend ce qui reste à livrer ({fmtNum(Number(remaining) / 1000)} u.) : remise, prix, quantités et raison sociale restent modifiables avant validation.</p>
+                  </form>
                 )}
                 {actions.deliver && can(a.perms, "livraisons", "edit") && (
                   <form action={deliverAction}><input type="hidden" name="id" value={id} /><button className="btn-secondary btn-sm" type="submit">Marquer livré</button></form>
@@ -251,7 +264,15 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
                 {actions.credit && can(a.perms, "facturation", "create") && (
                   <form action={creditNoteAction}><input type="hidden" name="id" value={id} /><button className="btn-secondary btn-sm" type="submit">Faire un avoir</button></form>
                 )}
-                {actions.cancel && can(a.perms, "livraisons", "validate") && (
+                {type === "COMMANDE" && actions.cancel && can(a.perms, "livraisons", "edit") && (
+                  <form action={cancelOrderAction} className="space-y-2 pt-3 border-t border-line">
+                    <input type="hidden" name="id" value={id} />
+                    <p className="text-muted">Annuler la commande : ce qui reste à livrer ne le sera plus ; les BL déjà validés restent.</p>
+                    <input name="reason" className="input h-9" placeholder="Motif de l'annulation *" required />
+                    <button className="btn-secondary btn-sm text-red" type="submit">Annuler la commande</button>
+                  </form>
+                )}
+                {type === "BL" && actions.cancel && can(a.perms, "livraisons", "validate") && (
                   <form action={cancelBLAction} className="space-y-2 pt-3 border-t border-line">
                     <input type="hidden" name="id" value={id} />
                     <p className="text-muted">Annuler ce BL remet le stock en place par des mouvements inverses ; le numéro reste pris et visible.</p>
@@ -300,7 +321,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
           {(doc.children.length > 0 || doc.sources.length > 0) && (
             <Card title="Pièces liées">
               <ul className="text-[13px] space-y-1">
-                {doc.sources.map((s) => <li key={s.id}><Link href={`/gestion/pieces/${s.id}`} className="font-mono hover:underline">{s.number}</Link> <span className="text-faint">· BL du {fmtDate(s.date)}</span></li>)}
+                {doc.sources.map((s) => <li key={s.id}><Link href={`/gestion/pieces/${s.id}`} className="font-mono hover:underline">{s.number}</Link> <span className="text-faint">· {DOC_TYPE_LABELS[s.type as DocType]?.one ?? s.type} du {fmtDate(s.date)}</span></li>)}
                 {doc.children.map((c) => <li key={c.id}><Link href={`/gestion/pieces/${c.id}`} className="font-mono hover:underline">{c.number ?? "Brouillon"}</Link> <span className="text-faint">· {DOC_TYPE_LABELS[c.type as DocType]?.one} · {fmtMoney(c.ttc)} MAD</span></li>)}
               </ul>
             </Card>

@@ -2,7 +2,7 @@
  * Test d'intégration de la gestion commerciale, sur une VRAIE base Postgres (hors `npm test`) :
  * journal de stock (lots, CMUP, refus, contre-passation), numérotation (reprise Sage, absence de
  * trou, validations simultanées), import du stock initial (idempotence, annulation), pièces de
- * vente (BL, blocages, facture regroupée, avoir, annulation), achats (commande en devise, réception,
+ * vente (commande client → BL, BL, blocages, facture regroupée, avoir, annulation), achats (commande en devise, réception,
  * frais d'approche, CMUP, facture rapprochée, retour, solde), inventaire (théorique figé, compteurs,
  * motifs, ajustements, pistes).
  *
@@ -171,6 +171,51 @@ async function main() {
   assert.equal((await stockState({ productIds: [p1.id] }))[0].available, "143.000");
   assert.equal((await one<{ n: number }>(sql`select count(*)::int as n from sales where source = 'COMANET_OS' and client_id = ${client.id}::uuid`)).n, 0);
   console.log("✓ BL annulé : stock remis par contre-mouvements ; mode OFF : aucune vente projetée");
+
+  // Commande client : confirmée (série BC réelle même en mode OFF, ni stock ni vente), BL préparé
+  // en un clic (lignes reprises, modifiables), livraison partielle puis totale, annulation refusée
+  // ensuite, BL annulé qui rend la quantité à livrer.
+  const bc = await D.saveDraft({ ...draft("10", "10", "1"), type: "COMMANDE", lines: [
+    { productId: p1.id, quantity: "10", freeQuantity: "1", unitPriceHt: "165.83", discountPct: "10" },
+    { productId: p2.id, quantity: "4", freeQuantity: "0", unitPriceHt: "200", discountPct: "0" },
+  ] }, who);
+  const vbc = await D.validateDocument(bc, who);
+  assert.ok(!vbc.simulation && vbc.number.startsWith("BC"), vbc.number);
+  assert.equal((await D.getDocument(bc))!.status, "VALIDE");
+  assert.equal((await stockState({ productIds: [p1.id] }))[0].available, "143.000"); // une commande ne touche pas au stock
+  await refused("préparer un BL d'une commande brouillon", async () => D.createBLFromOrder(await D.saveDraft({ ...draft("1", "0"), type: "COMMANDE" }, who), who), /confirmée/);
+  const blA = await D.createBLFromOrder(bc, who);
+  const blADoc = (await D.getDocument(blA))!;
+  assert.equal(blADoc.type, "BL");
+  assert.equal(blADoc.originDocumentId, bc);
+  assert.deepEqual(blADoc.lines.map((l) => [l.quantity, l.freeQuantity, l.discountPct]), [["10.000", "1.000", "10.00"], ["4.000", "0.000", "0.00"]]);
+  await refused("second BL brouillon sur la même commande", () => D.createBLFromOrder(bc, who), /brouillon existe déjà/);
+  // Le BL reste à la main : on livre 6 sur 10 à 12 % de remise, et rien du second article.
+  await D.saveDraft({ id: blA, type: "BL", clientId: client.id, date: day, site: "COMANET", deliveryAddress: null, salesRepId: null, paymentModeKey: null, globalDiscountPct: "0", notes: null, originDocumentId: bc,
+    lines: [{ productId: p1.id, quantity: "6", freeQuantity: "1", unitPriceHt: "165.83", discountPct: "12", sourceLineId: blADoc.lines[0].sourceLineId }] }, who);
+  await D.validateDocument(blA, who);
+  let bcDoc = (await D.getDocument(bc))!;
+  assert.equal(bcDoc.status, "LIVRE_PARTIEL");
+  assert.deepEqual(bcDoc.lines.map((l) => l.deliveredQty), ["6.000", "0.000"]);
+  assert.equal((await stockState({ productIds: [p1.id] }))[0].available, "136.000"); // 6 + 1 UG sortis par le BL
+  await refused("annuler une commande en partie livrée avec un BL brouillon", async () => { await D.createBLFromOrder(bc, who); await D.cancelOrder(bc, "test", who); }, /BL brouillon dépend/);
+  const blB = (await one<{ id: string }>(sql`select id from sales_documents where origin_document_id = ${bc}::uuid and type = 'BL' and status = 'BROUILLON'`)).id;
+  const blBDoc = (await D.getDocument(blB))!;
+  assert.deepEqual(blBDoc.lines.map((l) => [l.quantity, l.freeQuantity]), [["4.000", "0.000"], ["4.000", "0.000"]]); // reste 4 de p1 (UG déjà livrées), 4 de p2
+  await D.validateDocument(blB, who);
+  bcDoc = (await D.getDocument(bc))!;
+  assert.equal(bcDoc.status, "LIVRE");
+  assert.equal(D.orderRemaining(bcDoc.lines), 0n);
+  await refused("préparer un BL d'une commande livrée", () => D.createBLFromOrder(bc, who), /confirmée|entièrement/);
+  await refused("annuler une commande livrée", () => D.cancelOrder(bc, "test", who), /confirmée/);
+  await D.cancelBL(blB, "Colis refusé", who);
+  bcDoc = (await D.getDocument(bc))!;
+  assert.equal(bcDoc.status, "LIVRE_PARTIEL");
+  assert.deepEqual(bcDoc.lines.map((l) => l.deliveredQty), ["6.000", "0.000"]);
+  await D.cancelOrder(bc, "Le client ne veut plus le reste", who);
+  assert.equal((await D.getDocument(bc))!.status, "ANNULE");
+  await refused("modifier une commande confirmée", () => db.execute(sql`update sales_documents set ttc = 1 where id = ${bc}::uuid`), /plus modifiable/);
+  console.log(`✓ commande ${vbc.number} : BL préparé et modifié avant validation, livrée en partie puis en totalité, BL annulé rend le reste à livrer, commande annulée et figée`);
 
 
   // Achats (lot 3) : commande en euros, réception partielle avec lot et frais d'approche (CMUP,

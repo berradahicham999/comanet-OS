@@ -1,14 +1,20 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { baseUnitPriceHt, computeDocument } from "@/lib/gestion/calc";
-import { defaultDiscount, type DocType } from "@/lib/gestion/documents-shared";
+import { defaultDiscount, sourceRef, type DocType } from "@/lib/gestion/documents-shared";
 import type { EditorData, EditorProduct } from "@/lib/gestion/editor";
+import type { UsualClientProduct } from "@/lib/gestion/usual-products";
 
 /**
- * Saisie d'une pièce (BL, facture directe de services, avoir) — pensée pour le téléphone :
- * recherche d'article par nom, référence ou EAN, lignes en cartes, totaux en direct (même
- * fonction `computeDocument` que le serveur, qui recalcule de toute façon à l'enregistrement).
+ * Saisie d'une pièce (commande client, BL, facture directe de services, avoir) — pensée pour le
+ * téléphone : produits habituels du client en un geste, recherche d'article par nom, référence ou
+ * EAN, lignes en cartes, totaux en direct (même fonction `computeDocument` que le serveur, qui
+ * recalcule de toute façon à l'enregistrement).
+ *
+ * Lignes reprises d'une autre pièce (`sourceLineId`) : figées sur une facture (elles viennent du
+ * BL qui a sorti le stock) et sur un avoir ; libres sur un BL préparé depuis une commande, car
+ * c'est le BL qui engage (remise, prix, quantités, raison sociale restent à la main).
  */
 
 export type EditorLine = {
@@ -72,6 +78,19 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
 
   const client = data.clients.find((c) => c.id === clientId) ?? null;
   const fromOrigin = !!initial.originDocumentId || lines.some((l) => l.sourceLineId);
+  // Verrou des lignes et de l'en-tête repris : facture et avoir seulement. Un BL préparé depuis une commande reste libre.
+  const locked = fromOrigin && type !== "BL";
+  const stocked = type === "BL" || type === "COMMANDE";
+
+  // Produits habituels du client (12 mois), chargés dès que le client est connu : commande et BL.
+  const [usualFor, setUsualFor] = useState<{ clientId: string; rows: UsualClientProduct[] } | null>(null);
+  useEffect(() => {
+    if (!clientId || !stocked) return;
+    let alive = true;
+    fetch(`/api/gestion/produits-habituels/${clientId}`).then((r) => (r.ok ? r.json() : [])).then((rows) => { if (alive) setUsualFor({ clientId, rows: Array.isArray(rows) ? rows : [] }); }).catch(() => {});
+    return () => { alive = false; };
+  }, [clientId, stocked]);
+  const usual = usualFor && usualFor.clientId === clientId ? usualFor.rows : [];
   // Avoir financier : ni facture ni BL d'origine, une ligne par marque (remise sur objectifs…), sans stock.
   const financial = type === "AVOIR" && !fromOrigin;
   const reasons = financial ? creditReasons.filter((r) => !r.withReturn) : creditReasons;
@@ -98,15 +117,15 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
     return data.clients.filter((c) => norm(`${c.name} ${c.legalName ?? ""} ${c.city ?? ""}`).includes(q)).slice(0, 8);
   }, [clientQuery, data.clients]);
 
-  // BL : articles stockés ; facture directe : services et frais (un article stocké se facture depuis son BL).
+  // Commande et BL : articles stockés ; facture directe : services et frais (un article stocké se facture depuis son BL).
   const productMatches = useMemo(() => {
     const q = norm(query.trim());
     if (!q) return [];
     return data.products
-      .filter((p) => (type === "BL" ? p.kind === "PRODUIT" : p.kind !== "PRODUIT"))
+      .filter((p) => (stocked ? p.kind === "PRODUIT" : p.kind !== "PRODUIT"))
       .filter((p) => p.ean === query.trim() || norm(`${p.name} ${p.ref ?? ""} ${p.brand ?? ""}`).includes(q))
       .slice(0, 10);
-  }, [query, data.products, type]);
+  }, [query, data.products, stocked]);
 
   const pickClient = (id: string) => {
     setClientId(id);
@@ -122,15 +141,15 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
     }));
   };
 
-  const addProduct = (p: EditorProduct) => {
+  const addProduct = (p: EditorProduct, qty = 1) => {
     setQuery("");
     const existing = lines.find((l) => l.productId === p.id && !l.sourceLineId);
     if (existing) {
-      update(existing.key, { quantity: String(Number(existing.quantity || "0") + 1) });
+      update(existing.key, { quantity: String(Number(existing.quantity || "0") + qty) });
       return;
     }
     setLines((ls) => [...ls, {
-      key: newKey(), productId: p.id, designation: p.name, ref: p.ref, quantity: "1", freeQuantity: "0",
+      key: newKey(), productId: p.id, designation: p.name, ref: p.ref, quantity: String(qty), freeQuantity: "0",
       unitPriceHt: baseUnitPriceHt(p.publicPriceTtc, p.taxRate) ?? "", discountPct: client ? defaultDiscount(client.defaultDiscountPct, p.brandId ? client.brandDiscounts[p.brandId] ?? null : null) : "0",
       taxRate: p.taxRate, sourceLineId: null, sourceNumber: null, returnWarehouseKey: null, maxQty: null,
     }]);
@@ -188,7 +207,7 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
         {client && client.legalEntities.length > 0 && (
           <label className="block max-w-md">
             <span className="label block mb-1">Au nom de (raison sociale)</span>
-            <select className="select h-9" value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} disabled={fromOrigin}>
+            <select className="select h-9" value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} disabled={locked}>
               <option value="">{client.legalName ?? client.name} — fiche client</option>
               {client.legalEntities.map((e) => <option key={e.id} value={e.id}>{e.legalName}{e.ice ? ` — ICE ${e.ice}` : " — ICE manquant"}</option>)}
             </select>
@@ -197,7 +216,7 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <label className="block"><span className="label block mb-1">Date</span><input type="date" className="input h-9" value={date} onChange={(e) => setDate(e.target.value)} required /></label>
           <label className="block"><span className="label block mb-1">Site</span>
-            <select className="select h-9" value={site} onChange={(e) => setSite(e.target.value)} disabled={fromOrigin}>{data.sites.map((s) => <option key={s} value={s}>{s}</option>)}</select>
+            <select className="select h-9" value={site} onChange={(e) => setSite(e.target.value)} disabled={locked}>{data.sites.map((s) => <option key={s} value={s}>{s}</option>)}</select>
           </label>
           <label className="block"><span className="label block mb-1">Commercial</span>
             <select className="select h-9" value={salesRepId} onChange={(e) => setSalesRepId(e.target.value)}><option value="">—</option>{data.reps.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
@@ -219,7 +238,7 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
       <div className="card p-4 space-y-3">
         <div className="flex items-center justify-between gap-2">
           <h3 className="font-semibold">Lignes</h3>
-          {(type === "FACTURE" || financial) && !fromOrigin && <button type="button" className="btn-ghost btn-sm" onClick={addFreeLine}>+ Ligne libre</button>}
+          {(type === "FACTURE" || financial) && !locked && <button type="button" className="btn-ghost btn-sm" onClick={addFreeLine}>+ Ligne libre</button>}
         </div>
         {financial && (
           <div className="space-y-2">
@@ -229,9 +248,25 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
             <p className="text-[12px] text-muted">Avoir financier : une ligne par marque (« Gamarde », « Alphascience »…) avec le montant HT remboursé ; la TVA et le TTC se calculent. Sans effet sur le stock ; une fois validé, le montant devient un crédit client à imputer sur ses factures.</p>
           </div>
         )}
-        {!fromOrigin && !financial && (
+        {!locked && stocked && client && usual.length > 0 && (
+          <div className="space-y-1">
+            <div className="text-[11.5px] text-muted">Produits habituels de {client.name} (12 mois) — un appui ajoute la quantité moyenne commandée</div>
+            <div className="flex flex-wrap gap-1.5">
+              {usual.filter((u) => !lines.some((l) => l.productId === u.id)).slice(0, 8).map((u) => {
+                const p = data.products.find((x) => x.id === u.id);
+                if (!p) return null;
+                return (
+                  <button key={u.id} type="button" className="btn-secondary btn-sm text-[12px] max-w-full" onClick={() => addProduct(p, u.avgQty)} title={`${u.orders} commande(s), dernière le ${u.lastDate}`}>
+                    <span className="truncate">{u.name}</span><span className="text-faint ml-1">× {u.avgQty}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        {!locked && !financial && (
           <div className="relative">
-            <input className="input h-10" placeholder={type === "BL" ? "Ajouter un article : nom, référence, marque ou code-barres…" : "Ajouter un service ou des frais…"} value={query} onChange={(e) => setQuery(e.target.value)}
+            <input className="input h-10" placeholder={stocked ? "Ajouter un article : nom, référence, marque ou code-barres…" : "Ajouter un service ou des frais…"} value={query} onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (productMatches[0]) addProduct(productMatches[0]); } }} />
             {productMatches.length > 0 && (
               <ul className="absolute z-20 left-0 right-0 mt-1 card p-1 max-h-80 overflow-auto shadow-lg">
@@ -246,14 +281,15 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
             )}
           </div>
         )}
-        {type === "FACTURE" && !fromOrigin && <p className="text-[12px] text-muted">Les articles stockés se facturent depuis leurs bons de livraison (onglet « Facturer des BL ») : c&apos;est le BL qui sort le stock.</p>}
+        {type === "FACTURE" && !locked && <p className="text-[12px] text-muted">Les articles stockés se facturent depuis leurs bons de livraison (onglet « Facturer des BL ») : c&apos;est le BL qui sort le stock.</p>}
 
         {lines.length === 0 ? (
           <p className="text-muted py-4 text-center">Aucune ligne.</p>
         ) : (
           <ul className="divide-y divide-line">
             {lines.map((l, i) => {
-              const stock = type === "BL" ? available(l.productId) : null;
+              const stock = stocked ? available(l.productId) : null;
+              const frozen = !!l.sourceLineId && locked;
               const short = stock !== null && Number(l.quantity || 0) + Number(l.freeQuantity || 0) > Number(stock);
               return (
                 <li key={l.key} className="py-3 space-y-2">
@@ -261,7 +297,7 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
                     <span className="text-faint text-[11px] w-5 pt-1 tabular-nums">{i + 1}</span>
                     <div className="min-w-0 flex-1">
                       {l.productId || l.sourceLineId ? (
-                        <div className="font-medium">{l.designation}<span className="text-faint text-[11.5px] font-normal"> {[l.ref, l.sourceNumber ? `BL ${l.sourceNumber}` : null].filter(Boolean).join(" · ")}</span></div>
+                        <div className="font-medium">{l.designation}<span className="text-faint text-[11.5px] font-normal"> {[l.ref, sourceRef(type, l.sourceNumber)].filter(Boolean).join(" · ")}</span></div>
                       ) : (
                         <input className="input h-9" placeholder="Désignation" value={l.designation} onChange={(e) => update(l.key, { designation: e.target.value })} required />
                       )}
@@ -270,14 +306,14 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
                     <button type="button" className="btn-ghost btn-sm text-red" onClick={() => remove(l.key)} aria-label="Retirer la ligne">✕</button>
                   </div>
                   <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 pl-7">
-                    <label className="block"><span className="label block mb-0.5">Qté{l.maxQty ? ` (≤ ${Number(l.maxQty).toLocaleString("fr-FR")})` : ""}</span>
+                    <label className="block"><span className="label block mb-0.5">Qté{l.maxQty ? (locked ? ` (≤ ${Number(l.maxQty).toLocaleString("fr-FR")})` : ` (reste ${Number(l.maxQty).toLocaleString("fr-FR")})`) : ""}</span>
                       <input className="input h-9 text-right" inputMode="decimal" value={l.quantity} onChange={(e) => update(l.key, { quantity: e.target.value.replace(",", ".") })} /></label>
                     {type !== "AVOIR" && <label className="block"><span className="label block mb-0.5">UG</span>
-                      <input className="input h-9 text-right" inputMode="decimal" value={l.freeQuantity} disabled={!!l.sourceLineId} onChange={(e) => update(l.key, { freeQuantity: e.target.value.replace(",", ".") })} /></label>}
+                      <input className="input h-9 text-right" inputMode="decimal" value={l.freeQuantity} disabled={frozen} onChange={(e) => update(l.key, { freeQuantity: e.target.value.replace(",", ".") })} /></label>}
                     <label className="block"><span className="label block mb-0.5">P.U. HT</span>
-                      <input className="input h-9 text-right" inputMode="decimal" value={l.unitPriceHt} disabled={!!l.sourceLineId} onChange={(e) => update(l.key, { unitPriceHt: e.target.value.replace(",", ".") })} /></label>
+                      <input className="input h-9 text-right" inputMode="decimal" value={l.unitPriceHt} disabled={frozen} onChange={(e) => update(l.key, { unitPriceHt: e.target.value.replace(",", ".") })} /></label>
                     <label className="block"><span className="label block mb-0.5">Remise %</span>
-                      <input className="input h-9 text-right" inputMode="decimal" value={l.discountPct} disabled={!!l.sourceLineId} onChange={(e) => update(l.key, { discountPct: e.target.value.replace(",", ".") })} /></label>
+                      <input className="input h-9 text-right" inputMode="decimal" value={l.discountPct} disabled={frozen} onChange={(e) => update(l.key, { discountPct: e.target.value.replace(",", ".") })} /></label>
                     {!l.productId && !l.sourceLineId ? (
                       <label className="block"><span className="label block mb-0.5">TVA %</span>
                         <input className="input h-9 text-right" inputMode="decimal" value={l.taxRate} onChange={(e) => update(l.key, { taxRate: e.target.value.replace(",", ".") })} /></label>
@@ -299,7 +335,7 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
       {/* Pied */}
       <div className="grid lg:grid-cols-[1fr_320px] gap-4">
         <div className="card p-4 space-y-3">
-          {!fromOrigin && (
+          {!locked && (
             <label className="block max-w-40"><span className="label block mb-1">Remise globale %</span>
               <input className="input h-9 text-right" inputMode="decimal" value={globalDiscountPct} onChange={(e) => setGlobal(e.target.value.replace(",", "."))} /></label>
           )}
@@ -322,7 +358,7 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
       {/* Actions — collées en bas de l'écran, au-dessus de la barre de navigation du téléphone */}
       <div className="sticky bottom-[calc(4.75rem+env(safe-area-inset-bottom))] lg:bottom-2 z-10 flex gap-2 justify-start lg:justify-end bg-surface/95 backdrop-blur rounded-2xl p-2 lg:pr-36 border border-line">
         <button type="submit" name="intent" value="save" className="btn-secondary" disabled={!clientId || !lines.length}><span className="lg:hidden">Brouillon</span><span className="hidden lg:inline">Enregistrer le brouillon</span></button>
-        {canValidate && <button type="submit" name="intent" value="validate" className="btn-primary" disabled={!clientId || !lines.length || !calc}><span className="lg:hidden">Valider</span><span className="hidden lg:inline">Enregistrer et valider</span></button>}
+        {canValidate && <button type="submit" name="intent" value="validate" className="btn-primary" disabled={!clientId || !lines.length || !calc}><span className="lg:hidden">{type === "COMMANDE" ? "Confirmer" : "Valider"}</span><span className="hidden lg:inline">{type === "COMMANDE" ? "Enregistrer et confirmer" : "Enregistrer et valider"}</span></button>}
       </div>
     </form>
   );
