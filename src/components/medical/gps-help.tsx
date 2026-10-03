@@ -28,8 +28,8 @@ export function GpsHelp({ onClose }: { onClose: () => void }) {
       ) : (
         <ol className="list-decimal pl-5 space-y-1">
           <li>Réglages → <b>Confidentialité et sécurité</b> → <b>Service de localisation</b> : activé.</li>
-          <li>Dans la même liste, <b>Sites web Safari</b> (ou Chrome) → <b>Lorsque l&apos;app est active</b>, et activez <b>Position exacte</b>.</li>
-          <li>Dans Safari : touchez <b>aA</b> à gauche de l&apos;adresse → <b>Réglages du site web</b> → Position → <b>Autoriser</b>.</li>
+          <li>Dans la même liste, <b>Sites web Safari</b> → <b>Lorsque l&apos;app est active</b>, et activez <b>Position exacte</b>.</li>
+          <li>Réglages → <b>Apps</b> → <b>Safari</b> → <b>Position</b> → <b>Autoriser</b> (sinon Safari redemande à chaque visite).</li>
           <li>Rechargez la page, puis refaites l&apos;action.</li>
         </ol>
       )}

@@ -10,6 +10,7 @@ import {
   type QueuedAction, type RunningVisit, type Fix,
 } from "@/lib/medical/field-client";
 import { GpsHelp } from "./gps-help";
+import { LocationSetup, askLocationOnce } from "./location-setup";
 import { PreVisitBrief } from "./pre-visit-brief";
 
 export type DayData = {
@@ -97,7 +98,8 @@ export function VisitDay({ data, acceptNotice }: { data: DayData; acceptNotice: 
     const onOnline = () => flush();
     window.addEventListener("online", onOnline);
     const retry = setInterval(() => { if (navigator.onLine) flush(); }, 30_000);
-    if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+    // Production seulement : en développement les fichiers gardent le même nom et le cache masquerait les changements.
+    if (process.env.NODE_ENV === "production" && "serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
     return () => { clearInterval(t); clearInterval(retry); window.removeEventListener("online", onOnline); };
   }, [flush]);
 
@@ -193,7 +195,23 @@ export function VisitDay({ data, acceptNotice }: { data: DayData; acceptNotice: 
             Vous ne pouvez pas modifier une heure ni une position ; une erreur se corrige par votre manager, avec un motif.
           </p>
           <p className="text-[14px] text-ink-2 leading-relaxed">Si la localisation est refusée, la visite reste possible : elle est simplement signalée « non vérifiée ».</p>
-          <form action={acceptNotice}><button className="btn-primary w-full h-12 text-[15px]" type="submit">J&apos;ai compris</button></form>
+          <form action={acceptNotice}>
+            <button
+              type="button"
+              disabled={busy !== null}
+              className="btn-primary w-full h-12 text-[15px] disabled:opacity-60"
+              onClick={async (e) => {
+                const form = e.currentTarget.form;
+                // La demande d'autorisation du téléphone arrive ici, une fois, avant la première visite.
+                setBusy("gps");
+                await askLocationOnce(data.gpsTimeoutS);
+                setBusy(null);
+                form?.requestSubmit();
+              }}
+            >
+              {busy ? "Activation de la localisation…" : "J'ai compris — activer la localisation"}
+            </button>
+          </form>
         </div>
       </div>
     );
@@ -208,6 +226,7 @@ export function VisitDay({ data, acceptNotice }: { data: DayData; acceptNotice: 
         <span className="text-[12px] text-muted">{new Date(data.day + "T12:00:00Z").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</span>
       </div>
 
+      <LocationSetup timeoutS={data.gpsTimeoutS} />
       {info && <div className="rounded-2xl bg-green-soft border border-green/30 px-4 py-3 text-[13px] text-green font-medium">{info}</div>}
       {error && <div className="rounded-2xl bg-red-soft border border-red/30 px-4 py-3 text-[13px] text-red font-medium">{error}</div>}
       {pending > 0 && (
