@@ -49,7 +49,7 @@ export type Access = ResolvedAccess & {
 export function homeFor(perms: PermissionSet, scope: ScopeKey): string {
   if (scope === "OWN") {
     if (can(perms, "terrain", "create")) return "/terrain/saisie";
-    if (can(perms, "medical", "create")) return "/medical/visites/saisie";
+    if (can(perms, "medical", "create")) return "/medical/journee";
   }
   if (hasAnyModule(perms)) return "/";
   return "/taches";

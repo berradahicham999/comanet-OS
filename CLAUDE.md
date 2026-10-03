@@ -30,6 +30,8 @@ npm run db:studio
 npm run agent:tool -- <outil> '<json>'   # pont CLI de l'Agent marketing (lecture seule, données réelles)
 GESTION_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/gestion-integration.ts
                                          # intégration gestion commerciale (journal, numérotation, ventes, achats, inventaires, règlements, bascule) — jamais sur la prod
+MEDICAL_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/medical-integration.ts
+                                         # intégration Médical v2 (chrono, GPS, hors connexion, corrections, ordonnances) — jamais sur la prod
 ```
 
 Variables d'environnement : `DATABASE_URL`, `DATABASE_SSL`, `SESSION_SECRET`, `SETUP_KEY`,
@@ -54,13 +56,14 @@ src/lib/rules/        moteur de recommandations (Action Center)
 src/lib/marketing-intel/ couche Marketing Intelligence de l'Agent marketing (vue marque, stock par SKU, performance produit, décisions)
 src/lib/content/      planning éditorial (référentiels, workflow, notifications, fichiers, démo)
 src/lib/activations/  activations marketing hors digital (référentiels, workflow, budget, inventaire, ROI, démo)
+src/lib/medical/      médical (médecins, visites, chrono et GPS, ordonnances, analyses)
 src/lib/gestion/      gestion commerciale (montants exacts, numérotation, journal de stock, clients, fournisseurs, préparation de la bascule)
 drizzle/              migrations SQL + meta/_journal.json
 ```
 
 Modules : Cockpit, Action Center, Ventes, Clients, Produits, Marques, Stock,
 **Marketing** (vue d'ensemble, campagnes, Digital Ads, Influence, planning éditorial, activations, matériel, budgets, analytics, agent marketing),
-Terrain (animations, animatrices, saisie), Réglementaire, Tâches, Imports, Paramètres,
+Terrain (animations, animatrices, saisie), **Médical** (médecins, Ma journée avec chrono et GPS, suivi terrain, ordonnances, analyses et tournée), Réglementaire, Tâches, Imports, Paramètres,
 **Gestion commerciale** (préparation de la bascule, stock réel, fournisseurs, pièces de vente : BL, factures, avoirs, PDF ; achats : commandes, réceptions, factures fournisseurs, retours ; inventaires ; règlements, relances, envoi au comptable ; bascule).
 
 ---
@@ -114,6 +117,12 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Inventaire (théorique figé, compté, écart, fiabilité, pistes d'explication) | `src/lib/gestion/counts-shared.ts` + `counts.ts` | `countedByLine()`, `lineGap()`, `countStats()`, `gapLeads()`, `recurringGaps()`, `validateCount()` (seule validation, seuls ajustements d'inventaire) |
 | Règlement, solde d'une facture, balance âgée, relance, bascule (réel ou simulation) | `src/lib/gestion/receivables-shared.ts` + `payments.ts` + `documents-shared.ts` + `cutover.ts` | `invoiceBalance()`, `agingBucket()`, `agedBalance()`, `reminderLevel()`, `planAllocation()`, `createPayment()` (seule écriture des règlements), `emitsReal()`, `importBlockedByCutover()`, `setCutoverMode()` |
 | P&L de gestion (nature des sites, CA direct / en bloc / commissions, coût des ventes, charges récurrentes, soldes, contribution par marque, point mort) | `src/lib/pnl-shared.ts` + `src/lib/pnl.ts` (+ `budgetConsumptionByMonth()` dans `budget.ts`) | `classifySite()`, `chargeMonths()`, `buildPnl()` (seule définition du compte de résultat), `pnlStatement()`, `createCharge()`, `reviseCharge()`, `createBulkSale()` |
+| Contrôle de présence d'une visite (distance, heure retenue, durée, vitesse implicite, statut et motifs) | `src/lib/medical/gps-shared.ts` | `haversineM()`, `eventTime()`, `visitDurationMinutes()`, `impliedSpeedKmh()`, `verifyVisit()` |
+| Chrono de visite (Démarrer / Terminer / non effectuée, clôture auto, correction, cabinet) | `src/lib/medical/chrono.ts` | `recordAction()` (seule écriture de `visit_events` et des heures de visite), `autoCloseStale()`, `correctVisit()`, `validateCabinet()`, `refreshVerification()` |
+| Qui voit les heures et positions des visites | `src/lib/medical/field-access.ts` | `fieldScope()`, `inFieldScope()`, `requireFieldControl()` |
+| Journée terrain (ordre, temps en visite / entre visites) et indicateurs du suivi | `src/lib/medical/field-report-shared.ts` + `field-report.ts` | `buildTimeline()`, `fieldVisits()`, `fieldKpis()` |
+| Rapprochement d'un nom de médecin | `src/lib/medical/matching.ts` | `doctorNameTokens()`, `doctorAliasKey()`, `doctorNameScore()`, `matchDoctor()` |
+| Ordonnances : potentiel A/B/C, segments, produits à présenter, impact des visites, tournée | `src/lib/medical/prescriptions-shared.ts` + `prescriptions.ts` + `analyses.ts` | `doctorPotential()`, `doctorSegment()`, `recommendProducts()`, `visitImpact()`, `tourPriority()`, `refreshDoctorPotentials()` (seule écriture du potentiel AUTO), `doctorBrief()` |
 | Client prêt à facturer, doublons de clients, groupe (enseigne), raisons sociales facturables, fusion de fiches | `src/lib/gestion/clients-shared.ts` + `clients.ts` | `billingReadiness()`, `duplicateCandidates()`, `createClient()`, `updateClientLegal()` (seule écriture de `group_id`), `listClientGroups()`, `clientLinks()`, `billingIdentity()` (identité imprimée), `saveLegalEntity()`, `mergePreview()`, `mergeClients()` (seule fusion) |
 
 `tests/definitions-uniques.test.ts` échoue si une seconde définition réapparaît.
@@ -225,6 +234,25 @@ même point de vente se fusionnent (`mergeClients()`, « Valider » sur Clients)
 gardée, le nom absorbé devient un libellé d'import, son identité une raison sociale ; refusée si la fiche absorbée porte
 des pièces numérotées ou des règlements. Le **groupe** reste pour les enseignes à plusieurs magasins distincts.
 
+**Médical v2 : chrono, GPS, ordonnances** (`docs/guide-visites-gps.md` pour les déléguées, migrations 0036-0038).
+La déléguée travaille dans `/medical/journee` (mobile) : Démarrer → Terminer → compte rendu, ou « non effectuée ».
+Chaque action passe par `/api/medical/visit-events` (route, pas server action : la file IndexedDB hors connexion la
+rejoue par `fetch`, idempotente par `client_event_id`) et `recordAction()`. `visit_events` est en écriture seule
+(triggers) ; la déléguée ne fournit jamais une heure (heure serveur, ou heure du téléphone recalée du décalage mesuré à
+l'envoi). Statut de contrôle VERIFIEE / A_VERIFIER / NON_VERIFIEE / HORS_CONTROLE recalculé à chaque événement par
+`verifyVisit()` ; seuils dans `settings.medicalField` (Médical → Paramétrage). Les visites antérieures sont
+`AVANT_CHRONO` / `HORS_CONTROLE`. Position du cabinet : proposée au premier Démarrer (`gps_status = A_CONFIRMER`),
+validée ou déplacée par la direction ou le manager sur la carte de `/medical/suivi` (Leaflet + OSM). GPS visible
+seulement par les administrateurs et le `manager_id` de la déléguée (`field-access.ts`), jamais par « Valider » seul ;
+les alertes Action Center terrain portent `fieldDelegateId` et sont filtrées dans `allRecommendations()`. Corrections :
+`correctVisit()` (motif, événement CORRECTION, `audit()`), jamais sur une position. Clôture automatique : cron horaire
+`/api/cron/medical` + à la lecture. Heures affichées : toujours `fmtTime()` côté serveur (le fuseau du navigateur peut
+différer). Ordonnances : import `PRESCRIPTIONS` (liste blanche, colonne patient associée = import refusé), table
+`prescriptions`, alias `doctor_aliases` / `product_aliases` / `client_aliases`, file de résolution
+`/medical/ordonnances`. Potentiel AUTO jamais par-dessus une valeur MANUELLE. Analyses (segments, impact = corrélation
+observée, tournée) : `/medical/analyses`. Copilote : `get_doctor_profile`, `get_field_control` (aucune coordonnée).
+Test d'intégration : `MEDICAL_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/medical-integration.ts`.
+
 **P&L** (`/gestion/pnl`, section du `docs/guide-gestion-commerciale.md`, migration 0031). Réservé aux administrateurs
 (`requireAdmin()` : salaires). Compte de résultat mensuel HT : CA = ventes directes (sites de `settings.pnl.directSites`)
 + ventes en bloc aux distributeurs (`pnl_bulk_sales`, saisies à l'arrivage : Cospharma achète tout le stock Gamarde / Ainhoa)
@@ -277,7 +305,8 @@ Un seul moteur pour tous les types : `src/lib/import/`.
   Un stock initial ne s'efface pas : son annulation écrit des contre-mouvements dans le journal.
 
 Types : `SALES`, `CLIENTS`, `PRODUCTS`, `STOCK`, `OBJECTIVES`, `BUDGETS`, `REGULATORY`,
-`ANIMATIONS`, `ANIM_OBJECTIVES`, `ADS`, `MEDECINS`, `INVENTORY`, `INFLUENCERS`, `STOCK_INITIAL`.
+`ANIMATIONS`, `ANIM_OBJECTIVES`, `ADS`, `MEDECINS`, `INVENTORY`, `INFLUENCERS`, `STOCK_INITIAL`, `PRESCRIPTIONS`
+(ordonnances : aucune donnée patient, annulable).
 `STOCK` (photo) porte un dépôt : Cospharma et Pharmafirst ne sont connus que par leurs photos.
 
 Pour les publicités, `src/lib/meta/` fait la même chose par API et suit les mêmes conventions

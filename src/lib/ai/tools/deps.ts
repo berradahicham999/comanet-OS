@@ -19,7 +19,11 @@ import { getRecommendations } from "@/lib/rules";
 import { listTasks } from "@/lib/tasks";
 import { searchEntities } from "@/lib/search";
 import { normKey } from "@/lib/import/normalize";
-import type { Ref, RegulatoryRow, ToolDeps } from "./types";
+import type { MedicalToolDeps, Ref, RegulatoryRow, ToolDeps } from "./types";
+import { doctorNameScore, doctorNameTokens } from "@/lib/medical/matching";
+import { doctorBrief } from "@/lib/medical/prescriptions";
+import { fieldScopeOfUser } from "@/lib/medical/field-access";
+import { fieldDelegates, fieldKpis, fieldVisits } from "@/lib/medical/field-report";
 
 type Row = Record<string, unknown>;
 const first = (rows: Row[]): Ref | null => (rows[0] ? { id: String(rows[0].id), name: String(rows[0].name) } : null);
@@ -99,7 +103,49 @@ async function regulatoryFiles(): Promise<RegulatoryRow[]> {
   }));
 }
 
+/** Médecin le plus proche du nom saisi (même rapprochement que les ordonnances), dans la portée de la personne. */
+async function findDoctor(query: string, userId: string, ownOnly: boolean): Promise<Ref | null> {
+  const toks = doctorNameTokens(query);
+  if (!toks.length) return null;
+  const r = await db.execute<{ id: string; first_name: string; last_name: string; city: string | null }>(sql`
+    select d.id, d.first_name, d.last_name, d.city from doctors d
+    where true ${ownOnly ? sql`and (d.delegate_id = ${userId}::uuid or d.sector_id in (select ds.sector_id from medical_delegate_sectors ds join medical_delegates md on md.id = ds.delegate_id where md.user_id = ${userId}::uuid))` : sql``}`);
+  let best: { id: string; name: string; score: number } | null = null;
+  for (const d of r.rows) {
+    const score = doctorNameScore(toks, doctorNameTokens(`${d.first_name} ${d.last_name}`));
+    if (score >= 0.75 && (!best || score > best.score)) best = { id: d.id, name: `Dr ${d.first_name} ${d.last_name}${d.city ? ` — ${d.city}` : ""}`, score };
+  }
+  return best ? { id: best.id, name: best.name } : null;
+}
+
+const medicalDeps: MedicalToolDeps = {
+  findDoctor,
+  doctorBrief: (id) => doctorBrief(id),
+  async fieldSummary(userId, admin, delegateQuery, from, to) {
+    const scope = await fieldScopeOfUser(userId, admin);
+    if (!scope.all && !scope.delegateIds.length) return null;
+    const delegates = await fieldDelegates(scope);
+    const delegate = delegateQuery ? delegates.find((d) => normKey(d.name).includes(normKey(delegateQuery))) ?? null : null;
+    if (delegateQuery && !delegate) return null;
+    const filters = { delegateId: delegate?.id ?? null, from, to };
+    const visits = await fieldVisits(scope, filters);
+    const kpis = await fieldKpis(scope, visits, filters);
+    const byStatus: Record<string, number> = {};
+    const reasons = new Map<string, number>();
+    for (const v of visits) {
+      byStatus[v.verificationStatus] = (byStatus[v.verificationStatus] ?? 0) + 1;
+      // Motif sans chiffres (« Démarrage à … du cabinet ») pour regrouper ; jamais de coordonnées.
+      for (const m of v.reasons) {
+        const k = m.replace(/\d+([,.]\d+)?/g, "…").replace(/par .* :/, "par … :");
+        reasons.set(k, (reasons.get(k) ?? 0) + 1);
+      }
+    }
+    return { delegate: delegate?.name ?? null, kpis, byStatus, topReasons: [...reasons].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([reason, count]) => ({ reason, count })) };
+  },
+};
+
 export const realDeps: ToolDeps = {
+  medical: medicalDeps,
   // Ventes, objectifs, stock, catalogue, budget consommé, publicité, activité marketing : câblage de la couche Marketing Intelligence.
   ...realIntelDeps,
   findBrand, findClient, findProduct, findUser, clientIdsInCity,

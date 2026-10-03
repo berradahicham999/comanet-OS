@@ -293,7 +293,7 @@ export async function setLegalEntityActive(clientId: string, id: string, active:
  */
 export const MERGE_MOVED_TABLES = [
   "sales", "animations", "client_stock_readings", "activations", "inventory_movements", "pnl_bulk_sales",
-  "client_delivery_addresses", "client_aliases", "client_legal_entities",
+  "client_delivery_addresses", "client_aliases", "client_legal_entities", "prescriptions",
 ] as const;
 /** Pièces, règlements et relances (une relance porte sur une facture validée) : la fusion est refusée s'il y en a. */
 export const MERGE_SPECIAL_TABLES = ["sales_documents", "payments", "payment_reminders", "user_client_assignments", "client_brand_discounts", "activation_clients"] as const;
@@ -301,7 +301,7 @@ export const MERGE_SPECIAL_TABLES = ["sales_documents", "payments", "payment_rem
 const MOVE_LABELS: Record<string, string> = {
   sales: "lignes de vente", animations: "animations", client_stock_readings: "relevés de stock", activations: "activations",
   inventory_movements: "sorties de matériel", pnl_bulk_sales: "ventes en bloc (P&L)",
-  client_delivery_addresses: "adresses de livraison", client_aliases: "libellés d'import", client_legal_entities: "raisons sociales",
+  client_delivery_addresses: "adresses de livraison", client_aliases: "libellés d'import", client_legal_entities: "raisons sociales", prescriptions: "lignes d'ordonnance",
   activation_clients: "activations rattachées", user_client_assignments: "assignations d'utilisateurs", client_brand_discounts: "remises par marque",
   drafts: "pièces en brouillon", tasks: "tâches",
 };

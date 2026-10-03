@@ -12,6 +12,9 @@ import { emitEvents, eventKey, EVENT_TYPES, EVENT_SOURCES, type EmitInput } from
 import { normalizePlatform } from "@/lib/marketing-shared";
 import { refreshMarketingFacts } from "@/lib/analytics-marketing/refresh";
 import { cityToSector } from "@/lib/sectors";
+import { createHash } from "crypto";
+import { doctorAliasKey, doctorCandidate, matchDoctor } from "@/lib/medical/matching";
+import { refreshDoctorPotentials } from "@/lib/medical/prescriptions";
 import { getSettings } from "@/lib/settings";
 import { importBlockedByCutover } from "@/lib/gestion/documents-shared";
 import {
@@ -245,6 +248,7 @@ export async function runImport(params: {
       case "INVENTORY": await importInventory(rows, mapping, options, resolver, imp.id, summary); break;
       case "INFLUENCERS": await importInfluencers(rows, mapping, summary); break;
       case "STOCK_INITIAL": await importStockInitial(rows, mapping, options, imp.id, params.userId ?? null, summary); break;
+      case "PRESCRIPTIONS": await importPrescriptions(rows, mapping, resolver, imp.id, summary); break;
     }
     await resolver.flushAliases(type);
     summary.created = resolver.created;
@@ -1466,4 +1470,133 @@ async function importStockInitial(rows: Record<string, unknown>[], mapping: Mapp
     out.errors.push({ row: 0, message: `Aucune ligne chargée : ${(e as Error).message}` });
   }
   if (out.duplicates) out.warnings.push(`${out.duplicates} ligne(s) déjà chargée(s) par un import précédent : ignorée(s). Pour recharger, annulez d'abord cet import.`);
+}
+
+/* ------------------------------------------------------------------ */
+/* Ordonnances (Médical v2)                                            */
+/* ------------------------------------------------------------------ */
+
+/** En-têtes qui désignent une donnée patient : une telle colonne ne peut être associée à aucun champ. */
+const PATIENT_HEADER = /patient|malade|beneficiaire|\bassure|\bage\b|naissance|telephone|\btel\b|\bgsm\b|\bcin\b|\bcnss\b|mutuelle|\bcnops\b|\bamo\b/;
+
+/**
+ * Ordonnances : une ligne par produit prescrit. Seuls les champs de la liste blanche sont lus (date,
+ * médecin, spécialité, ville, pharmacie, produit, marque, quantité) ; aucune valeur d'une autre colonne
+ * n'est copiée, et les messages d'erreur ne citent aucune valeur de cellule. Idempotent : la clé de
+ * dédoublonnage porte le contenu de la ligne et son rang parmi les lignes identiques du fichier.
+ * Une ligne déjà rapprochée à la main n'est jamais « dé-rapprochée » par un rechargement.
+ */
+async function importPrescriptions(rows: Record<string, unknown>[], mapping: Mapping, resolver: Resolver, importId: string, out: ImportSummary) {
+  for (const [field, header] of Object.entries(mapping)) {
+    if (header && PATIENT_HEADER.test(normKey(header).toLowerCase())) {
+      out.errors.push({ row: 1, message: `La colonne « ${header} » ressemble à une donnée patient : elle ne peut pas être associée au champ « ${field} ». Import arrêté, rien n'a été enregistré.` });
+      return;
+    }
+  }
+  const settings = (await getSettings()).medicalField;
+  const [docRes, aliasRes, ignoredRes] = await Promise.all([
+    db.select({ id: s.doctors.id, firstName: s.doctors.firstName, lastName: s.doctors.lastName, city: s.doctors.city }).from(s.doctors),
+    db.select({ alias: s.doctorAliases.alias, doctorId: s.doctorAliases.doctorId }).from(s.doctorAliases),
+    db.select({ kind: s.prescriptionIgnoredLabels.kind, alias: s.prescriptionIgnoredLabels.alias }).from(s.prescriptionIgnoredLabels),
+  ]);
+  const candidates = docRes.map(doctorCandidate);
+  const aliases = new Map(aliasRes.map((a) => [a.alias, a.doctorId]));
+  const ignored = new Set(ignoredRes.map((x) => `${x.kind}|${x.alias}`));
+  const doctorCache = new Map<string, ReturnType<typeof matchDoctor>>();
+  const newAliases = new Map<string, string>();
+  const occurrences = new Map<string, number>();
+
+  type Row = typeof s.prescriptions.$inferInsert;
+  const pending: Row[] = [];
+  let doctorMatched = 0;
+  let productMatched = 0;
+  const unresolvedDoctors = new Set<string>();
+  const unresolvedProducts = new Set<string>();
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const date = toISODate(get(r, mapping, "date"));
+    if (!date) { out.errors.push({ row: i + 2, message: "Date manquante ou illisible" }); continue; }
+    const doctorRaw = [txt(r, mapping, "doctorFirstName"), txt(r, mapping, "doctorName")].filter(Boolean).join(" ").trim();
+    if (!doctorRaw) { out.errors.push({ row: i + 2, message: "Médecin manquant" }); continue; }
+    const productRaw = txt(r, mapping, "product");
+    if (!productRaw) { out.errors.push({ row: i + 2, message: "Produit manquant" }); continue; }
+    const qtyRaw = num(r, mapping, "quantity");
+    const quantity = qtyRaw === null ? 1 : Math.round(qtyRaw);
+    if (quantity <= 0) { out.errors.push({ row: i + 2, message: "Quantité nulle ou négative" }); continue; }
+
+    const city = normalizeCity(get(r, mapping, "city"));
+    const doctorKey = doctorAliasKey(doctorRaw, city);
+    let dm = doctorCache.get(doctorKey);
+    if (!dm) {
+      dm = matchDoctor(doctorRaw, city, candidates, aliases, { autoScore: settings.matchAutoScore, suggestScore: settings.matchSuggestScore });
+      doctorCache.set(doctorKey, dm);
+      if (dm.kind === "AUTO") newAliases.set(doctorKey, dm.doctorId);
+    }
+    const doctorIgnored = dm.kind === "NONE" && ignored.has(`DOCTOR|${doctorKey}`);
+    const doctorId = dm.kind === "NONE" ? null : dm.doctorId;
+    if (doctorId) doctorMatched++;
+    else if (!doctorIgnored) unresolvedDoctors.add(doctorKey);
+
+    const brandId = resolver.brand(txt(r, mapping, "brand"), productRaw);
+    const productId = await resolver.product(productRaw, null, brandId, false);
+    const productKey = normKey(productRaw);
+    if (productId) productMatched++;
+    else if (!ignored.has(`PRODUCT|${productKey}`)) unresolvedProducts.add(productKey);
+
+    const pharmacyRaw = txt(r, mapping, "pharmacy");
+    const clientId = pharmacyRaw ? await resolver.client(null, pharmacyRaw, null, city, false) : null;
+
+    const content = [date, doctorKey, normKey(pharmacyRaw ?? ""), productKey, quantity].join("|");
+    const occ = (occurrences.get(content) ?? 0) + 1;
+    occurrences.set(content, occ);
+    pending.push({
+      date,
+      doctorId,
+      doctorRawName: doctorRaw.slice(0, 200),
+      doctorRawKey: doctorKey,
+      doctorMatch: dm.kind === "NONE" ? (doctorIgnored ? "IGNORE" : "NON_RAPPROCHE") : dm.kind,
+      doctorMatchScore: dm.kind === "NONE" ? null : String(dm.score),
+      specialtyRaw: txt(r, mapping, "specialty")?.slice(0, 100) ?? null,
+      city,
+      clientId,
+      pharmacyRaw: pharmacyRaw?.slice(0, 200) ?? null,
+      productId,
+      productRaw: productRaw.slice(0, 200),
+      productRawKey: productKey,
+      quantity,
+      source: "IMPORT",
+      importId,
+      dedupeKey: createHash("sha1").update(`${content}|#${occ}`).digest("hex"),
+    });
+  }
+
+  const aliasRows = [...newAliases].map(([alias, doctorId]) => ({ alias, doctorId, source: "PRESCRIPTIONS", importId }));
+  for (let i = 0; i < aliasRows.length; i += 500) await db.insert(s.doctorAliases).values(aliasRows.slice(i, i + 500)).onConflictDoNothing();
+
+  for (let i = 0; i < pending.length; i += 500) {
+    const res = await db.insert(s.prescriptions).values(pending.slice(i, i + 500)).onConflictDoUpdate({
+      target: s.prescriptions.dedupeKey,
+      set: {
+        doctorId: sql`case when ${s.prescriptions.doctorMatch} = 'MANUEL' then ${s.prescriptions.doctorId} else coalesce(excluded.doctor_id, ${s.prescriptions.doctorId}) end`,
+        doctorMatch: sql`case when ${s.prescriptions.doctorMatch} = 'MANUEL' then ${s.prescriptions.doctorMatch} when excluded.doctor_id is null and ${s.prescriptions.doctorId} is not null then ${s.prescriptions.doctorMatch} else excluded.doctor_match end`,
+        doctorMatchScore: sql`coalesce(excluded.doctor_match_score, ${s.prescriptions.doctorMatchScore})`,
+        productId: sql`coalesce(excluded.product_id, ${s.prescriptions.productId})`,
+        clientId: sql`coalesce(excluded.client_id, ${s.prescriptions.clientId})`,
+        specialtyRaw: sql`coalesce(excluded.specialty_raw, ${s.prescriptions.specialtyRaw})`,
+        city: sql`coalesce(excluded.city, ${s.prescriptions.city})`,
+      },
+    }).returning({ inserted: sql<boolean>`(xmax = 0)` });
+    for (const x of res) { if (x.inserted) out.inserted++; else out.updated++; }
+  }
+
+  const total = pending.length;
+  const pct = (n: number) => (total ? (Math.round((n / total) * 1000) / 10).toLocaleString("fr-FR") : "0");
+  out.warnings.unshift(
+    `Rapprochement : médecins ${doctorMatched} / ${total} lignes (${pct(doctorMatched)} %), produits ${productMatched} / ${total} lignes (${pct(productMatched)} %).`,
+    ...(unresolvedDoctors.size ? [`${unresolvedDoctors.size} libellé(s) médecin à résoudre dans Médical → Ordonnances.`] : []),
+    ...(unresolvedProducts.size ? [`${unresolvedProducts.size} libellé(s) produit non rapproché(s) (produit concurrent ou nouveau libellé) : à associer ou écarter dans Médical → Ordonnances.`] : []),
+    ...(newAliases.size ? [`${newAliases.size} nom(s) de médecin rapproché(s) automatiquement (score ≥ ${Math.round(settings.matchAutoScore * 100)} %) — vérifiables dans Médical → Ordonnances.`] : []),
+  );
+  await refreshDoctorPotentials().catch((e) => out.warnings.push(`Potentiel médecin non recalculé : ${String((e as Error).message ?? e)}`));
 }

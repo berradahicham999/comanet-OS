@@ -20,7 +20,7 @@ export type RollbackPlan = {
   detail?: string;
 };
 
-const REVERSIBLE: ImportType[] = ["SALES", "STOCK", "ANIMATIONS", "ADS", "STOCK_INITIAL"];
+const REVERSIBLE: ImportType[] = ["SALES", "STOCK", "ANIMATIONS", "ADS", "STOCK_INITIAL", "PRESCRIPTIONS"];
 
 export function isReversible(type: string): boolean {
   return REVERSIBLE.includes(type as ImportType);
@@ -65,6 +65,10 @@ export async function rollbackPlan(importId: string, type: string): Promise<Roll
       const lines = await n(sql`select count(*)::int as n from animation_lines al join animations a on a.id = al.animation_id where a.import_id = ${importId}::uuid`);
       return { label: "journées d'animation", count, detail: lines ? `${lines.toLocaleString("fr-FR")} ligne(s) de vente terrain` : undefined };
     }
+    case "PRESCRIPTIONS": {
+      const count = await n(sql`select count(*)::int as n from prescriptions where import_id = ${importId}::uuid`);
+      return { label: "lignes d'ordonnance", count };
+    }
     case "ADS": {
       const count = await n(sql`select count(*)::int as n from ad_metrics where import_id = ${importId}::uuid`);
       const spend = Number((((await db.execute(sql`select coalesce(sum(spend),0)::float8 as n from ad_metrics where import_id = ${importId}::uuid`)).rows[0] ?? {}) as { n?: number }).n ?? 0);
@@ -106,12 +110,14 @@ const ORPHAN_PRODUCT_SQL = (importId: string) => sql`
     and not exists (select 1 from stock_lots where product_id = p.id)
     and not exists (select 1 from client_stock_readings where product_id = p.id)
     and not exists (select 1 from sales_document_lines where product_id = p.id)
-    and not exists (select 1 from purchase_document_lines where product_id = p.id)`;
+    and not exists (select 1 from purchase_document_lines where product_id = p.id)
+    and not exists (select 1 from prescriptions where product_id = p.id)`;
 
 const ORPHAN_CLIENT_SQL = (importId: string) => sql`
   from clients c where c.import_id = ${importId}::uuid
     and not exists (select 1 from sales where client_id = c.id)
     and not exists (select 1 from animations where client_id = c.id)
+    and not exists (select 1 from prescriptions where client_id = c.id)
     and not exists (select 1 from activations where client_id = c.id)
     and not exists (select 1 from user_client_assignments where client_id = c.id)
     and not exists (select 1 from client_stock_readings where client_id = c.id)
@@ -166,6 +172,12 @@ export async function rollbackRows(importId: string, type: string, actor: { id: 
     }
     case "ADS": {
       const r = await db.execute(sql`delete from ad_metrics where import_id = ${importId}::uuid`);
+      return r.rowCount ?? 0;
+    }
+    case "PRESCRIPTIONS": {
+      // Les alias médecin appris automatiquement par cet import partent avec lui ; ceux validés à la main restent.
+      await db.execute(sql`delete from doctor_aliases where import_id = ${importId}::uuid and source = 'PRESCRIPTIONS'`);
+      const r = await db.execute(sql`delete from prescriptions where import_id = ${importId}::uuid`);
       return r.rowCount ?? 0;
     }
     default:

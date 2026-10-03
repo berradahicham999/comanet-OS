@@ -63,7 +63,22 @@ export type ToolCallLog = {
  * Les lectures ventes / stock / budget / publicité / catalogue / activité marketing sont celles de la
  * couche Marketing Intelligence (`MarketingIntelDeps`) : mêmes fonctions, un seul câblage (`deps.ts`).
  */
+/** Lectures médicales (Médical v2) : fiche prescripteur et contrôle terrain, sans aucune position GPS. */
+export type MedicalToolDeps = {
+  findDoctor(query: string, userId: string, ownOnly: boolean): Promise<Ref | null>;
+  doctorBrief(doctorId: string): Promise<import("@/lib/medical/prescriptions").DoctorBrief | null>;
+  /** Contrôle terrain dans la portée de la personne (direction : tout ; manager : ses déléguées ; sinon null). */
+  fieldSummary(userId: string, admin: boolean, delegateQuery: string | null, from: string, to: string): Promise<{
+    delegate: string | null;
+    kpis: import("@/lib/medical/field-report").FieldKpis;
+    byStatus: Record<string, number>;
+    topReasons: { reason: string; count: number }[];
+  } | null>;
+};
+
 export type ToolDeps = MarketingIntelDeps & {
+  /** Facultatif : les doublures de test des autres domaines n'ont pas à le fournir. */
+  medical?: MedicalToolDeps;
   // Référentiels (résolution d'un nom saisi par le modèle vers un identifiant)
   findBrand(query: string): Promise<Ref | null>;
   findClient(query: string): Promise<Ref | null>;

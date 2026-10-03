@@ -77,6 +77,7 @@ export const importTypeEnum = pgEnum("import_type", [
   "INVENTORY",
   "INFLUENCERS",
   "STOCK_INITIAL",
+  "PRESCRIPTIONS",
 ]);
 
 export const importStatusEnum = pgEnum("import_status", [
@@ -174,6 +175,7 @@ export const doctorPotentialEnum = pgEnum("doctor_potential", ["A", "B", "C"]);
 
 export const medicalVisitStatusEnum = pgEnum("medical_visit_status", [
   "PLANIFIEE",
+  "EN_COURS",
   "REALISEE",
   "ANNULEE",
   "REPORTEE",
@@ -1715,6 +1717,16 @@ export const doctors = pgTable(
     /** Fréquence de visite recommandée en jours. Null = utilise `settings.medicalDefaultVisitFrequencyDays`. */
     visitFrequencyDays: integer("visit_frequency_days"),
     lastVisitAt: timestamp("last_visit_at", { withTimezone: true }),
+    /** Origine de la position du cabinet : PREMIERE_VISITE (proposée au premier « Démarrer »), MANUELLE, ADRESSE. */
+    gpsSource: text("gps_source").$type<"PREMIERE_VISITE" | "MANUELLE" | "ADRESSE">(),
+    /** A_CONFIRMER (à valider) tant que le manager ou la direction n'a pas validé la position ; seule une position VALIDEE prouve une présence. */
+    gpsStatus: text("gps_status").$type<"A_CONFIRMER" | "VALIDEE">(),
+    gpsValidatedAt: timestamp("gps_validated_at", { withTimezone: true }),
+    gpsValidatedBy: uuid("gps_validated_by").references(() => users.id, { onDelete: "set null" }),
+    /** MANUELLE = saisi sur la fiche, prime toujours ; AUTO = calculé depuis les ordonnances (`doctorPotential()`). */
+    potentialSource: text("potential_source").$type<"MANUELLE" | "AUTO">(),
+    /** Justification du dernier potentiel calculé (observations, motifs). */
+    potentialDetail: jsonb("potential_detail"),
     comments: text("comments"),
     notes: text("notes"),
     dedupeKey: text("dedupe_key"),
@@ -1769,6 +1781,20 @@ export const doctorVisits = pgTable(
     /** Documentation laissée (brochures, fiches, argumentaires). */
     documentation: text("documentation"),
     status: medicalVisitStatusEnum("status").notNull().default("PLANIFIEE"),
+    /** Chrono : heure serveur (ou appareil si synchro différée) de « Démarrer » / « Terminer ». Écrits par `chrono.ts` seulement. */
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    /** CHRONO (Démarrer / Terminer), SAISIE_MANUELLE (formulaire), AVANT_CHRONO (saisie antérieure à la migration 0037). */
+    timingSource: text("timing_source").$type<"CHRONO" | "SAISIE_MANUELLE" | "AVANT_CHRONO">().notNull().default("SAISIE_MANUELLE"),
+    /** Compte rendu : A_COMPLETER après « Terminer », VALIDE une fois envoyé. */
+    reportStatus: text("report_status").$type<"A_COMPLETER" | "VALIDE">(),
+    autoClosed: boolean("auto_closed").notNull().default(false),
+    syncedLate: boolean("synced_late").notNull().default(false),
+    notDoneReason: text("not_done_reason"),
+    /** Contrôle de présence (`verifyVisit()`), recalculé à chaque événement. */
+    verificationStatus: text("verification_status").$type<"VERIFIEE" | "A_VERIFIER" | "NON_VERIFIEE" | "HORS_CONTROLE">().notNull().default("HORS_CONTROLE"),
+    verificationReasons: jsonb("verification_reasons").$type<string[]>().notNull().default([]),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
     dedupeKey: text("dedupe_key"),
     importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1810,6 +1836,53 @@ export const visitSamples = pgTable(
   (t) => [index("visit_samples_visit_idx").on(t.visitId)],
 );
 
+/**
+ * Journal des événements de visite (Démarrer, Terminer, non effectuée, clôture auto, correction) avec la
+ * position GPS du moment. Écriture seule (triggers) : seul `src/lib/medical/chrono.ts` y écrit.
+ * `client_event_id` rend l'envoi idempotent (file hors connexion rejouée sans doublon).
+ */
+export const visitEvents = pgTable(
+  "visit_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    visitId: uuid("visit_id").notNull().references(() => doctorVisits.id, { onDelete: "restrict" }),
+    delegateId: uuid("delegate_id").references(() => users.id, { onDelete: "restrict" }),
+    type: text("type").$type<"START" | "STOP" | "NON_EFFECTUEE" | "CLOTURE_AUTO" | "CORRECTION">().notNull(),
+    lat: numeric("lat", { precision: 9, scale: 6 }),
+    lng: numeric("lng", { precision: 9, scale: 6 }),
+    accuracyM: integer("accuracy_m"),
+    gpsError: text("gps_error").$type<"REFUSE" | "INDISPONIBLE" | "DELAI" | "NON_SUPPORTE">(),
+    deviceTime: timestamp("device_time", { withTimezone: true }),
+    serverTime: timestamp("server_time", { withTimezone: true }).notNull().defaultNow(),
+    distanceCabinetM: integer("distance_cabinet_m"),
+    syncedLate: boolean("synced_late").notNull().default(false),
+    userAgent: text("user_agent"),
+    clientEventId: text("client_event_id").notNull(),
+    actorId: uuid("actor_id").references(() => users.id, { onDelete: "restrict" }),
+    actorName: text("actor_name"),
+    reason: text("reason"),
+    payload: jsonb("payload"),
+  },
+  (t) => [
+    uniqueIndex("visit_events_client_uq").on(t.clientEventId),
+    index("visit_events_visit_idx").on(t.visitId, t.serverTime),
+    index("visit_events_delegate_idx").on(t.delegateId, t.serverTime),
+  ],
+);
+
+/** Prise de connaissance de l'information GPS, horodatée (une ligne par lecture). */
+export const medicalGpsConsents = pgTable(
+  "medical_gps_consents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    noticeVersion: text("notice_version").notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }).notNull().defaultNow(),
+    userAgent: text("user_agent"),
+  },
+  (t) => [index("medical_gps_consents_user_idx").on(t.userId, t.noticeVersion)],
+);
+
 /** Mouvements de stock d'échantillons par délégué × produit. Le solde courant = somme des `quantity` signées. */
 export const sampleMovements = pgTable(
   "sample_movements",
@@ -1834,6 +1907,70 @@ export const sampleMovements = pgTable(
     index("sample_movements_delegate_product_idx").on(t.delegateId, t.productId),
     index("sample_movements_visit_idx").on(t.visitId),
   ],
+);
+
+/**
+ * Ordonnances collectées (Médical v2). AUCUNE donnée patient : le moteur d'import ne lit que les champs
+ * de la liste blanche (`FIELDS.PRESCRIPTIONS`). Le médecin est rapproché de `doctors` (`doctor_aliases`,
+ * `src/lib/medical/matching.ts`) ; non rapproché, il attend dans la file de résolution.
+ */
+export const prescriptions = pgTable(
+  "prescriptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    date: date("date").notNull(),
+    doctorId: uuid("doctor_id").references(() => doctors.id, { onDelete: "set null" }),
+    doctorRawName: text("doctor_raw_name").notNull(),
+    /** Clé du libellé médecin (`doctorAliasKey()`), commune à toutes les lignes du même libellé. */
+    doctorRawKey: text("doctor_raw_key").notNull(),
+    doctorMatch: text("doctor_match").$type<"ALIAS" | "AUTO" | "MANUEL" | "NON_RAPPROCHE" | "IGNORE">().notNull().default("NON_RAPPROCHE"),
+    doctorMatchScore: numeric("doctor_match_score", { precision: 4, scale: 3 }),
+    specialtyRaw: text("specialty_raw"),
+    city: text("city"),
+    clientId: uuid("client_id").references(() => clients.id, { onDelete: "set null" }),
+    pharmacyRaw: text("pharmacy_raw"),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
+    productRaw: text("product_raw").notNull(),
+    productRawKey: text("product_raw_key").notNull(),
+    quantity: integer("quantity").notNull().default(1),
+    source: text("source").notNull().default("IMPORT"),
+    importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
+    dedupeKey: text("dedupe_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("prescriptions_dedupe_uq").on(t.dedupeKey),
+    index("prescriptions_doctor_idx").on(t.doctorId, t.date),
+    index("prescriptions_product_idx").on(t.productId, t.date),
+    index("prescriptions_import_idx").on(t.importId),
+  ],
+);
+
+/** Variantes de nom rattachées à un médecin (modèle `client_aliases` / `product_aliases`). */
+export const doctorAliases = pgTable(
+  "doctor_aliases",
+  {
+    alias: text("alias").primaryKey(),
+    doctorId: uuid("doctor_id").notNull().references(() => doctors.id, { onDelete: "cascade" }),
+    source: text("source").notNull().default("IMPORT"),
+    importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("doctor_aliases_doctor_idx").on(t.doctorId)],
+);
+
+/** Libellés écartés de la file de rapprochement (médecin hors fichier, produit concurrent…). */
+export const prescriptionIgnoredLabels = pgTable(
+  "prescription_ignored_labels",
+  {
+    kind: text("kind").$type<"DOCTOR" | "PRODUCT" | "PHARMACY">().notNull(),
+    alias: text("alias").notNull(),
+    label: text("label").notNull(),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.kind, t.alias] })],
 );
 
 /* ------------------------------------------------------------------ */
@@ -3633,6 +3770,7 @@ export type MedicalDelegate = typeof medicalDelegates.$inferSelect;
 export type Doctor = typeof doctors.$inferSelect;
 export type DoctorVisit = typeof doctorVisits.$inferSelect;
 export type SampleMovement = typeof sampleMovements.$inferSelect;
+export type VisitEvent = typeof visitEvents.$inferSelect;
 export type EventRow = typeof events.$inferSelect;
 export type EventConsequence = typeof eventConsequences.$inferSelect;
 
