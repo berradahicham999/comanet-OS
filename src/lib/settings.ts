@@ -6,6 +6,7 @@
 import { db } from "@/db";
 import { settings } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import type { ForecastSettings } from "./forecast-shared";
 
 export type ComanetSettings = {
   /** Couverture de stock (mois) : seuils vert / jaune / orange. En dessous d'orange = rouge. */
@@ -90,7 +91,50 @@ export type ComanetSettings = {
   gestion: GestionSettings;
   /** P&L de gestion : quels sites de vente sont du CA COMANET, lesquels sont des prestations commissionnées. */
   pnl: PnlSettings;
+  /** Prévision saisonnière (`src/lib/forecast-shared.ts`) : base désaisonnalisée, horizon, événements (Ramadan, solaire, rentrée). */
+  forecast: ForecastSettings;
 };
+
+/**
+ * Prévision saisonnière. Les coefficients ci-dessous sont des valeurs de départ, alignées le 03/10/2026 sur le
+ * ratio observé dans l'historique sell-in 2024-2026 (Ramadan ×1,15 : les pharmacies se réassortissent avant et
+ * pendant ; solaire ×1,2 en saison, ×0,75 hors saison ; rentrée ≈ neutre). La page Paramètres affiche, à côté
+ * de chacun, le ratio observé à jour pour les recalibrer. Le Ramadan recule d'environ 11 jours par an : ses
+ * fenêtres sont explicites, une par année (à compléter chaque année).
+ */
+export const DEFAULT_FORECAST: ForecastSettings = {
+  baseMonths: 6,
+  horizonMonths: 6,
+  events: [
+    {
+      key: "ramadan", label: "Ramadan", multiplier: 1.15, keywords: [], recurring: null,
+      windows: [
+        { start: "2024-03-11", end: "2024-04-09" },
+        { start: "2025-03-01", end: "2025-03-30" },
+        { start: "2026-02-18", end: "2026-03-19" },
+        { start: "2027-02-08", end: "2027-03-09" },
+        { start: "2028-01-28", end: "2028-02-26" },
+        { start: "2029-01-16", end: "2029-02-14" },
+      ],
+    },
+    { key: "solaire-haute", label: "Saison solaire", multiplier: 1.2, keywords: ["solaire", "spf", "sun", "ecran", "apres-soleil", "après-soleil", "uv"], windows: [], recurring: { startMonth: 5, startDay: 1, endMonth: 8, endDay: 31 } },
+    { key: "solaire-basse", label: "Hors saison solaire", multiplier: 0.75, keywords: ["solaire", "spf", "sun", "ecran", "apres-soleil", "après-soleil", "uv"], windows: [], recurring: { startMonth: 11, startDay: 1, endMonth: 2, endDay: 28 } },
+    { key: "rentree", label: "Rentrée", multiplier: 1.05, keywords: [], windows: [], recurring: { startMonth: 9, startDay: 1, endMonth: 9, endDay: 30 } },
+  ],
+};
+
+/** Fusion des réglages de prévision : un événement enregistré sans tous ses champs reste lisible. */
+export function mergeForecast(stored: Partial<ForecastSettings> | null | undefined): ForecastSettings {
+  const d = DEFAULT_FORECAST;
+  if (!stored) return d;
+  const events = Array.isArray(stored.events)
+    ? stored.events.filter((e) => e && typeof e.key === "string" && e.key).map((e) => ({
+        key: e.key, label: e.label ?? e.key, multiplier: Number.isFinite(e.multiplier) && e.multiplier > 0 ? e.multiplier : 1,
+        windows: Array.isArray(e.windows) ? e.windows : [], recurring: e.recurring ?? null, keywords: Array.isArray(e.keywords) ? e.keywords : [],
+      }))
+    : d.events;
+  return { baseMonths: stored.baseMonths ?? d.baseMonths, horizonMonths: stored.horizonMonths ?? d.horizonMonths, events };
+}
 
 /**
  * Règles du P&L (`src/lib/pnl.ts`). Le fichier de ventes mélange trois natures de lignes selon le site :
@@ -621,6 +665,7 @@ export const DEFAULT_SETTINGS: ComanetSettings = {
   medicalField: DEFAULT_MEDICAL_FIELD,
   gestion: DEFAULT_GESTION,
   pnl: DEFAULT_PNL,
+  forecast: DEFAULT_FORECAST,
 };
 
 export const SETTINGS_KEY = "comanet.rules";
@@ -648,6 +693,7 @@ export function mergeSettings(stored: Partial<ComanetSettings> | null | undefine
     medicalField: { ...DEFAULT_MEDICAL_FIELD, ...(stored.medicalField ?? {}), tourWeights: { ...DEFAULT_MEDICAL_FIELD.tourWeights, ...(stored.medicalField?.tourWeights ?? {}) } },
     gestion: mergeGestion(stored.gestion),
     pnl: { ...DEFAULT_PNL, ...(stored.pnl ?? {}) },
+    forecast: mergeForecast(stored.forecast),
   };
 }
 

@@ -17,7 +17,7 @@ const EMOJI: Record<CoverageLevel, string> = { green: "🟢", yellow: "🟡", or
 export const getStockCoverage: AiTool<typeof schema> = {
   name: "get_stock_coverage",
   description:
-    "Stock : couverture en mois par référence (stock ÷ vente moyenne mensuelle sell-in), niveau 🟢🟡🟠🔴 selon les seuils Paramètres, date de rupture prévisible, commande conseillée, valeur de stock. Une référence sans photo de stock est « unknown », jamais estimée.",
+    "Stock : couverture en mois par référence (stock ÷ demande modélisée), niveau 🟢🟡🟠🔴 selon les seuils Paramètres, date de rupture prévisible, prévision mensuelle modélisée (saisonnalité : Ramadan, solaire, rentrée), commande conseillée, valeur de stock. La prévision est une modélisation étiquetée comme telle, jamais une mesure ; une référence sans photo de stock est « unknown », jamais estimée.",
   module: "stock",
   action: "view",
   schema,
@@ -48,7 +48,7 @@ export const getStockCoverage: AiTool<typeof schema> = {
     const atRisk = list.filter((p) => p.level === "red" || p.level === "orange");
     return {
       available: true,
-      source: `Photo de stock du ${stockDate ?? "?"} + vente moyenne sell-in Sage sur ${settings.avgSalesMonths} mois`,
+      source: `Photo de stock du ${stockDate ?? "?"} + vente moyenne sell-in sur ${settings.avgSalesMonths} mois + prévision modélisée (base désaisonnalisée ${settings.forecast.baseMonths} mois × saisonnalité)`,
       scope: scopeLabel(access, [brand ? `marque ${brand.name}` : null]),
       data: {
         thresholds_months: settings.coverage,
@@ -62,12 +62,17 @@ export const getStockCoverage: AiTool<typeof schema> = {
           product: p.name, sku: p.sku, brand: p.brandName, level: `${EMOJI[p.level]} ${p.level}`,
           stock_units: p.stockKnown ? p.stock : null, on_order_units: p.onOrder, avg_monthly_units: round(p.avgMonthly, 1), trend_pct: round(p.trendPct, 1),
           coverage_months: round(p.coverageMonths, 1), stockout_date: p.stockoutDate, recommended_order_units: p.recommendedOrder,
+          forecast_modelled_units: Object.fromEntries(p.forecast.months.slice(0, 3).map((m) => [m.month, round(m.qty)])),
+          forecast_events: p.forecast.months.slice(0, 3).flatMap((m) => m.events.map((e) => `${m.month} ${e.label} ×${e.multiplier}`)),
           lead_time_days: p.leadTimeDays, field_sell_out_30d_units: p.fieldSellOut30d, href: `/produits/${p.productId}`,
         })),
       },
       rowCount: rows.length,
       links: [{ label: "Ouvrir Stock & achats", href: `/stock${brand ? `?brand=${brand.id}` : ""}` }],
-      notes: known.length < list.length ? [`${list.length - known.length} produit(s) sans photo de stock : couverture non mesurable pour eux.`] : [],
+      notes: [
+        ...(known.length < list.length ? [`${list.length - known.length} produit(s) sans photo de stock : couverture non mesurable pour eux.`] : []),
+        "forecast_modelled_units est une prévision MODÉLISÉE (base désaisonnalisée × coefficients saisonniers des réglages), à présenter comme telle, jamais comme une vente attendue certaine.",
+      ],
     };
   },
 };

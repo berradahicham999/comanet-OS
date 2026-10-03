@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { getSettings } from "./settings";
-import { addDays, iso, today } from "./format";
+import { addDays, addMonths, iso, today } from "./format";
 import {
   computeCoverage,
   coverageLevel,
@@ -13,6 +13,7 @@ import {
   LEVEL_LABEL,
   type CoverageLevel,
 } from "./stock-math";
+import { buildForecast, demandSeries, type MonthlyForecast } from "./forecast-shared";
 
 // Les formules vivent dans `stock-math.ts` (pures et testées) ; ce fichier ne fait que lire
 // la base et les appliquer. Réexportées ici : les pages importent historiquement `@/lib/stock`.
@@ -36,6 +37,8 @@ export type ProductStock = {
   onOrder: number;
   stockDate: string | null;
   avgMonthly: number; // ventes moyennes mensuelles (sell-in)
+  /** Prévision mensuelle modélisée (saisonnalité) : base du stock cible et de la commande conseillée. */
+  forecast: MonthlyForecast;
   trendPct: number | null; // dernier mois complet vs moyenne
   coverageMonths: number | null; // null si pas de ventes
   level: CoverageLevel;
@@ -71,6 +74,8 @@ export async function productStocks(
   const avgEnd = iso(addDays(t, 1));
   const lastMonthStart = iso(addDays(t, -DAYS_PER_MONTH));
   const d30 = iso(addDays(t, -30));
+  // Mois civils complets de la base désaisonnalisée (prévision), avant le mois de référence.
+  const historyStart = iso(addMonths(t, -s.forecast.baseMonths));
 
   // Stock = journal de l'entrepôt COMANET (dépôts internes vendables : ce qui est physiquement chez nous, échantillons
   // compris) + dernière photo de chaque dépôt externe (Cospharma, Pharmafirst : connus seulement par import).
@@ -104,6 +109,17 @@ export async function productStocks(
     last_month as (
       select product_id, sum(quantity)::float8 as qty from sales where date >= ${lastMonthStart}::date and date < ${avgEnd}::date group by product_id
     ),
+    -- Historique mensuel (mois civils) de la base désaisonnalisée de la prévision, et premier mois de vente du produit.
+    monthly as (
+      select product_id, json_object_agg(m, qty) as months, min(first_month) as first_month from (
+        select product_id, to_char(date_trunc('month', date), 'YYYY-MM') as m, sum(quantity)::float8 as qty,
+               min(to_char(date_trunc('month', date), 'YYYY-MM')) over (partition by product_id) as first_month
+        from sales where date >= ${historyStart}::date and date < ${avgEnd}::date group by product_id, m
+      ) x group by product_id
+    ),
+    first_sale as (
+      select product_id, to_char(date_trunc('month', min(date)), 'YYYY-MM') as first_month from sales group by product_id
+    ),
     -- Commandes en cours = reste à recevoir des commandes fournisseurs ouvertes ; à défaut, la valeur de la photo importée.
     open_po as (
       select l.product_id, sum(l.quantity - l.received_qty)::float8 as qty
@@ -120,6 +136,7 @@ export async function productStocks(
            coalesce(l.quantity, 0) as stock, coalesce(po.qty, l.on_order, 0) as on_order, l.date as stock_date,
            coalesce(l.internal_qty, 0) as internal_qty, l.external_detail,
            coalesce(a.avg_monthly, 0) as avg_monthly, lm.qty as last_month_qty,
+           mo.months as monthly, fs.first_month,
            p.lead_time_days, p.safety_stock_days, p.moq,
            p.cost_price::float8 as cost_price, p.price_wholesale::float8 as price_wholesale,
            tr.rate::float8 as tax_rate, p.avg_client_discount_pct::float8 as avg_discount,
@@ -131,6 +148,8 @@ export async function productStocks(
     left join open_po po on po.product_id = p.id
     left join avg_sales a on a.product_id = p.id
     left join last_month lm on lm.product_id = p.id
+    left join monthly mo on mo.product_id = p.id
+    left join first_sale fs on fs.product_id = p.id
     left join field f on f.product_id = p.id
     where p.active
       ${opts.productId ? sql`and p.id = ${opts.productId}::uuid` : sql``}
@@ -144,8 +163,16 @@ export async function productStocks(
     const lastMonthQty = row.last_month_qty === null ? null : Number(row.last_month_qty);
     const leadTimeDays = Number(row.lead_time_days), safety = Number(row.safety_stock_days);
     const moq = row.moq === null ? null : Number(row.moq);
+    // Prévision modélisée : horizon au moins égal à la fenêtre du stock cible (délai + sécurité + revue).
+    const forecast = buildForecast({
+      product: { name: String(row.name), category: row.category ? String(row.category) : null },
+      history: (row.monthly ?? {}) as Record<string, number>,
+      firstSaleMonth: row.first_month ? String(row.first_month) : null,
+      ref: t, avgMonthly: avg, settings: s.forecast,
+      horizonMonths: Math.max(s.forecast.horizonMonths, Math.ceil((leadTimeDays + safety + DAYS_PER_MONTH) / 28) + 1),
+    });
     const cov = computeCoverage(
-      { stock, stockKnown, onOrder, avgMonthly: avg, leadTimeDays, safetyStockDays: safety, moq },
+      { stock, stockKnown, onOrder, avgMonthly: avg, leadTimeDays, safetyStockDays: safety, moq, forecast: demandSeries(forecast) },
       s.coverage,
     );
     const cost = row.cost_price === null ? null : Number(row.cost_price);
@@ -157,7 +184,7 @@ export async function productStocks(
       stock, stockKnown, onOrder, stockDate: row.stock_date ? String(row.stock_date) : null,
       stockInternal: Number(row.internal_qty),
       stockExternal: ((row.external_detail ?? []) as { warehouseKey: string; quantity: number; date: string }[]).map((e) => ({ warehouseKey: e.warehouseKey, quantity: Number(e.quantity), date: e.date })),
-      avgMonthly: avg, trendPct: trendPct(lastMonthQty, avg),
+      avgMonthly: avg, forecast, trendPct: trendPct(lastMonthQty, avg),
       coverageMonths: cov.coverageMonths, level: cov.level,
       stockoutDate: cov.daysToStockout === null ? null : iso(addDays(t, cov.daysToStockout)),
       leadTimeDays, safetyStockDays: safety, moq,

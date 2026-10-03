@@ -95,6 +95,13 @@ describe("Couverture stock et risque campagne — une seule définition", () => 
     const body = FILES.find((f) => f.path.endsWith("rules/index.ts"))!.body;
     assert.doesNotMatch(body, /scaleCautionRule/);
   });
+  test("la prévision saisonnière n'a qu'une définition : `buildForecast` / `seasonIndex` dans `forecast-shared.ts`", () => {
+    assert.deepEqual(hits(/export function buildForecast\(/), ["src/lib/forecast-shared.ts"]);
+    assert.deepEqual(hits(/export function seasonIndex\(/), ["src/lib/forecast-shared.ts"]);
+    // Aucune page ne recompose un indice saisonnier à la main.
+    const found = codeHits(/multiplier\s*-\s*1\)\s*\*\s*(share|overlap|weight)/, ["lib/forecast-shared.ts", "stock/prevision/page.tsx"]);
+    assert.deepEqual(found, [], `Indice saisonnier recalculé dans : ${found.join(", ")}`);
+  });
   test("`isUnderTension` est la seule porte d'entrée du risque", () => {
     assert.ok(hits(/export function isUnderTension/).includes("src/lib/stock-math.ts"));
     assert.ok(hits(/isUnderTension\(/).length >= 2);

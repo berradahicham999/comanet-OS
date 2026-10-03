@@ -8,6 +8,8 @@ import { PageHeader, Card, Badge, Tabs } from "@/components/ui";
 import { updateSettings, saveObjectives } from "./actions";
 import { seedDemoAction, purgeDemoAction, seedContentDemoAction, purgeContentDemoAction, seedActivationDemoAction, purgeActivationDemoAction } from "./demo-actions";
 import { fmtMAD, fmtNum } from "@/lib/format";
+import { observedEventRatios } from "@/lib/forecast";
+import type { SeasonEvent } from "@/lib/forecast-shared";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Paramètres" };
@@ -38,6 +40,7 @@ export default async function ParametresPage(props: { searchParams: Promise<{ ta
   for (const r of objRows.rows as { brand_id: string | null; month: number | null; amount: number }[]) obj.set(`${r.brand_id ?? "all"}|${r.month ?? 0}`, r.amount);
   const activeBrands = brands.filter((b) => b.active);
   const demo = (demoCount.rows[0] as { n: number }).n;
+  const observed = tab === "regles" ? await observedEventRatios(s.forecast, ref) : [];
 
   return (
     <>
@@ -94,6 +97,38 @@ export default async function ParametresPage(props: { searchParams: Promise<{ ta
               <Field name="mi_minPeriodRevenueMad" label="Classable si CA période ≥ (MAD)" value={s.marketingIntel.minPeriodRevenueMad} hint="En dessous : données insuffisantes" />
               <Field name="mi_lowMarginPct" label="Marge faible si < (%)" value={s.marketingIntel.lowMarginPct} hint="Jamais de scale automatique" />
               <Field name="mi_maxDecisions" label="Recommandations rendues (max)" value={s.marketingIntel.maxDecisions} />
+            </div>
+          </Card>
+          <Card title="Prévision saisonnière" className="md:col-span-2">
+            <div id="prevision" />
+            <p className="text-[12px] text-muted mb-2">Prévision mensuelle <b>modélisée</b> (Stock & achats → Prévision & commandes) : base désaisonnalisée × indice des événements ci-dessous. Un coefficient de 0,85 = −15 % sur les jours couverts, 1,5 = +50 %. Mots-clés vides = toutes les références ; sinon seules celles dont le nom ou la catégorie contient un mot-clé. Le <b>ratio observé</b> (ventes journalières dedans ÷ dehors sur 36 mois) est une corrélation constatée dans l&apos;historique, affichée pour calibrer le coefficient, jamais appliquée d&apos;office.</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+              <Field name="fc_baseMonths" label="Mois de base (complets)" value={s.forecast.baseMonths} hint="Moyenne désaisonnalisée" />
+              <Field name="fc_horizonMonths" label="Horizon affiché (mois)" value={s.forecast.horizonMonths} />
+            </div>
+            <input type="hidden" name="fc_ev_count" value={s.forecast.events.length + 1} />
+            <div className="space-y-3">
+              {[...s.forecast.events, null].map((e: SeasonEvent | null, i) => {
+                const o = e ? observed.find((x) => x.key === e.key) : null;
+                return (
+                  <div key={e?.key ?? "new"} className={`rounded-xl border border-line p-3 ${e ? "" : "border-dashed"}`}>
+                    <input type="hidden" name={`fc_ev_${i}_key`} value={e?.key ?? ""} />
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <Field name={`fc_ev_${i}_label`} label={e ? "Événement" : "Nouvel événement (libellé)"} value={e?.label ?? ""} hint={e ? undefined : "Laisser vide pour ne rien ajouter"} />
+                      <Field name={`fc_ev_${i}_multiplier`} label="Coefficient" value={e?.multiplier ?? 1} step="0.05" hint={o ? (o.ratio === null ? `observé : pas assez de jours (${o.products} réf.)` : `observé : ×${o.ratio.toFixed(2)} sur ${o.daysIn} j (${o.products} réf.)`) : undefined} />
+                      <Field name={`fc_ev_${i}_keywords`} label="Mots-clés (virgules)" value={e?.keywords.join(", ") ?? ""} hint="Vide : toutes les références" />
+                      <Field name={`fc_ev_${i}_recurring`} label="Chaque année du … au … (JJ/MM → JJ/MM)" value={e?.recurring ? `${String(e.recurring.startDay).padStart(2, "0")}/${String(e.recurring.startMonth).padStart(2, "0")} → ${String(e.recurring.endDay).padStart(2, "0")}/${String(e.recurring.endMonth).padStart(2, "0")}` : ""} hint="Peut chevaucher le nouvel an" />
+                    </div>
+                    <div className="grid sm:grid-cols-4 gap-2 mt-2">
+                      <label className="block text-[13px] sm:col-span-3"><span className="label block mb-1">Fenêtres explicites (une par ligne : AAAA-MM-JJ → AAAA-MM-JJ, bornes incluses)</span>
+                        <textarea name={`fc_ev_${i}_windows`} defaultValue={e?.windows.map((w) => `${w.start} → ${w.end}`).join("\n") ?? ""} rows={Math.max(2, e?.windows.length ?? 0)} className="input py-1.5 font-mono text-[12px]" />
+                        <span className="text-[11px] text-faint block mt-0.5">Ramadan : une fenêtre par année, à compléter chaque année (il recule d&apos;environ 11 jours par an).</span>
+                      </label>
+                      {e && <label className="flex items-end gap-2 text-[12px] pb-6"><input type="checkbox" name={`fc_ev_${i}_delete`} value="1" /> Supprimer cet événement</label>}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </Card>
           <div className="md:col-span-2"><button className="btn-primary" type="submit">Enregistrer les seuils</button></div>

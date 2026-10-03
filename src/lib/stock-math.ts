@@ -32,6 +32,14 @@
  *    assumé et documenté, aucune extrapolation n'est faite.
  *  · Produit ou marque inactifs    → exclus en amont par `productStocks()` (`where p.active`).
  *
+ * ── Prévision saisonnière (depuis le 03/10/2026) ────────────────────────────
+ *  Quand `forecast` est fourni (série de demande modélisée par `src/lib/forecast-shared.ts` : reste du mois
+ *  en cours, puis mois civils entiers, et base désaisonnalisée au-delà), la couverture, la date de rupture et
+ *  le stock cible se calculent en **parcourant** cette série au lieu de diviser par une moyenne plate :
+ *  coverage = jours consommés avant épuisement ÷ 30 ; targetStock = demande modélisée sur
+ *  (leadTime + sécurité + 30 jours). La commande conseillée garde sa formule. Sans `forecast`, la vente
+ *  moyenne reste la règle (même résultat qu'avant). Une base modélisée nulle = pas de rotation.
+ *
  * ── Produit « en tension » ──────────────────────────────────────────────────
  *  Un produit est en tension quand sa couverture est connue, inférieure à
  *  `settings.stockTightCoverageMonths`, et que sa rotation dépasse
@@ -39,6 +47,8 @@
  *  d'enjeu). C'est la définition utilisée par la règle « campagne active + produit en
  *  tension » et par le garde-fou de scaling publicitaire.
  */
+
+import type { DemandForecast } from "./forecast-shared";
 
 export type CoverageLevel = "green" | "yellow" | "orange" | "red" | "none" | "unknown";
 
@@ -77,7 +87,38 @@ export type CoverageInput = {
   leadTimeDays: number;
   safetyStockDays: number;
   moq: number | null;
+  /** Demande modélisée (`demandSeries()`) ; absente = vente moyenne plate. */
+  forecast?: DemandForecast | null;
 };
+
+export type { DemandForecast };
+
+/** Jours couverts par `stock` en consommant la série puis la base (null si la base est nulle et la série épuisée). */
+export function daysCovered(stock: number, f: DemandForecast): number | null {
+  let left = stock, days = 0;
+  for (const m of f.series) {
+    if (m.days <= 0) continue;
+    if (m.qty <= 0) { days += m.days; continue; }
+    if (left >= m.qty) { left -= m.qty; days += m.days; continue; }
+    return days + (m.days * left) / m.qty;
+  }
+  if (!(f.baseline > 0)) return null;
+  return days + (left / f.baseline) * DAYS_PER_MONTH;
+}
+
+/** Demande modélisée sur les `days` prochains jours : série puis base au-delà. */
+export function demandOver(days: number, f: DemandForecast): number {
+  let left = days, qty = 0;
+  for (const m of f.series) {
+    if (left <= 0) break;
+    if (m.days <= 0) continue;
+    const take = Math.min(left, m.days);
+    qty += (m.qty * take) / m.days;
+    left -= take;
+  }
+  if (left > 0) qty += (f.baseline * left) / DAYS_PER_MONTH;
+  return qty;
+}
 
 export type CoverageResult = {
   coverageMonths: number | null;
@@ -90,12 +131,25 @@ export type CoverageResult = {
 
 export function computeCoverage(input: CoverageInput, t: CoverageThresholds): CoverageResult {
   const { stock, stockKnown, onOrder, avgMonthly, leadTimeDays, safetyStockDays, moq } = input;
-  const hasRotation = Number.isFinite(avgMonthly) && avgMonthly > 0;
-  const coverageMonths = stockKnown && hasRotation ? stock / avgMonthly : null;
-
+  const f = input.forecast ?? null;
+  const hasRotation = f ? Number.isFinite(f.baseline) && f.baseline > 0 : Number.isFinite(avgMonthly) && avgMonthly > 0;
   // Stock cible = délai fournisseur + stock de sécurité + 1 mois de revue.
-  const targetMonths = leadTimeDays / DAYS_PER_MONTH + safetyStockDays / DAYS_PER_MONTH + 1;
-  const targetStock = hasRotation ? Math.round(avgMonthly * targetMonths) : 0;
+  const targetDays = leadTimeDays + safetyStockDays + DAYS_PER_MONTH;
+  const targetMonths = targetDays / DAYS_PER_MONTH;
+
+  let coverageMonths: number | null = null;
+  let targetStock = 0;
+  if (f && hasRotation) {
+    // Parcours de la demande modélisée ; un stock nul ou négatif garde sa lecture (0 ou déficit) via la base.
+    if (stockKnown) {
+      const d = stock > 0 ? daysCovered(stock, f) : stock / f.baseline * DAYS_PER_MONTH;
+      coverageMonths = d === null ? null : d / DAYS_PER_MONTH;
+    }
+    targetStock = Math.round(demandOver(targetDays, f));
+  } else if (hasRotation) {
+    coverageMonths = stockKnown ? stock / avgMonthly : null;
+    targetStock = Math.round(avgMonthly * targetMonths);
+  }
 
   let recommendedOrder = stockKnown && hasRotation ? Math.max(0, targetStock - stock - onOrder) : 0;
   if (moq && moq > 0 && recommendedOrder > 0) recommendedOrder = Math.ceil(recommendedOrder / moq) * moq;
