@@ -199,8 +199,11 @@ refusent UPDATE / DELETE / TRUNCATE ; une erreur se corrige par contre-mouvement
 transaction. Réglages : `settings.gestion` (identité de la société — jamais dans le code, le dépôt est public —,
 TVA par défaut, délais, stock insuffisant, péremption, bascule : mode OFF → PARALLELE → ACTIF, date, sites).
 Logo et cachet dans `content_assets` (`company_slot`). Droits : modules `livraisons`, `facturation`, `achats` ;
-archiver / bloquer / supprimer = « Valider ». `productStocks()` lit encore les photos : il passera sur le journal
-à la bascule (un seul point de changement).
+archiver / bloquer / supprimer = « Valider ». Stock (depuis le 03/10/2026, sans attendre la bascule) : `productStocks()`
+= journal de l'entrepôt COMANET (dépôts internes vendables : produits vendus en direct + échantillons) + dernière photo de
+chaque dépôt externe (`stockInternal`, `stockExternal`) ; « Stock réel » (`/gestion/stock`) ne montre que l'entrepôt
+COMANET, « Stock & achats » (`/stock`) une colonne par dépôt et le total. Une photo exige un dépôt externe ; un export
+Sage global sans dépôt n'entre plus dans le stock (contrôle de bascule seulement) ; une photo de distributeur ne touche plus aux prix des fiches.
 Lot 2 livré : ventes. `sales_documents` + `sales_document_lines` (BL, FACTURE, AVOIR), figées par triggers dès la
 validation ; seul `src/lib/gestion/documents.ts` crée, valide, livre, annule ou facture (`validateDocument()` : blocages
 `commercialIssues()`, numéro, identités figées, sortie FEFO / retour, compteurs facturé / crédité). Montants :
@@ -226,8 +229,7 @@ Lot 5 livré : règlements et bascule. `payments` (RG, figés par triggers) + `p
 facture) + `payment_reminders` ; seul `src/lib/gestion/payments.ts` les écrit. Solde, balance âgée, relances, imputation
 proposée : `receivables-shared.ts`. Un avoir s'impute sur sa facture à la validation. Bascule : `emitsReal()` (seule
 source du « réel ou simulation »), `importBlockedByCutover()` (C5), page `/gestion/bascule` (`cutover.ts` : contrôles,
-mode, rapport), reprise Sage (`importOpeningInvoices()`, source SAGE_REPRISE), `productStocks()` lit le journal en mode
-ACTIF. Envoi au comptable : sélection multiple des pièces et ZIP de leurs PDF assemblé dans le navigateur (`piece-exporter.tsx`) + récapitulatif Excel du mois (`exports.ts`). Retours de tests : P.U. TTC sur le BL, nom du client imprimé corrigeable sur une pièce validée (`renameDocumentClient()`, seule clé `legalName` de l'identité figée, migration 0030), avoir financier sans origine (lignes libres par marque, motif sans retour).
+mode, rapport), reprise Sage (`importOpeningInvoices()`, source SAGE_REPRISE). Envoi au comptable : sélection multiple des pièces et ZIP de leurs PDF assemblé dans le navigateur (`piece-exporter.tsx`) + récapitulatif Excel du mois (`exports.ts`). Retours de tests : P.U. TTC sur le BL, nom du client imprimé corrigeable sur une pièce validée (`renameDocumentClient()`, seule clé `legalName` de l'identité figée, migration 0030), avoir financier sans origine (lignes libres par marque, motif sans retour).
 Un point de vente, plusieurs raisons sociales (migration 0034) : `client_legal_entities` porte les raisons sociales
 supplémentaires d'un client (l'identité de la fiche reste la principale) ; une pièce choisit l'entité facturée
 (`sales_documents.legal_entity_id`, NULL = fiche), figée dans `client_snapshot` par `billingIdentity()`. Deux fiches du

@@ -93,7 +93,11 @@ export async function addStockSnapshot(formData: FormData) {
   if (!productId || quantity === null) return;
   const onOrder = numOrNull(formData.get("onOrder")) ?? 0;
   const date = String(formData.get("date") ?? "") || new Date().toISOString().slice(0, 10);
-  await db.insert(stockSnapshots).values({ productId, quantity: String(quantity), onOrder: String(onOrder), date, source: "MANUAL" });
+  // Une photo décrit un dépôt externe (Cospharma, Pharmafirst) : l'entrepôt COMANET vit dans le journal.
+  const warehouseKey = String(formData.get("warehouseKey") ?? "");
+  const kind = (await db.execute<{ kind: string }>(sql`select kind from warehouses where key = ${warehouseKey}`)).rows[0]?.kind;
+  if (kind !== "EXTERNE") return;
+  await db.insert(stockSnapshots).values({ productId, quantity: String(quantity), onOrder: String(onOrder), date, source: "MANUAL", warehouseKey });
   revalidatePath(`/produits/${productId}`);
   revalidatePath("/stock");
 }

@@ -36,9 +36,9 @@ export default async function StockReelPage(props: { searchParams: Promise<{ vie
     canValidate ? db.execute<{ id: string; name: string }>(sql`select id, name from products where active and kind = 'PRODUIT' order by name`) : Promise.resolve({ rows: [] as { id: string; name: string }[] }),
   ]);
   const internal = warehouses.filter((w) => w.kind === "INTERNE");
-  const external = warehouses.filter((w) => w.kind === "EXTERNE");
   const whLabel = new Map(warehouses.map((w) => [w.key, w.label]));
-  const withStock = state.filter((r) => r.movements > 0 || r.external.length > 0);
+  // Stock réel = ce qui est physiquement chez COMANET. Cospharma et Pharmafirst se lisent dans « Stock & achats ».
+  const withStock = state.filter((r) => r.movements > 0);
   const totalValue = withStock.reduce((a, r) => a + (fromDb(r.value, SCALE.money) ?? 0n), 0n);
   const allLots = withStock.flatMap((r) => r.lots.map((l) => ({ ...l, product: r.name, productId: r.productId, status: expiryStatus(l.expiryDate, at, alertDays) })));
   const lotsNear = allLots.filter((l) => l.status === "PROCHE").length;
@@ -50,7 +50,7 @@ export default async function StockReelPage(props: { searchParams: Promise<{ vie
       <PageHeader
         eyebrow="Gestion commerciale"
         title="Stock réel"
-        subtitle={<>Entrepôt COMANET : somme des mouvements du journal, jamais un chiffre écrasé. Dépôts Cospharma et Pharmafirst : dernière photo importée. {at !== now && <b>État au {fmtDate(at)}.</b>} La couverture 🟢🟠🔴 de « Stock &amp; achats » passera sur ce journal à la bascule.</>}
+        subtitle={<>Ce qui est physiquement chez COMANET (produits vendus en direct et échantillons des autres marques) : somme des mouvements du journal, jamais un chiffre écrasé. {at !== now && <b>État au {fmtDate(at)}.</b>} Le stock chez Cospharma et Pharmafirst se lit dans <Link href="/stock" className="underline">Stock &amp; achats</Link>.</>}
         actions={<Link href="/imports?type=STOCK_INITIAL" className="btn-secondary btn-sm">Importer un stock initial</Link>}
       >
         <GestionTabs current="/gestion/stock" />
@@ -86,7 +86,6 @@ export default async function StockReelPage(props: { searchParams: Promise<{ vie
           columns={[
             { key: "name", label: "Article" },
             ...internal.map((w) => ({ key: `wh:${w.key}`, label: w.key === "PRINCIPAL" ? "Entrepôt" : w.label, num: true })),
-            ...external.map((w) => ({ key: `ext:${w.key}`, label: w.label.replace("Dépôt ", ""), num: true })),
             { key: "available", label: "Disponible", num: true },
             ...(seeMargins ? [{ key: "cmup", label: "CMUP", num: true }, { key: "value", label: "Valeur", num: true }] : []),
             { key: "lots", label: "Lots", hideOnMobile: true },
@@ -101,7 +100,6 @@ export default async function StockReelPage(props: { searchParams: Promise<{ vie
               cells: {
                 name: <span className="flex items-center gap-2 min-w-0">{r.brandColor && <BrandDot color={r.brandColor} />}<Link href={`/produits/${r.productId}#stock`} className="font-medium hover:underline truncate">{r.name}</Link>{r.code && <span className="text-[11px] text-faint font-mono">{r.code}</span>}</span>,
                 ...Object.fromEntries(internal.map((w) => [`wh:${w.key}`, r.byWarehouse[w.key] ? fmtQty(r.byWarehouse[w.key]) : "—"])),
-                ...Object.fromEntries(external.map((w) => { const e = r.external.find((x) => x.warehouseKey === w.key); return [`ext:${w.key}`, e ? <span title={`Photo du ${fmtDate(e.date)}`}>{fmtQty(e.qty)} <span className="text-[10.5px] text-faint">{fmtDateShort(e.date)}</span></span> : "—"]; })),
                 available: <b>{fmtQty(r.available)}</b>,
                 cmup: fmtMoney(r.cmup),
                 value: fmtMoney(r.value, 0),

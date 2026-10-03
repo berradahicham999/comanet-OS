@@ -66,11 +66,12 @@ export default async function NewImportPage(props: { searchParams: Promise<{ fil
             {type === "STOCK" && <label className="block"><span className="label block mb-1">Date de la photo de stock</span><input type="date" name="stockDate" defaultValue={iso(new Date())} className="input h-9" /></label>}
             {type === "STOCK" && (
               <label className="block"><span className="label block mb-1">Dépôt photographié</span>
-                <select name="warehouseKey" defaultValue="" className="select h-9">
-                  <option value="">Photo globale (avant la bascule)</option>
+                <select name="warehouseKey" defaultValue="" className="select h-9" required>
+                  <option value="" disabled>— choisir le dépôt —</option>
                   {warehouses.filter((w) => w.kind === "EXTERNE").map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}
+                  <option value="GLOBAL">Export Sage global (contrôle de bascule, n&apos;entre pas dans le stock)</option>
                 </select>
-                <span className="text-[11px] text-faint block mt-0.5">Cospharma et Pharmafirst : leur stock n&apos;est connu que par ces photos, dépôt par dépôt.</span>
+                <span className="text-[11px] text-faint block mt-0.5">Cospharma et Pharmafirst : leur stock n&apos;est connu que par ces photos, dépôt par dépôt. Le stock de l&apos;entrepôt COMANET ne passe pas par une photo : il vit dans le journal (stock initial, réceptions, BL, inventaires).</span>
               </label>
             )}
             {type === "STOCK_INITIAL" && (<>
