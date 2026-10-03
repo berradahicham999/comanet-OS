@@ -22,7 +22,7 @@ export default async function VisitesPage(props: { searchParams: Promise<{ deleg
     db.execute(sql`
       select v.id, v.date::text as date, v.status, v.doctor_interest,
         (d.first_name || ' ' || d.last_name) as doctor_name, d.id as doctor_id,
-        u.name as delegate_name
+        coalesce(u.name, v.delegate_label) as delegate_name
       from doctor_visits v
       join doctors d on d.id = v.doctor_id
       left join users u on u.id = v.delegate_id

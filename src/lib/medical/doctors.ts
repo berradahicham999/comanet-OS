@@ -187,7 +187,7 @@ export type DoctorVisitHistoryRow = {
 
 export async function doctorVisitHistory(doctorId: string): Promise<DoctorVisitHistoryRow[]> {
   const r = await db.execute(sql`
-    select v.id, v.date::text as date, u.name as delegate_name, v.status, v.result, v.doctor_interest, v.comment, v.next_action, v.next_visit_date::text as next_visit_date,
+    select v.id, v.date::text as date, coalesce(u.name, v.delegate_label) as delegate_name, v.status, v.result, v.doctor_interest, v.comment, v.next_action, v.next_visit_date::text as next_visit_date,
       coalesce((select array_agg(p.name order by p.name) from visit_products vp join products p on p.id = vp.product_id where vp.visit_id = v.id), '{}') as products,
       coalesce((select json_agg(json_build_object('product', p.name, 'quantity', vs.quantity)) from visit_samples vs join products p on p.id = vs.product_id where vs.visit_id = v.id), '[]') as samples
     from doctor_visits v

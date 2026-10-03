@@ -78,6 +78,7 @@ export const importTypeEnum = pgEnum("import_type", [
   "INFLUENCERS",
   "STOCK_INITIAL",
   "PRESCRIPTIONS",
+  "VISITES_MEDICALES",
 ]);
 
 export const importStatusEnum = pgEnum("import_status", [
@@ -1718,7 +1719,7 @@ export const doctors = pgTable(
     visitFrequencyDays: integer("visit_frequency_days"),
     lastVisitAt: timestamp("last_visit_at", { withTimezone: true }),
     /** Origine de la position du cabinet : PREMIERE_VISITE (proposée au premier « Démarrer »), MANUELLE, ADRESSE. */
-    gpsSource: text("gps_source").$type<"PREMIERE_VISITE" | "MANUELLE" | "ADRESSE">(),
+    gpsSource: text("gps_source").$type<"PREMIERE_VISITE" | "MANUELLE" | "ADRESSE" | "HISTORIQUE">(),
     /** A_CONFIRMER (à valider) tant que le manager ou la direction n'a pas validé la position ; seule une position VALIDEE prouve une présence. */
     gpsStatus: text("gps_status").$type<"A_CONFIRMER" | "VALIDEE">(),
     gpsValidatedAt: timestamp("gps_validated_at", { withTimezone: true }),
@@ -1784,8 +1785,10 @@ export const doctorVisits = pgTable(
     /** Chrono : heure serveur (ou appareil si synchro différée) de « Démarrer » / « Terminer ». Écrits par `chrono.ts` seulement. */
     startedAt: timestamp("started_at", { withTimezone: true }),
     endedAt: timestamp("ended_at", { withTimezone: true }),
-    /** CHRONO (Démarrer / Terminer), SAISIE_MANUELLE (formulaire), AVANT_CHRONO (saisie antérieure à la migration 0037). */
-    timingSource: text("timing_source").$type<"CHRONO" | "SAISIE_MANUELLE" | "AVANT_CHRONO">().notNull().default("SAISIE_MANUELLE"),
+    /** CHRONO (Démarrer / Terminer), SAISIE_MANUELLE (formulaire), AVANT_CHRONO (saisie antérieure à la migration 0037), HISTORIQUE (reprise d'un CRM). */
+    timingSource: text("timing_source").$type<"CHRONO" | "SAISIE_MANUELLE" | "AVANT_CHRONO" | "HISTORIQUE">().notNull().default("SAISIE_MANUELLE"),
+    /** Nom de la VM quand elle n'a pas de compte COMANET OS (visites reprises d'un CRM) ; aucun compte n'est créé. */
+    delegateLabel: text("delegate_label"),
     /** Compte rendu : A_COMPLETER après « Terminer », VALIDE une fois envoyé. */
     reportStatus: text("report_status").$type<"A_COMPLETER" | "VALIDE">(),
     autoClosed: boolean("auto_closed").notNull().default(false),

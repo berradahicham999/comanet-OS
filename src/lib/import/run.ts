@@ -4,7 +4,7 @@ import { DELEGATE_SQL } from "@/lib/users";
 import * as s from "@/db/schema";
 import { saleLineHash } from "@/lib/hash";
 import { categoryFromLabel } from "@/lib/budget-categories";
-import { cleanText, inferClientType, normKey, toISODate, toNumber } from "./normalize";
+import { cleanText, inferClientType, normKey, parseDurationMinutes, toISODate, toNumber } from "./normalize";
 import { matchBrand, matchBrandInText, matchClient, matchProduct, type ClientCandidate, type ProductCandidate } from "./match";
 import { isComputedColumn, type ImportType } from "./fields";
 import { normalizeCity, animationKey, animatriceName, animatriceEmail } from "@/lib/animations-shared";
@@ -15,6 +15,8 @@ import { cityToSector } from "@/lib/sectors";
 import { createHash } from "crypto";
 import { doctorAliasKey, doctorCandidate, matchDoctor } from "@/lib/medical/matching";
 import { refreshDoctorPotentials } from "@/lib/medical/prescriptions";
+import { cabinetFromHistory } from "@/lib/medical/gps-shared";
+import { pgArray } from "@/lib/sql-array";
 import { getSettings } from "@/lib/settings";
 import { importBlockedByCutover } from "@/lib/gestion/documents-shared";
 import {
@@ -249,6 +251,7 @@ export async function runImport(params: {
       case "INFLUENCERS": await importInfluencers(rows, mapping, summary); break;
       case "STOCK_INITIAL": await importStockInitial(rows, mapping, options, imp.id, params.userId ?? null, summary); break;
       case "PRESCRIPTIONS": await importPrescriptions(rows, mapping, resolver, imp.id, summary); break;
+      case "VISITES_MEDICALES": await importVisitesMedicales(rows, mapping, imp.id, summary); break;
     }
     await resolver.flushAliases(type);
     summary.created = resolver.created;
@@ -1599,4 +1602,199 @@ async function importPrescriptions(rows: Record<string, unknown>[], mapping: Map
     ...(newAliases.size ? [`${newAliases.size} nom(s) de médecin rapproché(s) automatiquement (score ≥ ${Math.round(settings.matchAutoScore * 100)} %) — vérifiables dans Médical → Ordonnances.`] : []),
   );
   await refreshDoctorPotentials().catch((e) => out.warnings.push(`Potentiel médecin non recalculé : ${String((e as Error).message ?? e)}`));
+}
+
+/* ------------------------------------------------------------------ */
+/* Visites médicales — reprise de l'historique d'un CRM                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Visites médicales reprises d'un CRM (copie unique, rejouable) : une ligne par visite, clé `crm:<réf>`.
+ * - Médecin : rapproché (clé du référentiel, alias, puis similarité de nom), créé s'il manque ; son potentiel
+ *   complète une fiche vide (jamais par-dessus une valeur saisie).
+ * - VM : rattachée au compte dont l'e-mail est fourni, sinon son nom reste sur la visite (aucun compte créé).
+ * - Une visite déjà saisie dans COMANET OS (même médecin, même jour) n'est pas doublée.
+ * - Visites HISTORIQUE, hors contrôle GPS ; la position du cabinet est proposée (« à valider ») à partir des
+ *   positions des visites quand elles se regroupent (`cabinetFromHistory`).
+ */
+async function importVisitesMedicales(rows: Record<string, unknown>[], mapping: Mapping, importId: string, out: ImportSummary) {
+  const settings = (await getSettings()).medicalField;
+  const [docRes, aliasRes, specRes, userRes, existingRes] = await Promise.all([
+    db.select({ id: s.doctors.id, firstName: s.doctors.firstName, lastName: s.doctors.lastName, city: s.doctors.city, dedupeKey: s.doctors.dedupeKey }).from(s.doctors),
+    db.select({ alias: s.doctorAliases.alias, doctorId: s.doctorAliases.doctorId }).from(s.doctorAliases),
+    db.select({ id: s.medicalSpecialties.id, name: s.medicalSpecialties.name }).from(s.medicalSpecialties),
+    db.execute<{ id: string; email: string }>(sql`select id, lower(email) as email from users`),
+    db.execute<{ doctor_id: string; date: string; dedupe_key: string | null }>(sql`select doctor_id, date::text as date, dedupe_key from doctor_visits where status in ('REALISEE', 'NON_EFFECTUEE', 'EN_COURS')`),
+  ]);
+  const candidates = docRes.map(doctorCandidate);
+  const byKey = new Map(docRes.filter((d) => d.dedupeKey).map((d) => [d.dedupeKey!, d.id]));
+  const aliases = new Map(aliasRes.map((a) => [a.alias, a.doctorId]));
+  const specByKey = new Map(specRes.map((x) => [normKey(x.name), x.id]));
+  const userByEmail = new Map(userRes.rows.map((u) => [u.email, u.id]));
+  // Visites déjà présentes, hors reprise : (médecin, jour) → ne pas doubler.
+  const existingDay = new Set(existingRes.rows.filter((v) => !v.dedupe_key?.startsWith("crm:")).map((v) => `${v.doctor_id}|${v.date}`));
+
+  const docCache = new Map<string, string | null>();
+  const newAliases = new Map<string, string>();
+  const created: string[] = [];
+  const unknownEmails = new Set<string>();
+  let skippedExisting = 0;
+  let potentialFilled = 0;
+
+  async function resolveDoctor(r: Record<string, unknown>): Promise<string | null> {
+    const name = txt(r, mapping, "doctorName");
+    if (!name) return null;
+    const city = normalizeCity(get(r, mapping, "city"));
+    const cacheKey = `${normKey(name)}|${city ?? ""}`;
+    if (docCache.has(cacheKey)) return docCache.get(cacheKey)!;
+    // 1) clé du référentiel (« NOM NOM VILLE » ou « NOM VILLE » selon l'import qui a créé la fiche)
+    let id = byKey.get(normKey(`${name} ${name} ${city ?? ""}`)) ?? byKey.get(normKey(` ${name} ${city ?? ""}`)) ?? null;
+    // 2) alias puis similarité de nom
+    if (!id) {
+      const m = matchDoctor(name, city, candidates, aliases, { autoScore: settings.matchAutoScore, suggestScore: settings.matchSuggestScore });
+      if (m.kind !== "NONE") {
+        id = m.doctorId;
+        if (m.kind === "AUTO") newAliases.set(doctorAliasKey(name, city), m.doctorId);
+      }
+    }
+    // 3) création, avec les champs du CRM
+    if (!id) {
+      const specialtyName = txt(r, mapping, "specialty");
+      let specialtyId: string | null = null;
+      if (specialtyName) {
+        specialtyId = specByKey.get(normKey(specialtyName)) ?? null;
+        if (!specialtyId) {
+          const [row] = await db.insert(s.medicalSpecialties).values({ name: specialtyName }).onConflictDoNothing().returning();
+          specialtyId = row?.id ?? null;
+          if (specialtyId) specByKey.set(normKey(specialtyName), specialtyId);
+        }
+      }
+      const pot = (txt(r, mapping, "potential") ?? "").toUpperCase();
+      const dedupeKey = normKey(` ${name} ${city ?? ""}`);
+      const [row] = await db.insert(s.doctors).values({
+        firstName: "", lastName: name, city, specialtyId, status: "ACTIF",
+        potential: ["A", "B", "C"].includes(pot) ? (pot as "A" | "B" | "C") : null,
+        potentialSource: ["A", "B", "C"].includes(pot) ? "MANUELLE" : null,
+        comments: "Créé à la reprise de l'historique des visites (CRM).", dedupeKey, importId,
+      }).onConflictDoNothing().returning({ id: s.doctors.id });
+      id = row?.id ?? ((await db.execute<{ id: string }>(sql`select id from doctors where dedupe_key = ${dedupeKey}`)).rows[0]?.id ?? null);
+      if (row) {
+        created.push(name);
+        candidates.push(doctorCandidate({ id: row.id, firstName: "", lastName: name, city }));
+        byKey.set(dedupeKey, row.id);
+      }
+    }
+    docCache.set(cacheKey, id);
+    return id;
+  }
+
+  type Row = typeof s.doctorVisits.$inferInsert;
+  const pending: Row[] = [];
+  const potentials = new Map<string, "A" | "B" | "C">();
+  const seen = new Set<string>();
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const ref = txt(r, mapping, "visitRef");
+    if (!ref) { out.errors.push({ row: i + 2, message: "Référence de visite manquante" }); continue; }
+    const key = `crm:${ref}`;
+    if (seen.has(key)) { out.duplicates++; continue; }
+    seen.add(key);
+    const date = toISODate(get(r, mapping, "date"));
+    if (!date) { out.errors.push({ row: i + 2, message: "Date manquante ou illisible" }); continue; }
+    const doctorId = await resolveDoctor(r);
+    if (!doctorId) { out.errors.push({ row: i + 2, message: "Médecin manquant" }); continue; }
+    if (existingDay.has(`${doctorId}|${date}`)) { skippedExisting++; continue; }
+    const pot = (txt(r, mapping, "potential") ?? "").toUpperCase();
+    if (["A", "B", "C"].includes(pot)) potentials.set(doctorId, pot as "A" | "B" | "C");
+    const email = (txt(r, mapping, "delegateEmail") ?? "").toLowerCase();
+    const delegateId = email ? userByEmail.get(email) ?? null : null;
+    if (email && !delegateId) unknownEmails.add(email);
+    const lat = num(r, mapping, "lat");
+    const lng = num(r, mapping, "lng");
+    const okPos = lat !== null && lng !== null && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && !(lat === 0 && lng === 0);
+    pending.push({
+      doctorId,
+      delegateId,
+      delegateLabel: delegateId ? null : txt(r, mapping, "delegate"),
+      date,
+      durationMinutes: parseDurationMinutes(get(r, mapping, "duration")),
+      gpsLat: okPos ? lat!.toFixed(6) : null,
+      gpsLng: okPos ? lng!.toFixed(6) : null,
+      comment: txt(r, mapping, "comment"),
+      objections: txt(r, mapping, "objections"),
+      status: "REALISEE",
+      reportStatus: "VALIDE",
+      timingSource: "HISTORIQUE",
+      verificationStatus: "HORS_CONTROLE",
+      dedupeKey: key,
+      importId,
+    });
+  }
+
+  if (newAliases.size) {
+    const al = [...newAliases].map(([alias, doctorId]) => ({ alias, doctorId, source: "VISITES_MEDICALES", importId }));
+    for (let i = 0; i < al.length; i += 500) await db.insert(s.doctorAliases).values(al.slice(i, i + 500)).onConflictDoNothing();
+  }
+  for (let i = 0; i < pending.length; i += 500) {
+    const res = await db.insert(s.doctorVisits).values(pending.slice(i, i + 500)).onConflictDoUpdate({
+      target: s.doctorVisits.dedupeKey,
+      targetWhere: sql`dedupe_key is not null`,
+      set: {
+        comment: sql`coalesce(excluded.comment, doctor_visits.comment)`,
+        objections: sql`coalesce(excluded.objections, doctor_visits.objections)`,
+        durationMinutes: sql`coalesce(excluded.duration_minutes, doctor_visits.duration_minutes)`,
+        gpsLat: sql`coalesce(excluded.gps_lat, doctor_visits.gps_lat)`,
+        gpsLng: sql`coalesce(excluded.gps_lng, doctor_visits.gps_lng)`,
+        delegateId: sql`coalesce(doctor_visits.delegate_id, excluded.delegate_id)`,
+        delegateLabel: sql`case when coalesce(doctor_visits.delegate_id, excluded.delegate_id) is null then coalesce(excluded.delegate_label, doctor_visits.delegate_label) else null end`,
+      },
+    }).returning({ inserted: sql<boolean>`(xmax = 0)` });
+    for (const x of res) { if (x.inserted) out.inserted++; else out.updated++; }
+  }
+
+  // Potentiel du CRM : seulement sur les fiches sans potentiel (une valeur saisie prime toujours).
+  const potRows = [...potentials].map(([id, level]) => ({ id, level }));
+  if (potRows.length) {
+    const r = await db.execute(sql`
+      update doctors d set potential = x.level::doctor_potential, potential_source = 'MANUELLE', updated_at = now()
+      from jsonb_to_recordset(${JSON.stringify(potRows)}::jsonb) as x(id uuid, level text)
+      where d.id = x.id and d.potential is null`);
+    potentialFilled = r.rowCount ?? 0;
+  }
+
+  // Dernière visite, statut, et position du cabinet déduite de l'historique (fiches sans position seulement).
+  const touched = [...new Set(pending.map((p) => p.doctorId))];
+  let proposed = 0;
+  for (let i = 0; i < touched.length; i += 500) {
+    const ids = touched.slice(i, i + 500);
+    await db.execute(sql`
+      update doctors set
+        last_visit_at = (select max(v.date) from doctor_visits v where v.doctor_id = doctors.id and v.status = 'REALISEE'),
+        status = case when status = 'NOUVEAU' then 'ACTIF' else status end,
+        updated_at = now()
+      where id = any(${pgArray(ids)})`);
+    const pts = await db.execute<{ doctor_id: string; lat: string; lng: string }>(sql`
+      select v.doctor_id, v.gps_lat as lat, v.gps_lng as lng from doctor_visits v join doctors d on d.id = v.doctor_id
+      where v.doctor_id = any(${pgArray(ids)}) and v.gps_lat is not null and d.gps_lat is null`);
+    const byDoc = new Map<string, { lat: number; lng: number }[]>();
+    for (const p of pts.rows) byDoc.set(p.doctor_id, [...(byDoc.get(p.doctor_id) ?? []), { lat: Number(p.lat), lng: Number(p.lng) }]);
+    const props = [...byDoc].map(([id, list]) => ({ id, c: cabinetFromHistory(list, settings) })).filter((x) => x.c);
+    if (props.length) {
+      const payload = JSON.stringify(props.map((x) => ({ id: x.id, lat: x.c!.position.lat.toFixed(6), lng: x.c!.position.lng.toFixed(6) })));
+      const r = await db.execute(sql`
+        update doctors d set gps_lat = x.lat::numeric, gps_lng = x.lng::numeric, gps_source = 'HISTORIQUE', gps_status = 'A_CONFIRMER', updated_at = now()
+        from jsonb_to_recordset(${payload}::jsonb) as x(id uuid, lat text, lng text)
+        where d.id = x.id and d.gps_lat is null`);
+      proposed += r.rowCount ?? 0;
+    }
+  }
+
+  out.warnings.unshift(
+    `${pending.length} visite(s) reprise(s) sur ${touched.length} médecin(s) ; ${skippedExisting} déjà saisie(s) dans COMANET OS (même médecin, même jour) non doublée(s).`,
+    ...(created.length ? [`${created.length} médecin(s) absent(s) du fichier, créé(s) : à compléter (secteur, délégué).`] : []),
+    ...(newAliases.size ? [`${newAliases.size} nom(s) de médecin rapproché(s) par similarité (≥ ${Math.round(settings.matchAutoScore * 100)} %).`] : []),
+    ...(potentialFilled ? [`${potentialFilled} potentiel(s) A/B/C repris sur des fiches qui n'en avaient pas.`] : []),
+    ...(proposed ? [`${proposed} position(s) de cabinet proposée(s) à partir des visites, à valider sur la carte du suivi terrain.`] : []),
+    ...(unknownEmails.size ? [`Compte introuvable pour : ${[...unknownEmails].join(", ")} — visites gardées au nom de la VM.`] : []),
+  );
 }
