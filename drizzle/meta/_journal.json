@@ -281,6 +281,13 @@
       "when": 1789801900000,
       "tag": "0039_medical_visites_historique",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1789802000000,
+      "tag": "0040_products_conditions_achat",
+      "breakpoints": true
     }
   ]
 }
