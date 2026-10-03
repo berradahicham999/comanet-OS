@@ -6,9 +6,14 @@ téléphone). Ajoutez-le à l'écran d'accueil : Safari → Partager → « Sur 
 
 ## La première fois
 
-Un écran explique quand votre position est enregistrée. Lisez-le, puis touchez **J'ai compris**.
-Quand le téléphone demande l'accès à la position, répondez **Autoriser** (sur iPhone : « Autoriser lorsque
-l'app est active » et **Position exacte** activée).
+Un écran explique quand votre position est enregistrée. Lisez-le, puis touchez **J'ai compris — activer la
+localisation**. Le téléphone demande l'accès à la position : choisissez **Autoriser lorsque vous consultez le
+site** (pas « Uniquement cette fois »). C'est fait une bonne fois pour toutes : le téléphone ne vous le redemandera
+plus, ni au Démarrer ni au Terminer. « Localisation autorisée » s'affiche en vert en haut de Ma journée.
+
+Si une carte bleue « Autoriser la localisation une fois pour toutes » apparaît, l'autorisation n'a pas été
+mémorisée : touchez **Activer maintenant** et choisissez la bonne option. (Sur iPhone : Réglages → Apps → Safari →
+Position → **Autoriser**.)
 
 ## Une visite en 4 gestes
 
