@@ -19,9 +19,17 @@ export const DOC_TYPE_LABELS: Record<DocType, { one: string; many: string; serie
   AVOIR: { one: "Avoir", many: "Avoirs", series: "AV", simSeries: "SIMAV" },
 };
 
-/** Module de droits d'une pièce : commande et BL relèvent des livraisons, facture et avoir de la facturation. */
-export function moduleOfType(type: DocType): "livraisons" | "facturation" {
-  return type === "COMMANDE" || type === "BL" ? "livraisons" : "facturation";
+/** Commande « à soi » (portée « ses données ») : saisie par la personne ou attribuée à elle comme commercial. */
+export function isOwnOrder(d: { createdById: string | null; salesRepId: string | null }, userId: string): boolean {
+  return d.createdById === userId || d.salesRepId === userId;
+}
+
+/**
+ * Module de droits d'une pièce : la commande a le sien (un commercial peut prendre des commandes sans
+ * toucher aux BL), le BL relève des livraisons, facture et avoir de la facturation.
+ */
+export function moduleOfType(type: DocType): "commandes" | "livraisons" | "facturation" {
+  return type === "COMMANDE" ? "commandes" : type === "BL" ? "livraisons" : "facturation";
 }
 
 /** Type de la pièce d'où viennent les lignes reprises (`source_line_id`) : BL ← commande, facture ← BL, avoir ← facture. */

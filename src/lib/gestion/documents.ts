@@ -133,7 +133,8 @@ export type DocumentListRow = {
   netHt: string; ttc: string; isSimulation: boolean; salesRep: string | null; dueDate: string | null; site: string; approvalRequested: boolean;
 };
 
-export async function listDocuments(opts: { type?: DocType; clientIds?: string[] | null; limit?: number } = {}): Promise<DocumentListRow[]> {
+/** `ownerId` : portée « ses données » — seulement les pièces saisies par cette personne ou qui lui sont attribuées (commandes d'un commercial). */
+export async function listDocuments(opts: { type?: DocType; clientIds?: string[] | null; ownerId?: string; limit?: number } = {}): Promise<DocumentListRow[]> {
   const r = await db.execute<DocumentListRow>(sql`
     select d.id, d.type, d.status, d.number, d.date::text as date, d.client_id as "clientId", c.name as client, c.city,
       d.net_ht::text as "netHt", d.ttc::text as ttc, d.is_simulation as "isSimulation", d.sales_rep_name as "salesRep",
@@ -141,6 +142,7 @@ export async function listDocuments(opts: { type?: DocType; clientIds?: string[]
     from sales_documents d join clients c on c.id = d.client_id
     where true ${opts.type ? sql`and d.type = ${opts.type}` : sql``}
       ${opts.clientIds ? (opts.clientIds.length ? sql`and d.client_id = any(${pgArray(opts.clientIds)})` : sql`and false`) : sql``}
+      ${opts.ownerId ? sql`and (d.created_by_id = ${opts.ownerId}::uuid or d.sales_rep_id = ${opts.ownerId}::uuid)` : sql``}
     order by d.date desc, d.created_at desc limit ${opts.limit ?? 500}`);
   return r.rows;
 }

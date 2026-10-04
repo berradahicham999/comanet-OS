@@ -108,7 +108,8 @@ describe("règles des pièces", () => {
     assert.equal(allowedActions("COMMANDE", "LIVRE").cancel, false);
     assert.equal(allowedActions("COMMANDE", "VALIDE").invoice, false);
     assert.equal(allowedActions("COMMANDE", "VALIDE").deliver, false);
-    assert.equal(moduleOfType("COMMANDE"), "livraisons");
+    assert.equal(moduleOfType("COMMANDE"), "commandes");
+    assert.equal(moduleOfType("BL"), "livraisons");
     assert.equal(moduleOfType("AVOIR"), "facturation");
     assert.equal(sourceLabel("BL"), "BC");
     assert.equal(sourceLabel("FACTURE"), "BL");

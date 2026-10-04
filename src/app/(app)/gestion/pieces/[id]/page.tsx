@@ -8,7 +8,7 @@ import { requireAccessContext, can, clientFilter, clientInScope, hasFlag } from 
 import { getSettings } from "@/lib/settings";
 import { auditTrail } from "@/lib/audit";
 import { documentIssues, getDocument, orderRemaining } from "@/lib/gestion/documents";
-import { allowedActions, DOC_TYPE_LABELS, STATUS_META, moduleOfType, sourceRef, statusLabel, waPhone, type DocStatus, type DocType } from "@/lib/gestion/documents-shared";
+import { allowedActions, DOC_TYPE_LABELS, STATUS_META, isOwnOrder, moduleOfType, sourceRef, statusLabel, waPhone, type DocStatus, type DocType } from "@/lib/gestion/documents-shared";
 import { editorData } from "@/lib/gestion/editor";
 import { listCreditReasons, listWarehouses } from "@/lib/gestion/refs";
 import { shareToken } from "@/lib/gestion/share";
@@ -42,9 +42,10 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
   const status = doc.status as DocStatus;
   const permModule = moduleOfType(type);
   if (!can(a.perms, permModule, "view") || !(await clientInScope(doc.clientId))) redirect(a.home);
+  if (type === "COMMANDE" && a.scope === "OWN" && !isOwnOrder(doc, a.user.id)) redirect("/gestion/pieces?type=COMMANDE");
   const canEdit = can(a.perms, permModule, "edit");
   // Confirmer une commande ne sort pas de stock : « Créer » suffit (le commercial confirme sa saisie).
-  const canValidate = type === "COMMANDE" ? can(a.perms, "livraisons", "create") : can(a.perms, permModule, "validate");
+  const canValidate = type === "COMMANDE" ? can(a.perms, "commandes", "create") : can(a.perms, permModule, "validate");
   const settings = await getSettings();
   const g = settings.gestion;
   const draft = status === "BROUILLON";
@@ -264,7 +265,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
                 {actions.credit && can(a.perms, "facturation", "create") && (
                   <form action={creditNoteAction}><input type="hidden" name="id" value={id} /><button className="btn-secondary btn-sm" type="submit">Faire un avoir</button></form>
                 )}
-                {type === "COMMANDE" && actions.cancel && can(a.perms, "livraisons", "edit") && (
+                {type === "COMMANDE" && actions.cancel && can(a.perms, "commandes", "edit") && (
                   <form action={cancelOrderAction} className="space-y-2 pt-3 border-t border-line">
                     <input type="hidden" name="id" value={id} />
                     <p className="text-muted">Annuler la commande : ce qui reste à livrer ne le sera plus ; les BL déjà validés restent.</p>
@@ -300,7 +301,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
                     ))}
                   </ul>
                 )}
-                {Number(settlement.balance) > 0 && can(a.perms, "facturation", "create") && <Link href={`/gestion/reglements/nouveau?client=${doc.clientId}`} className="btn-secondary btn-sm inline-flex">Encaisser</Link>}
+                {Number(settlement.balance) > 0 && can(a.perms, "reglements", "create") && <Link href={`/gestion/reglements/nouveau?client=${doc.clientId}`} className="btn-secondary btn-sm inline-flex">Encaisser</Link>}
               </div>
             </Card>
           )}
@@ -308,7 +309,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
             <Card title="Crédit client restant">
               <div className="text-[13px] space-y-2">
                 <p><b className="tabular-nums">{fmtMoney(credit.left)} MAD</b> de cet avoir ne sont imputés sur aucune facture.</p>
-                {creditTargets.length > 0 && can(a.perms, "facturation", "edit") ? (
+                {creditTargets.length > 0 && can(a.perms, "reglements", "edit") ? (
                   <form action={allocateCreditAction} className="space-y-2">
                     <input type="hidden" name="creditId" value={id} />
                     <select name="invoiceId" className="select h-9">{creditTargets.map((i) => <option key={i.id} value={i.id}>{i.number} — solde {fmtMoney(i.balance)} MAD</option>)}</select>

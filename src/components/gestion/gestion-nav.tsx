@@ -2,9 +2,15 @@ import { redirect } from "next/navigation";
 import { requireAccessContext, can } from "@/lib/access";
 import type { ModuleKey } from "@/lib/access-shared";
 import { Tabs } from "@/components/ui";
+import { PREPARATION_MODULES } from "@/components/nav-config";
 
 /** Modules qui ouvrent l'espace « Gestion commerciale ». */
-export const GESTION_MODULES: ModuleKey[] = ["livraisons", "facturation", "achats", "stock", "clients", "produits", "administration"];
+export const GESTION_MODULES: ModuleKey[] = ["commandes", "livraisons", "facturation", "reglements", "achats", "stock", "clients", "produits", "administration"];
+
+/** Page « Préparation » : pour qui prépare, facture ou administre (voir `PREPARATION_MODULES`). */
+export function canSeePreparation(perms: Awaited<ReturnType<typeof requireAccessContext>>["perms"]) {
+  return PREPARATION_MODULES.some((m) => can(perms, m, "view"));
+}
 
 /** Garde de page : au moins un module de la gestion commerciale en lecture. */
 export async function requireGestionView() {
@@ -17,10 +23,10 @@ export async function requireGestionView() {
 export async function GestionTabs({ current }: { current: string }) {
   const a = await requireAccessContext();
   const tabs = [
-    { href: "/gestion", label: "Préparation", ok: true },
-    { href: "/gestion/pieces", label: "Pièces", ok: can(a.perms, "livraisons", "view") || can(a.perms, "facturation", "view") },
+    { href: "/gestion", label: "Préparation", ok: canSeePreparation(a.perms) },
+    { href: "/gestion/pieces", label: "Pièces", ok: can(a.perms, "commandes", "view") || can(a.perms, "livraisons", "view") || can(a.perms, "facturation", "view") },
     { href: "/gestion/pieces/facturer", label: "Facturer des BL", ok: can(a.perms, "facturation", "create") },
-    { href: "/gestion/reglements", label: "Règlements", ok: can(a.perms, "facturation", "view") },
+    { href: "/gestion/reglements", label: "Règlements", ok: can(a.perms, "reglements", "view") },
     { href: "/gestion/stock", label: "Stock réel", ok: can(a.perms, "stock", "view") },
     { href: "/gestion/inventaires", label: "Inventaires", ok: can(a.perms, "stock", "view") },
     { href: "/gestion/achats", label: "Achats", ok: can(a.perms, "achats", "view") || can(a.perms, "stock", "view") },

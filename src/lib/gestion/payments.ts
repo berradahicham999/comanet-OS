@@ -20,7 +20,7 @@ import { agingBucket, daysOverdue, initialPaymentStatus, nextPaymentStatuses, re
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export class PaymentError extends Error {}
-const MODULE = "facturation" as const;
+const MODULE = "reglements" as const;
 const m = (v: string | null | undefined) => parseDecimal(v ?? "0", SCALE.money) ?? 0n;
 const f = (v: bigint) => formatScaled(v, SCALE.money);
 

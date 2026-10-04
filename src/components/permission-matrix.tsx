@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import clsx from "clsx";
 import {
-  FLAG_KEYS, FLAG_LABELS, MODULE_GROUPS, MODULE_HINTS, MODULE_LABELS, SCOPE_HINTS, SCOPE_KEYS, SCOPE_LABELS, VALIDATE_HINTS,
+  ACTION_HINTS, FLAG_KEYS, FLAG_LABELS, MODULE_GROUPS, MODULE_HINTS, MODULE_LABELS, SCOPE_HINTS, SCOPE_KEYS, SCOPE_LABELS, VALIDATE_HINTS,
   type FlagKey, type ModuleKey, type ScopeKey,
 } from "@/lib/access-shared";
 import { cityKey } from "@/lib/animations-shared";
@@ -256,6 +256,13 @@ function GroupRows({ title, modules, perms, toggle, adminLocked }: {
           <td>
             <div className="font-medium text-ink">{MODULE_LABELS[m]}</div>
             <div className="text-[11.5px] text-muted leading-snug">{MODULE_HINTS[m]}</div>
+            {ACTION_HINTS[m] && (
+              <div className="text-[11px] text-muted leading-snug mt-0.5">
+                {ACTION_HINTS[m]!.create && <>Créer : {ACTION_HINTS[m]!.create}</>}
+                {ACTION_HINTS[m]!.create && ACTION_HINTS[m]!.edit && " · "}
+                {ACTION_HINTS[m]!.edit && <>Modifier : {ACTION_HINTS[m]!.edit}</>}
+              </div>
+            )}
             {perms[m].validate && <div className="text-[11px] text-accent-2 leading-snug mt-0.5">Valider : {VALIDATE_HINTS[m]}</div>}
           </td>
           {ACTIONS.map((a) => {
@@ -267,7 +274,7 @@ function GroupRows({ title, modules, perms, toggle, adminLocked }: {
                   aria-label={`${MODULE_LABELS[m]} — ${ACTION_LABELS[a]}`}
                   checked={perms[m][a]}
                   disabled={locked}
-                  title={locked ? "Dernier administrateur : ce droit ne peut pas être retiré." : a === "validate" ? VALIDATE_HINTS[m] : undefined}
+                  title={locked ? "Dernier administrateur : ce droit ne peut pas être retiré." : a === "validate" ? VALIDATE_HINTS[m] : a === "create" || a === "edit" ? ACTION_HINTS[m]?.[a] : undefined}
                   onChange={() => toggle(m, a)}
                   className="h-4 w-4"
                 />

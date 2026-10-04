@@ -24,9 +24,11 @@ export default async function PiecesPage(props: { searchParams: Promise<{ type?:
   const visibleTypes = DOC_TYPES.filter((t) => can(access.perms, moduleOfType(t), "view"));
   // Sans type demandé : les BL (le quotidien de l'administration), sinon le premier type visible.
   const type = (visibleTypes.includes(sp.type as DocType) ? sp.type : visibleTypes.includes("BL") ? "BL" : visibleTypes[0]) as DocType | undefined;
-  if (!type) return <Empty title="Accès restreint" hint="Les pièces de vente demandent le droit « Voir » sur Livraisons ou Facturation." />;
+  if (!type) return <Empty title="Accès restreint" hint="Les pièces de vente demandent le droit « Voir » sur Commandes clients, Bons de livraison ou Factures et avoirs." />;
   const permModule = moduleOfType(type);
-  const [docs, settings] = await Promise.all([listDocuments({ type, clientIds: await clientFilter() }), getSettings()]);
+  // Portée « ses données » : un commercial ne voit que ses commandes ; BL et factures restent filtrés par ses clients.
+  const ownerId = type === "COMMANDE" && access.scope === "OWN" ? access.user.id : undefined;
+  const [docs, settings] = await Promise.all([listDocuments({ type, clientIds: await clientFilter(), ownerId }), getSettings()]);
   const canCreate = can(access.perms, permModule, "create");
   const mode = settings.gestion.cutover.mode;
 
@@ -34,10 +36,10 @@ export default async function PiecesPage(props: { searchParams: Promise<{ type?:
     <>
       <PageHeader
         eyebrow="Gestion commerciale"
-        title="Pièces de vente"
+        title={visibleTypes.length === 1 && type === "COMMANDE" ? "Commandes clients" : "Pièces de vente"}
         subtitle={MODE_HINT[mode]}
         actions={<span className="flex gap-2 flex-wrap">
-          <Link href={`/gestion/exports?types=${type}`} className="btn-secondary btn-sm">Sélectionner et exporter</Link>
+          {type !== "COMMANDE" && <Link href={`/gestion/exports?types=${type}`} className="btn-secondary btn-sm">Sélectionner et exporter</Link>}
           {canCreate && <Link href={`/gestion/pieces/nouveau?type=${type}`} className="btn-primary btn-sm">+ {type === "COMMANDE" ? "Commande client" : type === "BL" ? "Bon de livraison" : type === "AVOIR" ? "Avoir financier" : "Facture de services"}</Link>}
         </span>}
       >

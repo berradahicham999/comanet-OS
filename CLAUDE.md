@@ -199,7 +199,8 @@ refusent UPDATE / DELETE / TRUNCATE ; une erreur se corrige par contre-mouvement
 `toFixed` dans `src/lib/gestion/`. Toute écriture de référentiel laisse une trace `audit_logs` dans la même
 transaction. Réglages : `settings.gestion` (identité de la société — jamais dans le code, le dépôt est public —,
 TVA par défaut, délais, stock insuffisant, péremption, bascule : mode OFF → PARALLELE → ACTIF, date, sites).
-Logo et cachet dans `content_assets` (`company_slot`). Droits : modules `livraisons`, `facturation`, `achats` ;
+Logo et cachet dans `content_assets` (`company_slot`). Droits : modules `commandes`, `livraisons`, `facturation`,
+`reglements`, `achats` (migration 0043 : commandes et règlements détachés, droits recopiés) ;
 archiver / bloquer / supprimer = « Valider ». Stock (depuis le 03/10/2026, sans attendre la bascule) : `productStocks()`
 = journal de l'entrepôt COMANET (dépôts internes vendables : produits vendus en direct + échantillons) + dernière photo de
 chaque dépôt externe (`stockInternal`, `stockExternal`) ; « Stock réel » (`/gestion/stock`) ne montre que l'entrepôt
@@ -236,7 +237,8 @@ VALIDE (confirmée) → LIVRE_PARTIEL → LIVRE, `delivered_qty` par ligne ; sai
 (`/api/gestion/produits-habituels/[clientId]`), **sans remise** (le serveur force 0 ; la remise du client est posée sur le BL
 préparé) ; `createBLFromOrder()` prépare un BL brouillon **entièrement modifiable**
 (lignes `source_line_id` libres sur un BL, figées sur facture et avoir) ; la validation du BL fait avancer la quantité
-livrée, son annulation la rend. Confirmer = Créer sur `livraisons` (le commercial confirme sa saisie). Règles Action
+livrée, son annulation la rend. Confirmer = Créer sur `commandes` (le commercial confirme sa saisie) ; « Préparer le
+BL » = Créer sur `livraisons`. Portée OWN : seulement ses commandes (`isOwnOrder()` : saisie ou attribuée). Règles Action
 Center `gestion-commandes-a-preparer`, `gestion-commandes-stock-insuffisant` ; seuil `settings.gestion.orderPrepAlertDays`.
 Un point de vente, plusieurs raisons sociales (migration 0034) : `client_legal_entities` porte les raisons sociales
 supplémentaires d'un client (l'identité de la fiche reste la principale) ; une pièce choisit l'entité facturée
@@ -275,7 +277,7 @@ signalé, jamais estimé. Marketing : `budgetConsumptionByMonth()` (même défin
 répartis. N-1 des charges affiché seulement si des charges N-1 existent.
 
 **Permissions modulaires par utilisateur** (`docs/permissions-modulaires.md`). Chaque compte porte
-sa propre matrice `user_permissions` (17 modules × Voir / Créer / Modifier / Valider), une portée
+sa propre matrice `user_permissions` (19 modules × Voir / Créer / Modifier / Valider), une portée
 `user_scope` (OWN / ASSIGNED / ALL), des assignations de marques et de clients, et sept interrupteurs
 transverses `user_flags`. Les modèles de rôle (`role_templates`) ne servent qu'à pré-remplir.
 Règles : aucune décision d'accès sur `users.role` (enum legacy recalculée, lecture seule — un test
