@@ -654,6 +654,18 @@ export const clients = pgTable(
     creditLimit: numeric("credit_limit", { precision: 14, scale: 2 }),
     blocked: boolean("blocked").notNull().default(false),
     blockedReason: text("blocked_reason"),
+    /*
+     * CRM commercial (migration 0045). Fréquence de visite attendue par mois (NULL = non définie : hors
+     * barre de progression ; 0 = ne pas visiter). Position du point de vente : proposée au premier
+     * « Démarrer » d'une visite, validée par la direction ou le manager (`src/lib/crm/visits.ts`).
+     */
+    visitFrequencyMonthly: integer("visit_frequency_monthly"),
+    gpsLat: numeric("gps_lat", { precision: 9, scale: 6 }),
+    gpsLng: numeric("gps_lng", { precision: 9, scale: 6 }),
+    gpsSource: text("gps_source").$type<"PREMIERE_VISITE" | "MANUELLE">(),
+    gpsStatus: text("gps_status").$type<"A_CONFIRMER" | "VALIDEE">(),
+    gpsValidatedAt: timestamp("gps_validated_at", { withTimezone: true }),
+    gpsValidatedBy: uuid("gps_validated_by").references((): AnyPgColumn => users.id, { onDelete: "set null" }),
     updatedAt: timestamp("updated_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1856,7 +1868,10 @@ export const visitEvents = pgTable(
   "visit_events",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    visitId: uuid("visit_id").notNull().references(() => doctorVisits.id, { onDelete: "restrict" }),
+    /** Visite médicale… */
+    visitId: uuid("visit_id").references(() => doctorVisits.id, { onDelete: "restrict" }),
+    /** …ou visite commerciale (CRM, migration 0045) : exactement l'une des deux (contrainte `visit_events_one_visit_ck`). */
+    clientVisitId: uuid("client_visit_id").references((): AnyPgColumn => clientVisits.id, { onDelete: "restrict" }),
     delegateId: uuid("delegate_id").references(() => users.id, { onDelete: "restrict" }),
     type: text("type").$type<"START" | "STOP" | "NON_EFFECTUEE" | "CLOTURE_AUTO" | "CORRECTION">().notNull(),
     lat: numeric("lat", { precision: 9, scale: 6 }),
@@ -1878,6 +1893,51 @@ export const visitEvents = pgTable(
     uniqueIndex("visit_events_client_uq").on(t.clientEventId),
     index("visit_events_visit_idx").on(t.visitId, t.serverTime),
     index("visit_events_delegate_idx").on(t.delegateId, t.serverTime),
+    index("visit_events_client_visit_idx").on(t.clientVisitId, t.serverTime).where(sql`client_visit_id is not null`),
+  ],
+);
+
+/**
+ * CRM commercial — visite d'une commerciale chez un client (point de vente). Une visite effectuée compte
+ * pour le mois de sa date ; seules les visites physiques (`kind` VISITE, réglable dans `settings.crm`)
+ * alimentent la progression. Heures, statut et contrôle de présence : `src/lib/crm/visits.ts` seulement.
+ */
+export const clientVisits = pgTable(
+  "client_visits",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    clientId: uuid("client_id").notNull().references((): AnyPgColumn => clients.id, { onDelete: "restrict" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    date: date("date").notNull(),
+    status: text("status").$type<"PLANIFIEE" | "EN_COURS" | "EFFECTUEE" | "NON_EFFECTUEE" | "ANNULEE">().notNull().default("PLANIFIEE"),
+    kind: text("kind").$type<"VISITE" | "APPEL" | "MESSAGE">().notNull().default("VISITE"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    durationMinutes: integer("duration_minutes"),
+    timingSource: text("timing_source").$type<"CHRONO" | "SAISIE_MANUELLE" | "HISTORIQUE">().notNull().default("SAISIE_MANUELLE"),
+    objective: text("objective"),
+    result: text("result"),
+    comment: text("comment"),
+    nextAction: text("next_action"),
+    nextVisitDate: date("next_visit_date"),
+    notDoneReason: text("not_done_reason"),
+    reportStatus: text("report_status").$type<"A_COMPLETER" | "VALIDE">(),
+    autoClosed: boolean("auto_closed").notNull().default(false),
+    syncedLate: boolean("synced_late").notNull().default(false),
+    verificationStatus: text("verification_status").$type<"VERIFIEE" | "A_VERIFIER" | "NON_VERIFIEE" | "HORS_CONTROLE">().notNull().default("HORS_CONTROLE"),
+    verificationReasons: jsonb("verification_reasons").$type<string[]>().notNull().default([]),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    dedupeKey: text("dedupe_key"),
+    importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("client_visits_client_date_idx").on(t.clientId, t.date),
+    index("client_visits_user_date_idx").on(t.userId, t.date),
+    index("client_visits_status_idx").on(t.status),
+    uniqueIndex("client_visits_dedupe_uq").on(t.dedupeKey).where(sql`dedupe_key is not null`),
   ],
 );
 
@@ -3163,6 +3223,8 @@ export const objectives = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     brandId: uuid("brand_id").references(() => brands.id, { onDelete: "cascade" }), // null = COMANET global
     productId: uuid("product_id").references(() => products.id, { onDelete: "cascade" }), // objectif produit (facultatif)
+    /** Objectif d'un client (CRM, migration 0045) : CA HT sell-in, marque facultative, jamais de produit. NULL = objectif marque / COMANET. */
+    clientId: uuid("client_id").references(() => clients.id, { onDelete: "cascade" }),
     year: integer("year").notNull(),
     month: integer("month"), // 1..12, null = objectif annuel
     amount: numeric("amount", { precision: 14, scale: 2 }).notNull(), // CA HT
@@ -3172,11 +3234,13 @@ export const objectives = pgTable(
     uniqueIndex("objectives_scope_uq").on(
       sql`coalesce(${t.brandId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
       sql`coalesce(${t.productId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
+      sql`coalesce(${t.clientId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
       t.year,
       sql`coalesce(${t.month}, 0)`,
     ),
     index("objectives_brand_idx").on(t.brandId),
     index("objectives_product_idx").on(t.productId),
+    index("objectives_client_idx").on(t.clientId).where(sql`client_id is not null`),
   ],
 );
 
@@ -3775,6 +3839,7 @@ export type ContentItem = typeof contentItems.$inferSelect;
 export type Import = typeof imports.$inferSelect;
 export type BudgetLine = typeof budgetLines.$inferSelect;
 export type Objective = typeof objectives.$inferSelect;
+export type ClientVisit = typeof clientVisits.$inferSelect;
 export type MedicalSpecialty = typeof medicalSpecialties.$inferSelect;
 export type MedicalSector = typeof medicalSectors.$inferSelect;
 export type MedicalDelegate = typeof medicalDelegates.$inferSelect;

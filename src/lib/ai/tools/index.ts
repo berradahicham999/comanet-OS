@@ -27,6 +27,7 @@ import { getInventoryStatus, getProductPerformance, getStockRisk, getTopSkus } f
 import { getSalesBreakdown, getSalesPerformance } from "./marketing-sales";
 import { getMarketingContext } from "./marketing-context";
 import { getDoctorProfile, getFieldControl } from "./medical";
+import { getClientPortfolio, getClientVisits } from "./crm";
 
 export type { AiTool, ToolAccess, ToolContext, ToolDeps, ToolResult, ToolCallLog } from "./types";
 
@@ -39,6 +40,8 @@ export const TOOLS: AiTool<any>[] = [
   getSalesPerformance, getSalesBreakdown, getMarketingContext,
   // Médical v2 (ordonnances, contrôle terrain)
   getDoctorProfile, getFieldControl,
+  // CRM commercial (portefeuilles, visites, chronologie client)
+  getClientPortfolio, getClientVisits,
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 /** Outils de l'Agent marketing, dans l'ordre d'appel conseillé pour « que pousser cette semaine ». */

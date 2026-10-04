@@ -22,6 +22,8 @@ import { activationRules } from "./activation-rules";
 import { analyticsRules } from "./analytics-rules";
 import { clientStockRules } from "./client-stock-rules";
 import { gestionRules } from "./gestion-rules";
+import { crmRules } from "./crm-rules";
+import { crmViewer, canSeePositions } from "@/lib/crm/access";
 import { dismissalsFor } from "./dismissals";
 import { isDismissed } from "./dismissals-shared";
 
@@ -49,6 +51,7 @@ export const RULES: Rule[] = [
   dataQualityRule,
   ...medicalRules,
   ...medicalFieldRules,
+  ...crmRules,
 ];
 
 async function buildContext(): Promise<RuleContext> {
@@ -68,7 +71,11 @@ export const allRecommendations = cache(async (): Promise<RecommendationWithStat
   }));
   // Alertes de contrôle terrain : seulement pour la direction et le manager de la déléguée concernée.
   const scope = await fieldScope().catch(() => ({ all: false, delegateIds: [] as string[] }));
-  const recs = results.flat().filter((r) => !r.fieldDelegateId || inFieldScope(scope, r.fieldDelegateId));
+  // Contrôle de présence des visites commerciales : direction et manager de la commerciale seulement.
+  const crm = await crmViewer().catch(() => null);
+  const recs = results.flat()
+    .filter((r) => !r.fieldDelegateId || inFieldScope(scope, r.fieldDelegateId))
+    .filter((r) => !r.crmUserId || (!!crm && canSeePositions(crm, r.crmUserId)));
   const keys = recs.map((r) => r.key);
   const [taskRows, dismissals] = await Promise.all([
     keys.length

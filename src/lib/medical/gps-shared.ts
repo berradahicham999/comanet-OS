@@ -1,5 +1,6 @@
 /**
- * Médical v2 — contrôle de présence d'une visite (pur, sans base, importable côté client).
+ * Contrôle de présence d'une visite (pur, sans base, importable côté client) : visites médicales (Médical v2)
+ * et visites commerciales (CRM, `src/lib/crm/visits.ts`), avec le même moteur.
  *
  * Seule définition de : distance entre deux points (`haversineM`), heure retenue d'un événement
  * (`eventTime`), durée d'une visite (`visitDurationMinutes`), vitesse implicite entre deux visites
@@ -148,8 +149,11 @@ export function verifyVisit(input: {
   previousStop: PreviousStop;
   autoClosed: boolean;
   settings: CheckSettings;
+  /** Lieu de référence dans les motifs : « cabinet » (médical, défaut) ou « point de vente » (CRM commercial). */
+  placeNoun?: string;
 }): VerificationResult {
   const { events, cabinet, previousStop, settings: s } = input;
+  const place = input.placeNoun ?? "cabinet";
   const reasons: string[] = [];
   let gpsMissing = false;
 
@@ -174,7 +178,7 @@ export function verifyVisit(input: {
     }
     if (cabinet) {
       const d = haversineM(p, cabinet);
-      if (d > s.radiusM) reasons.push(`${noun} à ${fmtM(d)} du cabinet (rayon ${fmtM(s.radiusM)}).`);
+      if (d > s.radiusM) reasons.push(`${noun} à ${fmtM(d)} du ${place} (rayon ${fmtM(s.radiusM)}).`);
     }
     const delay = sendDelayMs(e);
     if (delay > s.lateSyncHours * 3_600_000) reasons.push(`${noun} : envoi ${fmtH(delay)} après l'action (hors connexion).`);
@@ -182,8 +186,8 @@ export function verifyVisit(input: {
     if (skew > s.clockSkewMin * 60_000) reasons.push(`Horloge du téléphone décalée de ${fmtH(skew)} ${at}.`);
   }
 
-  if (!cabinet) reasons.push("Position du cabinet inconnue : présence non comparable.");
-  else if (!cabinet.validated) reasons.push("Position du cabinet pas encore validée.");
+  if (!cabinet) reasons.push(`Position du ${place} inconnue : présence non comparable.`);
+  else if (!cabinet.validated) reasons.push(`Position du ${place} pas encore validée.`);
 
   if (start && stop) {
     const a = pointOf(start);

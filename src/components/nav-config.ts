@@ -35,6 +35,9 @@ export const NAV: NavGroup[] = [
     items: [
       { href: "/ventes", label: "Ventes", icon: "ChartColumn", module: "ventes" },
       { href: "/clients", label: "Clients", icon: "Users", module: "clients" },
+      { href: "/clients/tournee", label: "Ma tournée", icon: "MapPinned", module: "clients", action: "create" },
+      { href: "/clients/visites", label: "Suivi des visites", icon: "CalendarCheck", module: "clients" },
+      { href: "/clients/portefeuilles", label: "Portefeuilles", icon: "IdCard", module: "clients", action: "edit" },
       { href: "/clients/stock", label: "Stock chez les clients", icon: "Store", module: "clients" },
       { href: "/produits", label: "Produits", icon: "Package", module: "produits" },
       { href: "/marques", label: "Marques", icon: "Tags", module: "produits" },
@@ -139,7 +142,8 @@ export function navForPermissions(perms: PermissionSet, flags?: FlagSet): NavGro
  */
 export function mobileTabsForPermissions(perms: PermissionSet, homePath: string, flags?: FlagSet): NavItem[] {
   const all = navForPermissions(perms, flags).flatMap((g) => g.items);
-  const prefer = [homePath, "/", "/actions", "/taches", "/ventes", "/marketing", "/reglementaire", "/terrain", "/medical"];
+  // Commerciale (accueil = ses commandes) : Ma tournée juste après.
+  const prefer = [homePath, ...(homePath.startsWith("/gestion/pieces") ? ["/clients/tournee"] : []), "/", "/actions", "/taches", "/ventes", "/marketing", "/reglementaire", "/terrain", "/medical"];
   const picked: NavItem[] = [];
   for (const href of prefer) {
     if (picked.length >= 4) break;

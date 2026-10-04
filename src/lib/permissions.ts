@@ -118,7 +118,7 @@ export async function resolveAccessFor(userId: string, legacyRole?: SessionUser[
 }
 
 async function resolveFromTables(userId: string): Promise<ResolvedAccess> {
-  const [permRows, scopeRows, flagRows, brandRows, clientRows] = await Promise.all([
+  const [permRows, scopeRows, flagRows, brandRows, clientRows, managedRows] = await Promise.all([
     db.execute<{ module: string; can_view: boolean; can_create: boolean; can_edit: boolean; can_validate: boolean }>(
       sql`select module, can_view, can_create, can_edit, can_validate from user_permissions where user_id = ${userId}::uuid`,
     ),
@@ -128,6 +128,9 @@ async function resolveFromTables(userId: string): Promise<ResolvedAccess> {
     db.execute<{ j: Record<string, boolean> }>(sql`select to_jsonb(f) as j from user_flags f where user_id = ${userId}::uuid`),
     db.execute<{ brand_id: string }>(sql`select brand_id from user_brand_assignments where user_id = ${userId}::uuid`),
     db.execute<{ client_id: string }>(sql`select client_id from user_client_assignments where user_id = ${userId}::uuid`),
+    // CRM commercial : le commercial attitré d'une fiche la voit toujours (son portefeuille), même hors de ses villes.
+    // Lecture tolérante : avant la migration 0045, la colonne existe déjà (0025) ; aucune erreur ne doit bloquer la connexion.
+    db.execute<{ client_id: string }>(sql`select id as client_id from clients where account_manager_id = ${userId}::uuid`).catch(() => ({ rows: [] as { client_id: string }[] })),
   ]);
   const { allBrands, cities } = await readCityScope(userId);
   const perms = matrixFromRows(
@@ -146,7 +149,7 @@ async function resolveFromTables(userId: string): Promise<ResolvedAccess> {
         overrideCommercial: !!f.override_commercial,
       }
     : noFlags();
-  const explicit = { brandIds: brandRows.rows.map((r) => r.brand_id), clientIds: clientRows.rows.map((r) => r.client_id), allBrands, cities };
+  const explicit = { brandIds: brandRows.rows.map((r) => r.brand_id), clientIds: [...new Set([...clientRows.rows, ...managedRows.rows].map((r) => r.client_id))], allBrands, cities };
   // Catalogue lu seulement si nécessaire : la plupart des comptes n'ont ni ville ni « toutes les marques ».
   const [allBrandRows, cityClientRows] = await Promise.all([
     allBrands ? db.execute<{ id: string }>(sql`select id from brands`) : null,

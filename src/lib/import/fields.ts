@@ -115,6 +115,8 @@ export const FIELDS: Record<ImportType, FieldDef[]> = {
     { key: "contact", label: "Contact", synonyms: ["contact", "interlocuteur", "ct contact"] },
     { key: "paymentDays", label: "Délai de paiement (jours)", synonyms: ["delai de paiement", "delai paiement", "echeance jours", "jours"] },
     { key: "discountPct", label: "Remise par défaut (%)", synonyms: ["remise", "remise %", "taux de remise", "remise client"] },
+    { key: "accountManager", label: "Commercial attitré (compte COMANET OS)", synonyms: ["commercial attitre", "commerciale attitree", "responsable du compte", "email commercial", "portefeuille"], hint: "Nom ou e-mail d'un compte ; inconnu = ligne signalée, fiche inchangée." },
+    { key: "visitFrequency", label: "Fréquence de visite (par mois)", synonyms: ["frequence de visite", "frequence visite", "visites par mois", "frequence mensuelle", "nb visites mois"], hint: "Nombre entier de 0 à 31 ; vide = inchangé." },
   ],
   PRODUCTS: [
     { key: "name", label: "Désignation", required: true, synonyms: ["designation", "nom produit", "produit", "article", "libelle", "nom"] },
@@ -155,7 +157,8 @@ export const FIELDS: Record<ImportType, FieldDef[]> = {
     { key: "date", label: "Date de la photo", synonyms: ["date", "date stock"] },
   ],
   OBJECTIVES: [
-    { key: "brand", label: "Marque", required: true, synonyms: ["marque", "brand", "gamme"] },
+    { key: "brand", label: "Marque", synonyms: ["marque", "brand", "gamme"], hint: "Obligatoire sauf pour un objectif client (colonne Client)." },
+    { key: "client", label: "Client (objectif par client)", synonyms: ["client", "point de vente", "code client", "pharmacie"], hint: "Renseigné : la ligne devient un objectif du client (CA HT), hors des totaux par marque." },
     { key: "productName", label: "Produit (facultatif)", synonyms: ["produit", "designation", "article", "nom produit"] },
     { key: "amount", label: "Objectif CA HT", required: true, synonyms: ["objectif ca 2026", "objectif ca", "objectif", "ca", "montant", "objectif ca ht"] },
     { key: "units", label: "Unités", synonyms: ["unites 2026", "unites", "quantite", "qte", "volume"] },

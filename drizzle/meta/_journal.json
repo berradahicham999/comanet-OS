@@ -309,6 +309,13 @@
       "when": 1789888560000,
       "tag": "0043_droits_commandes_reglements",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1790000000000,
+      "tag": "0045_crm_commercial",
+      "breakpoints": true
     }
   ]
 }
