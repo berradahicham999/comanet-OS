@@ -55,6 +55,11 @@ export type Recommendation = {
    * direction et de son manager (`inFieldScope()`), jamais des autres profils qui voient le module Médical.
    */
   fieldDelegateId?: string;
+  /**
+   * Alerte de contrôle de présence d'une visite commerciale (CRM) sur cette commerciale : visible seulement
+   * de la direction et de son manager (`canSeePositions()` de `src/lib/crm/access.ts`).
+   */
+  crmUserId?: string;
 };
 
 export type RecommendationWithState = Recommendation & {

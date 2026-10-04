@@ -1,6 +1,6 @@
 # Générateur d'actions marketing — architecture fonctionnelle et UX (04/10/2026)
 
-> **État** : livré sur `feat/action-generator` (migration 0045). Vérifié sur la base locale : génération Auracos /
+> **État** : livré sur `feat/action-generator` (migration 0046). Vérifié sur la base locale : génération Auracos /
 > Procollagenium / événementiel / 20 000 MAD (5 options), fiche, ajout au plan (activation + 11 tâches + 3 contenus,
 > budget 40 000 → 25 200 MAD), non-répétition, opportunités variées par marque, chemin campagne (dépenses prévues), mobile.
 

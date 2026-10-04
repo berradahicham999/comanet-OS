@@ -142,6 +142,8 @@ Modules actuels absorbés : `cockpit` et `actions` (visibles dès qu'un module e
 | administration | — | — |
 
 Portée ASSIGNED = filtre `brand_id ∈ mes marques` **ou** `client_id ∈ mes clients`, selon la table.
+« Mes clients » = clients assignés nommément, clients de mes villes, et (CRM commercial, migration 0045) clients dont
+je suis le commercial attitré (`clients.account_manager_id`).
 
 ## 5. Migration depuis l'existant (sans perte)
 

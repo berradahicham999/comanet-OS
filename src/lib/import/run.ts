@@ -339,6 +339,14 @@ async function importSales(rows: Record<string, unknown>[], mapping: Mapping, op
 /* ------------------------------- Clients ------------------------------ */
 
 async function importClients(rows: Record<string, unknown>[], mapping: Mapping, _o: ImportOptions, R: Resolver, out: ImportSummary) {
+  // CRM : commercial attitré reconnu par nom ou e-mail d'un compte actif.
+  const managers = mapping.accountManager
+    ? (await db.execute<{ id: string; name: string; email: string }>(sql`select id, name, email from users where active`)).rows
+    : [];
+  const managerOf = (v: string) => {
+    const k = normKey(v);
+    return managers.find((u) => u.email.toLowerCase() === v.trim().toLowerCase()) ?? managers.find((u) => normKey(u.name) === k) ?? null;
+  };
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
     const name = txt(r, mapping, "name");
@@ -360,6 +368,20 @@ async function importClients(rows: Record<string, unknown>[], mapping: Mapping, 
       try { await db.update(s.clients).set({ ...legal.set, updatedAt: new Date() }).where(eq(s.clients.id, id)); }
       catch (e) { out.errors.push({ row: i + 2, message: explainDbError(e) }); continue; }
     }
+    // CRM : jamais d'écrasement par du vide ; une valeur illisible est signalée, la fiche reste inchangée.
+    const crm: Partial<typeof s.clients.$inferInsert> = {};
+    const mgr = txt(r, mapping, "accountManager");
+    if (mgr) {
+      const u = managerOf(mgr);
+      if (u) crm.accountManagerId = u.id;
+      else out.warnings.push(`Ligne ${i + 2} : commercial « ${mgr} » inconnu (nom ou e-mail d'un compte actif attendu) — commercial attitré inchangé.`);
+    }
+    const freq = num(r, mapping, "visitFrequency");
+    if (freq !== null) {
+      if (Number.isInteger(freq) && freq >= 0 && freq <= 31) crm.visitFrequencyMonthly = freq;
+      else out.warnings.push(`Ligne ${i + 2} : fréquence de visite « ${freq} » invalide (entier de 0 à 31) — inchangée.`);
+    }
+    if (Object.keys(crm).length) await db.update(s.clients).set({ ...crm, updatedAt: new Date() }).where(eq(s.clients.id, id));
     if (R.clients.length > before) out.inserted++;
     else {
       // mise à jour des attributs connus
@@ -370,7 +392,7 @@ async function importClients(rows: Record<string, unknown>[], mapping: Mapping, 
       const rep = txt(r, mapping, "rep"); if (rep) set.salesRep = rep;
       const phone = txt(r, mapping, "phone"); if (phone) set.phone = phone;
       if (Object.keys(set).length) await db.update(s.clients).set({ ...set, needsReview: false }).where(eq(s.clients.id, id));
-      if (Object.keys(set).length || Object.keys(legal.set).length) out.updated++;
+      if (Object.keys(set).length || Object.keys(legal.set).length || Object.keys(crm).length) out.updated++;
     }
   }
 }
@@ -467,8 +489,25 @@ async function importObjectives(rows: Record<string, unknown>[], mapping: Mappin
   let lastBrand: string | null = null;
   const brandTotals = new Map<string, { amount: number; units: number }>();
   const unmatched: string[] = [];
+  const unknownClients: string[] = [];
+  if (!mapping.brand && !mapping.client) { out.errors.push({ row: 1, message: "Associez la colonne « Marque » (objectifs marque / produit) ou « Client » (objectifs par client)." }); return; }
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
+    // Objectif client (CRM) : ligne à part, jamais additionnée aux totaux par marque.
+    const clientValue = mapping.client ? txt(r, mapping, "client") : null;
+    if (clientValue && !normKey(clientValue).startsWith("TOTAL")) {
+      const amount = num(r, mapping, "amount");
+      if (amount === null || amount <= 0) continue;
+      const clientId = await R.client(clientValue, null, clientValue, null, false);
+      if (!clientId) { unknownClients.push(clientValue); continue; }
+      const b = txt(r, mapping, "brand");
+      const brandId = b ? R.brand(b) : null;
+      if (b && !brandId) { out.errors.push({ row: i + 2, message: `Marque « ${b} » inconnue pour l'objectif de ${clientValue}.` }); continue; }
+      const month = num(r, mapping, "month");
+      await upsertObjective({ brandId, productId: null, clientId, year: num(r, mapping, "year") ?? year, month: month ? Math.round(month) : null, amount, units: num(r, mapping, "units") });
+      out.inserted++;
+      continue;
+    }
     let brandValue: string | null = txt(r, mapping, "brand");
     if (brandValue && normKey(brandValue).startsWith("TOTAL")) continue; // lignes de total
     if (!brandValue) brandValue = lastBrand; else lastBrand = brandValue;
@@ -509,13 +548,14 @@ async function importObjectives(rows: Record<string, unknown>[], mapping: Mappin
   for (const [key, t] of brandTotals) { const [, y, m] = key.split("|"); const k = `${y}|${m}`; globals.set(k, (globals.get(k) ?? 0) + t.amount); }
   for (const [k, amount] of globals) { const [y, m] = k.split("|"); await upsertObjective({ brandId: null, productId: null, year: Number(y), month: m ? Number(m) : null, amount, units: null }); }
   if (unmatched.length) out.warnings.push(`${unmatched.length} objectif(s) produit non rapproché(s) (comptés dans l'objectif marque) : ${unmatched.slice(0, 15).join(" ; ")}${unmatched.length > 15 ? "…" : ""}`);
+  if (unknownClients.length) out.warnings.push(`${unknownClients.length} objectif(s) client ignoré(s), client introuvable (nom ou code) : ${unknownClients.slice(0, 15).join(" ; ")}${unknownClients.length > 15 ? "…" : ""}`);
 }
 
-async function upsertObjective(v: { brandId: string | null; productId: string | null; year: number; month: number | null; amount: number; units: number | null }) {
+async function upsertObjective(v: { brandId: string | null; productId: string | null; clientId?: string | null; year: number; month: number | null; amount: number; units: number | null }) {
   await db.execute(sql`
-    insert into objectives (brand_id, product_id, year, month, amount, units)
-    values (${v.brandId}::uuid, ${v.productId}::uuid, ${v.year}, ${v.month}, ${v.amount.toFixed(2)}::numeric, ${v.units === null ? null : v.units.toFixed(2)}::numeric)
-    on conflict (coalesce(brand_id, '00000000-0000-0000-0000-000000000000'::uuid), coalesce(product_id, '00000000-0000-0000-0000-000000000000'::uuid), year, coalesce(month, 0))
+    insert into objectives (brand_id, product_id, client_id, year, month, amount, units)
+    values (${v.brandId}::uuid, ${v.productId}::uuid, ${v.clientId ?? null}::uuid, ${v.year}, ${v.month}, ${v.amount.toFixed(2)}::numeric, ${v.units === null ? null : v.units.toFixed(2)}::numeric)
+    on conflict (coalesce(brand_id, '00000000-0000-0000-0000-000000000000'::uuid), coalesce(product_id, '00000000-0000-0000-0000-000000000000'::uuid), coalesce(client_id, '00000000-0000-0000-0000-000000000000'::uuid), year, coalesce(month, 0))
     do update set amount = excluded.amount, units = excluded.units`);
 }
 

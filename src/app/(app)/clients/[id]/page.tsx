@@ -10,22 +10,27 @@ import { monthlySeries, ORDER_KEY } from "@/lib/analytics";
 import { PageHeader, Card, Badge, Delta, Section, PriorityBadge, StatusBadge, Tabs } from "@/components/ui";
 import { ClientStockTab } from "./stock-tab";
 import { MonthlyRevenueChart } from "@/components/charts";
-import { fmtMAD, fmtNum, fmtDate, fmtDateShort, addDays, iso } from "@/lib/format";
+import { fmtMAD, fmtNum, fmtDate, fmtDateShort, addDays, iso, today } from "@/lib/format";
 import { updateClient } from "../actions";
 import { readingsForClient } from "@/lib/client-stock";
 import { SECTORS, cityToSector } from "@/lib/sectors";
 import { ClientInfosTab } from "./infos-tab";
 import { billingReadiness } from "@/lib/gestion/clients-shared";
+import { ClientCrmTab } from "./crm-tab";
+import { clientCrmSummary } from "@/lib/crm/portfolio";
+import { headlineObjective } from "@/lib/crm/objectives";
+import { getSettings } from "@/lib/settings";
+import { monthOf } from "@/lib/crm/portfolio-shared";
 
 export const dynamic = "force-dynamic";
 
 const REC_TONE: Record<string, "red" | "orange" | "blue" | "green" | "accent" | "gray"> = { RELANCE: "blue", REACTIVATION: "red", ANALYSE: "orange", ANIMATION: "accent", DEVELOPPEMENT: "green", NONE: "gray" };
 
-export default async function ClientPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; releve?: string; brand?: string; sort?: string; done?: string; error?: string; merge?: string; mergeq?: string }> }) {
+export default async function ClientPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; releve?: string; brand?: string; sort?: string; done?: string; error?: string; merge?: string; mergeq?: string; kinds?: string }> }) {
   await requireAccess("clients");
   const { id } = await props.params;
   const sp = await props.searchParams;
-  const tab = sp.tab === "stock" ? "stock" : sp.tab === "infos" ? "infos" : "apercu";
+  const tab = sp.tab === "stock" ? "stock" : sp.tab === "infos" ? "infos" : sp.tab === "crm" ? "crm" : "apercu";
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const client = await db.query.clients.findFirst({ where: eq(clientsTable.id, id) });
   if (!client) notFound();
@@ -53,6 +58,10 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
     readingsForClient(id),
     canDo("clients", "edit"),
   ]);
+  // CRM commercial : rappel du suivi sur la vue d'ensemble.
+  const crmToday = iso(today());
+  const crm = tab === "apercu" ? await clientCrmSummary(id, monthOf(crmToday), crmToday, await getSettings()).catch(() => null) : null;
+  const crmObjective = headlineObjective(crm?.objective);
   const stockProducts = new Set(stockReadings.map((r) => r.productId)).size;
   const intel = intelList[0];
   if (!intel) notFound();
@@ -68,15 +77,26 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
         subtitle={[client.legalName && client.legalName !== client.name ? client.legalName : null, client.accountCode ? `Code ${client.accountCode}` : client.code, client.type, client.city, client.sector ? `Secteur : ${client.sector}` : null, client.salesRep ? `Commercial : ${client.salesRep}` : null].filter(Boolean).join(" · ")}
         actions={<Link href={`/taches/nouvelle?entityType=client&entityId=${id}&title=${encodeURIComponent(rec.title + " — " + client.name)}`} className="btn-primary btn-sm">+ Tâche</Link>}
       >
-        <Tabs current={tab === "stock" ? `/clients/${id}?tab=stock` : tab === "infos" ? `/clients/${id}?tab=infos` : `/clients/${id}`} tabs={[{ href: `/clients/${id}`, label: "Vue d'ensemble" }, { href: `/clients/${id}?tab=infos`, label: billing.ready ? "Identité & conditions" : "Identité & conditions ⚠︎" }, { href: `/clients/${id}?tab=stock`, label: "Stock en point de vente", count: stockProducts }]} />
+        <Tabs current={tab === "stock" ? `/clients/${id}?tab=stock` : tab === "infos" ? `/clients/${id}?tab=infos` : tab === "crm" ? `/clients/${id}?tab=crm` : `/clients/${id}`} tabs={[{ href: `/clients/${id}`, label: "Vue d'ensemble" }, { href: `/clients/${id}?tab=crm`, label: "Suivi commercial" }, { href: `/clients/${id}?tab=infos`, label: billing.ready ? "Identité & conditions" : "Identité & conditions ⚠︎" }, { href: `/clients/${id}?tab=stock`, label: "Stock en point de vente", count: stockProducts }]} />
       </PageHeader>
 
-      {tab === "infos" ? <ClientInfosTab client={client} billing={billing} sp={sp} /> : tab === "stock" ? <ClientStockTab clientId={id} clientName={client.name} sp={sp} /> : (<>
+      {tab === "infos" ? <ClientInfosTab client={client} billing={billing} sp={sp} /> : tab === "stock" ? <ClientStockTab clientId={id} clientName={client.name} sp={sp} /> : tab === "crm" ? <ClientCrmTab clientId={id} sp={sp} /> : (<>
       {/* Recommandation */}
       <div className={`card card-pad mb-4 border-l-4`} style={{ borderLeftColor: rec.kind === "NONE" ? "#d6d6d1" : rec.kind === "REACTIVATION" ? "#dc2626" : rec.kind === "ANALYSE" ? "#ea580c" : rec.kind === "RELANCE" ? "#2563eb" : "#0f766e" }}>
         <div className="flex flex-wrap items-center gap-2 mb-1"><span className="label">Plan d&apos;action</span><Badge tone={REC_TONE[rec.kind]}>{rec.title}</Badge></div>
         <p className="text-[14px]">{rec.detail}</p>
       </div>
+
+      {crm && (
+        <Link href={`/clients/${id}?tab=crm`} className="card px-4 py-3 mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] hover:border-line-2">
+          <span className="label">Suivi commercial</span>
+          <span>{crm.managerName ? `Commercial attitré : ${crm.managerName}` : <span className="text-muted">Aucun commercial attitré</span>}</span>
+          <span>{crm.frequency === null ? <span className="text-muted">fréquence non définie</span> : `${crm.doneThisMonth}/${crm.frequency} visite(s) ce mois`}</span>
+          <span className="text-muted">dernière visite {crm.lastVisit ? fmtDateShort(crm.lastVisit) : "jamais"}</span>
+          {crmObjective && <span>objectif du mois {crmObjective.pct === null ? "—" : `${Math.round(crmObjective.pct)} %`}</span>}
+          <span className="ml-auto text-accent font-medium">Ouvrir →</span>
+        </Link>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <Card><div className="label">CA 12 mois</div><div className="kpi mt-2">{fmtMAD(intel.revenue12, { compact: true })}</div><div className="mt-2 text-[12px] text-muted flex items-center gap-1"><Delta value={intel.growthPct} /> 3 mois vs 3 mois préc.</div></Card>

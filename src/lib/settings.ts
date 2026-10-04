@@ -87,6 +87,8 @@ export type ComanetSettings = {
   clientStock: ClientStockSettings;
   /** Médical v2 : chrono de visite, contrôle GPS, ordonnances (Paramétrage médical). */
   medicalField: MedicalFieldSettings;
+  /** CRM commercial : fréquences par défaut, alertes de visite et d'objectif client, contrôle de présence des visites. */
+  crm: CrmSettings;
   /** Gestion commerciale : identité de la société imprimée sur les pièces, politiques, bascule depuis Sage. */
   gestion: GestionSettings;
   /** P&L de gestion : quels sites de vente sont du CA COMANET, lesquels sont des prestations commissionnées. */
@@ -397,6 +399,79 @@ export const DEFAULT_MEDICAL_FIELD: MedicalFieldSettings = {
   workDays: [1, 2, 3, 4, 5, 6],
 };
 
+/**
+ * CRM commercial (`src/lib/crm/`). Les fréquences par type ne s'appliquent jamais seules : elles sont
+ * proposées sur une sélection de clients (Clients → Portefeuilles). Les seuils de contrôle de présence
+ * reprennent la forme de ceux du médical (même moteur `verifyVisit()`), réglés à part pour les points de vente.
+ */
+export type CrmSettings = {
+  /** Visites par mois proposées par type de client (appliquées à la demande seulement). */
+  defaultFrequencyByType: { PHARMACIE: number; PARAPHARMACIE: number; GROSSISTE: number; AUTRE: number };
+  /** Types de contact qui comptent dans la progression (par défaut : la visite physique seule). */
+  countedKinds: ("VISITE" | "APPEL" | "MESSAGE")[];
+  /** À partir de ce jour du mois, un client prévu et jamais visité ce mois devient une alerte. */
+  lateVisitDayOfMonth: number;
+  /** Portefeuille en retard : progression inférieure de N points à l'avancement du mois. */
+  paceGapPts: number;
+  /** Objectif client en retard : réalisé < objectif × avancement du mois × ce ratio, à partir de `objectiveCheckFromDay`. */
+  objectiveLateRatio: number;
+  objectiveCheckFromDay: number;
+  /** Commande « prise pendant la visite » : saisie par la commerciale chez ce client jusqu'à N minutes après la fin. */
+  orderWindowMinutes: number;
+  /** Ma tournée : nombre de clients suggérés « à voir aujourd'hui ». */
+  tourSuggestions: number;
+  /** Assortiment manquant : clients comparables minimum, part minimale d'entre eux qui achètent le produit, nombre de produits proposés. */
+  assortmentMinPeers: number;
+  assortmentMinShare: number;
+  assortmentTopN: number;
+  /** Contrôle de présence (mêmes notions que `medicalField`). */
+  radiusM: number;
+  maxAccuracyM: number;
+  maxStartStopM: number;
+  minDurationMin: number;
+  maxDurationMin: number;
+  lateSyncHours: number;
+  clockSkewMin: number;
+  maxSpeedKmh: number;
+  autoCloseHours: number;
+  gpsTimeoutS: number;
+};
+
+export const DEFAULT_CRM: CrmSettings = {
+  defaultFrequencyByType: { PHARMACIE: 1, PARAPHARMACIE: 1, GROSSISTE: 2, AUTRE: 0 },
+  countedKinds: ["VISITE"],
+  lateVisitDayOfMonth: 20,
+  paceGapPts: 25,
+  objectiveLateRatio: 0.7,
+  objectiveCheckFromDay: 15,
+  orderWindowMinutes: 120,
+  tourSuggestions: 3,
+  assortmentMinPeers: 5,
+  assortmentMinShare: 0.4,
+  assortmentTopN: 5,
+  radiusM: 150,
+  maxAccuracyM: 100,
+  maxStartStopM: 300,
+  minDurationMin: 3,
+  maxDurationMin: 120,
+  lateSyncHours: 2,
+  clockSkewMin: 10,
+  maxSpeedKmh: 80,
+  autoCloseHours: 4,
+  gpsTimeoutS: 20,
+};
+
+export function mergeCrm(stored: Partial<CrmSettings> | null | undefined): CrmSettings {
+  const d = DEFAULT_CRM;
+  if (!stored) return d;
+  return {
+    ...d,
+    ...stored,
+    defaultFrequencyByType: { ...d.defaultFrequencyByType, ...(stored.defaultFrequencyByType ?? {}) },
+    countedKinds: Array.isArray(stored.countedKinds) && stored.countedKinds.length ? stored.countedKinds : d.countedKinds,
+  };
+}
+
 export type ClientStockSettings = {
   /** Relevé « frais » (vert) s'il a strictement moins de N jours. */
   freshDays: number;
@@ -701,6 +776,7 @@ export const DEFAULT_SETTINGS: ComanetSettings = {
   marketingIntel: DEFAULT_MARKETING_INTEL,
   clientStock: DEFAULT_CLIENT_STOCK,
   medicalField: DEFAULT_MEDICAL_FIELD,
+  crm: DEFAULT_CRM,
   gestion: DEFAULT_GESTION,
   pnl: DEFAULT_PNL,
   forecast: DEFAULT_FORECAST,
@@ -730,6 +806,7 @@ export function mergeSettings(stored: Partial<ComanetSettings> | null | undefine
     marketingIntel: { ...DEFAULT_MARKETING_INTEL, ...(stored.marketingIntel ?? {}) },
     clientStock: { ...DEFAULT_CLIENT_STOCK, ...(stored.clientStock ?? {}) },
     medicalField: { ...DEFAULT_MEDICAL_FIELD, ...(stored.medicalField ?? {}), tourWeights: { ...DEFAULT_MEDICAL_FIELD.tourWeights, ...(stored.medicalField?.tourWeights ?? {}) } },
+    crm: mergeCrm(stored.crm),
     gestion: mergeGestion(stored.gestion),
     pnl: { ...DEFAULT_PNL, ...(stored.pnl ?? {}) },
     forecast: mergeForecast(stored.forecast),

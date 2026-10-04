@@ -120,8 +120,8 @@ async function objectiveFor(range: Range, brandIds: string[] | null | undefined)
     select o.brand_id::text as brand_id,
            sum(case when o.month is not null then o.amount / days.days_in_month else o.amount / (case when (o.year % 4 = 0 and o.year % 100 <> 0) or o.year % 400 = 0 then 366 else 365 end) end)::float8 as amount
     from objectives o join days on days.year = o.year and (o.month is null or o.month = days.m)
-    where o.product_id is null and ${scope}
-      and not (o.month is null and exists (select 1 from objectives m where m.brand_id = o.brand_id and m.year = o.year and m.product_id is null and m.month = days.m))
+    where o.product_id is null and o.client_id is null and ${scope}
+      and not (o.month is null and exists (select 1 from objectives m where m.brand_id = o.brand_id and m.year = o.year and m.product_id is null and m.client_id is null and m.month = days.m))
     group by 1`);
   return new Map(r.rows.map((x) => [x.brand_id, Number(x.amount)]));
 }

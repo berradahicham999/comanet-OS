@@ -80,7 +80,7 @@ export async function qualityReport(): Promise<QualityReport> {
     one(sql`select count(*)::int as n, (select count(*) from brands where active and merged_into_id is null)::int as total, ${samplesSql(sql`b.name`)} as samples
              from brands b where b.active and b.merged_into_id is null and not exists (select 1 from budgets bu where bu.brand_id = b.id and bu.year = ${year} and bu.amount > 0)`),
     one(sql`select count(*)::int as n, (select count(*) from brands where active and merged_into_id is null)::int as total, ${samplesSql(sql`b.name`)} as samples
-             from brands b where b.active and b.merged_into_id is null and not exists (select 1 from objectives o where o.brand_id = b.id and o.year = ${year} and o.product_id is null)`),
+             from brands b where b.active and b.merged_into_id is null and not exists (select 1 from objectives o where o.brand_id = b.id and o.year = ${year} and o.product_id is null and o.client_id is null)`),
     one(sql`select count(*)::int as n, (select count(*) from products where active)::int as total, ${samplesSql(sql`p.name`)} as samples from products p where p.active and p.cost_price is null`),
     one(sql`select count(*)::int as n, null::int as total, ${samplesSql(sql`s.source_label`)} as samples from fact_marketing_spend s where s.source_kind = 'SAMPLE' and s.source_ref = 'PRIX_INCONNU'`),
     one(sql`select coalesce((current_date - max(date))::int, 9999) as n, null::int as total, array[coalesce(max(date)::text, 'aucun instantané')] as samples from stock_snapshots`),

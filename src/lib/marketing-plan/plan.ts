@@ -59,7 +59,7 @@ export async function listPlans(brandIds: string[] | null): Promise<PlanSummary[
   const r = await db.execute(sql`
     select p.id, p.brand_id, b.name as brand_name, b.color as brand_color, p.name, p.period_start::text as period_start, p.period_end::text as period_end, p.year, p.status::text as status,
       (select amount::float8 from budgets bu where bu.brand_id = p.brand_id and bu.year = p.year) as budget,
-      (select amount::float8 from objectives o where o.brand_id = p.brand_id and o.product_id is null and o.year = p.year and o.month is null) as revenue_target,
+      (select amount::float8 from objectives o where o.brand_id = p.brand_id and o.product_id is null and o.client_id is null and o.year = p.year and o.month is null) as revenue_target,
       coalesce((select sum(amount) from budget_lines bl where bl.brand_id = p.brand_id and bl.year = p.year), 0)::float8 as allocated,
       (select count(*) from marketing_axes a where a.plan_id = p.id)::int as axes,
       (select count(*) from marketing_actions ma join tasks t on t.id = ma.task_id where ma.plan_id = p.id and t.status in ('TODO','IN_PROGRESS','BLOCKED'))::int as open_actions
@@ -84,7 +84,7 @@ export async function getPlan(id: string): Promise<PlanDetail | null> {
   if (!p) return null;
   const [budgetRow, objectiveRow, lineRows, byCat, consumption, objRows, axisRows, monthRows, actions] = await Promise.all([
     db.query.budgets.findFirst({ where: and(eq(budgets.brandId, p.brandId), eq(budgets.year, p.year)) }),
-    db.query.objectives.findFirst({ where: and(eq(objectives.brandId, p.brandId), isNull(objectives.productId), eq(objectives.year, p.year), isNull(objectives.month)) }),
+    db.query.objectives.findFirst({ where: and(eq(objectives.brandId, p.brandId), isNull(objectives.productId), isNull(objectives.clientId), eq(objectives.year, p.year), isNull(objectives.month)) }),
     db.select().from(budgetLines).where(and(eq(budgetLines.brandId, p.brandId), eq(budgetLines.year, p.year))),
     budgetByCategory(p.year, p.brandId),
     budgetConsumption(p.year, p.brandId),
@@ -199,7 +199,7 @@ export async function savePlan(input: PlanInput, actor: AuditActor, id?: string 
       if (!before || Number(before.amount) !== input.budget) await audit({ actor, action: before ? "UPDATE" : "CREATE", module: "budgets", entity: "budget", label: `Budget ${input.year}`, before: before ? { amount: Number(before.amount) } : undefined, after: { amount: input.budget, planId } }, tx);
     }
     if (input.revenueTarget !== undefined && input.revenueTarget !== null && input.revenueTarget > 0) {
-      const before = await tx.query.objectives.findFirst({ where: and(eq(objectives.brandId, input.brandId), isNull(objectives.productId), eq(objectives.year, input.year), isNull(objectives.month)) });
+      const before = await tx.query.objectives.findFirst({ where: and(eq(objectives.brandId, input.brandId), isNull(objectives.productId), isNull(objectives.clientId), eq(objectives.year, input.year), isNull(objectives.month)) });
       if (before) await tx.update(objectives).set({ amount: input.revenueTarget.toFixed(2) }).where(eq(objectives.id, before.id));
       else await tx.insert(objectives).values({ brandId: input.brandId, productId: null, year: input.year, month: null, amount: input.revenueTarget.toFixed(2) });
       if (!before || Number(before.amount) !== input.revenueTarget) await audit({ actor, action: before ? "UPDATE" : "CREATE", module: "marketing", entity: "objective", label: `CA objectif ${input.year}`, before: before ? { amount: Number(before.amount) } : undefined, after: { amount: input.revenueTarget, planId } }, tx);

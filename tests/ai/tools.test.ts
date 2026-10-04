@@ -131,13 +131,14 @@ type Ko = { available: false; reason: string; howToFix: string };
 /* ------------------------------ Registre ------------------------------ */
 
 describe("registre des outils", () => {
-  test("les douze outils du plan, get_ads_intelligence, les dix outils de l'Agent marketing, les deux outils médicaux et les trois outils Marketing OS sont présents, triés par nom", () => {
+  test("les douze outils du plan, get_ads_intelligence, les dix outils de l'Agent marketing, les deux outils médicaux, les trois outils Marketing OS et les deux outils CRM sont présents, triés par nom", () => {
     assert.deepEqual(TOOL_NAMES, [...TOOL_NAMES].sort());
     for (const n of ["get_sales_summary", "get_client_intelligence", "get_terrain_summary", "get_stock_coverage", "get_marketing_budget", "get_ads_performance", "get_regulatory_alerts", "get_action_center", "get_tasks", "search_entities", "propose_task", "propose_report"]) assert.ok(TOOL_NAMES.includes(n), n);
     for (const n of ["get_brand_overview", "get_sales_performance", "get_sales_breakdown", "get_sales_targets", "get_inventory_status", "get_stock_risk", "get_top_skus", "get_product_performance", "get_marketing_context", "get_marketing_recommendations"]) assert.ok(TOOL_NAMES.includes(n), n);
     for (const n of ["get_doctor_profile", "get_field_control"]) assert.ok(TOOL_NAMES.includes(n), n);
     for (const n of ["get_marketing_plan", "get_marketing_actions", "get_unified_decisions", "generate_marketing_actions"]) assert.ok(TOOL_NAMES.includes(n), n);
-    assert.equal(TOOLS.length, 29);
+    for (const n of ["get_client_portfolio", "get_client_visits"]) assert.ok(TOOL_NAMES.includes(n), n);
+    assert.equal(TOOLS.length, 31);
   });
   test("chaque schéma JSON est un objet fermé sans $schema, avec descriptions", () => {
     for (const d of toolDefinitions(TOOLS)) {
@@ -402,5 +403,54 @@ describe("Outils médicaux (Médical v2)", () => {
     assert.equal(field.action, "validate");
     assert.equal(doctor.action, "view");
     assert.equal(field.module, "medical");
+  });
+});
+
+describe("Outils CRM commercial", () => {
+  const viewer = (over: Partial<import("@/lib/crm/access-shared").CrmViewer> = {}) => ({ userId: "u-saliha", name: "Saliha", admin: false, all: false, managedIds: [], canCreate: true, canEdit: false, canValidate: false, ...over });
+  const portfolio = {
+    month: "2026-09", elapsedPct: 30,
+    clients: [
+      { id: "c1", name: "Pharmacie Atlas", city: "Marrakech", sector: null, type: "PHARMACIE", frequency: 2, managerId: "u-saliha", managerName: "Saliha", doneThisMonth: 0, contactsThisMonth: 0, remaining: 2, lastVisit: null, nextPlanned: null, plannedToday: null, objective: { global: { brandId: null, brandName: null, target: 10_000, source: "MENSUEL" as const, realized: 1000, pct: 10, verdict: "EN_RETARD" as const }, brands: [], realized: 1000 }, daysUntilNextOrder: -5, lastOrder: "2026-08-01", segment: "STABLE", stockAging: "never" as const, gpsStatus: "A_CONFIRMER" as const },
+    ],
+    progress: { expected: 2, counted: 0, done: 0, pct: 0, followed: 1, complete: 0, notVisited: 1, undefinedFrequency: 0 },
+    pace: { kind: "EN_RETARD" as const, label: "En retard de 1 visite", behind: 1, expectedToDate: 0.6 },
+    byCity: [{ city: "Marrakech", clients: 1, progress: { expected: 2, counted: 0, done: 0, pct: 0, followed: 1, complete: 0, notVisited: 1, undefinedFrequency: 0 } }],
+  };
+  const crmDeps = (v = viewer()) => ({
+    crm: {
+      viewer: async () => v,
+      findCommercial: async (q: string) => (/hanane/i.test(q) ? { id: "u-hanane", name: "Hanane" } : null),
+      portfolio: async () => portfolio,
+      suggestions: async () => [{ clientId: "c1", name: "Pharmacie Atlas", city: "Marrakech", reasons: ["encore 2 visites à faire ce mois"] }],
+      team: async () => { throw new Error("non attendu"); },
+      timeline: async () => [{ date: "2026-09-01", at: null, kind: "VISITE" as const, title: "Visite · Effectuée", detail: "Commande prise", who: "Saliha", href: "/clients/visites/v1", tone: "green" as const }],
+      brief: async () => ({
+        client: { id: "c1", name: "Pharmacie Atlas", city: "Marrakech", type: "PHARMACIE", contactName: null, phone: null }, lastVisit: null,
+        rhythm: { lastOrder: "2026-08-01", avgIntervalDays: 30, daysUntilNext: -5, revenue12: 120_000, segment: "STABLE" }, usualProducts: [], lastReading: null, objective: null,
+        receivables: { outstanding: "5000.00", overdue: "1000.00", invoices: 2, oldestDaysLate: 12, lastPayment: null }, missing: { peers: 0, basis: "—", items: [] }, openTasks: [], salesUpTo: "2026-08-31",
+      }),
+    },
+  });
+
+  test("sa propre progression, sans aucune position ni heure", async () => {
+    const r = ok<Ok>(await executeTool("get_client_portfolio", {}, ctx({ now: new Date("2026-09-09T12:00:00Z") }, undefined, crmDeps() as never)));
+    const json = JSON.stringify(r.data);
+    assert.match(json, /"progress_pct":0/);
+    assert.match(json, /En retard de 1 visite/);
+    assert.ok(!/"(lat|lng|gps[a-z_]*|started_at|ended_at|accuracy_m|distance[a-z_]*)"/i.test(json), json);
+    assert.equal((r.data.to_see_first as unknown[]).length, 1);
+  });
+  test("le portefeuille d'une autre commerciale est refusé sans droit de suivi", async () => {
+    const r = (await executeTool("get_client_portfolio", { commercial: "Hanane" }, ctx({}, undefined, crmDeps() as never))) as Ko;
+    assert.equal(r.available, false);
+    assert.match(r.reason, /réservé/);
+  });
+  test("fiche client : hors portée refusée, encours masqué sans droits sur les règlements", async () => {
+    const out = (await executeTool("get_client_visits", { client: "Atlas" }, ctx({ access: access({ clientIds: ["autre"] }) }, undefined, crmDeps() as never))) as Ko;
+    assert.equal(out.available, false);
+    const r = ok<Ok>(await executeTool("get_client_visits", { client: "Atlas" }, ctx({}, undefined, crmDeps() as never)));
+    assert.equal(r.data.receivables, "non accessible");
+    assert.equal((r.data.timeline as unknown[]).length, 1);
   });
 });

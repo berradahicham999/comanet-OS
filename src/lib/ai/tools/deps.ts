@@ -23,7 +23,13 @@ import { getRecommendations } from "@/lib/rules";
 import { listTasks } from "@/lib/tasks";
 import { searchEntities } from "@/lib/search";
 import { normKey } from "@/lib/import/normalize";
-import type { MedicalToolDeps, Ref, RegulatoryRow, ToolDeps } from "./types";
+import type { CrmToolDeps, MedicalToolDeps, Ref, RegulatoryRow, ToolDeps } from "./types";
+import { getSettings } from "@/lib/settings";
+import { iso, today } from "@/lib/format";
+import { crmViewerFor } from "@/lib/crm/access";
+import { portfolioOf, teamOverview, tourSuggestions } from "@/lib/crm/portfolio";
+import { clientTimeline } from "@/lib/crm/timeline";
+import { clientVisitBrief } from "@/lib/crm/intelligence";
 import { doctorNameScore, doctorNameTokens } from "@/lib/medical/matching";
 import { doctorBrief } from "@/lib/medical/prescriptions";
 import { fieldScopeOfUser } from "@/lib/medical/field-access";
@@ -148,10 +154,38 @@ const medicalDeps: MedicalToolDeps = {
   },
 };
 
+/** CRM commercial : mêmes fonctions que les écrans (`src/lib/crm/`), sans aucune position GPS. */
+const crmDeps: CrmToolDeps = {
+  viewer: (userId, userName, perms) => crmViewerFor(userId, userName, perms),
+  async findCommercial(query) {
+    const r = await db.execute<{ id: string; name: string }>(sql`
+      select u.id, u.name from users u where u.active and (
+        exists (select 1 from clients c where c.account_manager_id = u.id) or exists (select 1 from client_visits cv where cv.user_id = u.id))`);
+    const k = normKey(query);
+    const hit = r.rows.find((u) => normKey(u.name) === k) ?? r.rows.find((u) => normKey(u.name).includes(k));
+    return hit ? { id: hit.id, name: hit.name } : null;
+  },
+  async portfolio(userId, month) {
+    return portfolioOf(userId, month, iso(today()), await getSettings());
+  },
+  async suggestions(p) {
+    const s = (await getSettings()).crm;
+    return tourSuggestions(p, iso(today()), { ...s, tourSuggestions: Math.max(5, s.tourSuggestions) }).map((x) => ({ clientId: x.clientId, name: x.name, city: x.city, reasons: x.reasons }));
+  },
+  async team(viewer, month, city) {
+    return teamOverview(viewer, month, iso(today()), await getSettings(), { city });
+  },
+  timeline: (clientId, limit) => clientTimeline(clientId, { limit }),
+  async brief(clientId) {
+    return clientVisitBrief(clientId, await getSettings());
+  },
+};
+
 export const realDeps: ToolDeps = {
   medical: medicalDeps,
   // Marketing OS : plan, actions et décisions unifiées (lecture seule ; `src/lib/marketing-plan/`, `src/lib/decisions/`).
   marketingPlan: { listPlans: (ids) => listPlans(ids), getPlan: (id) => getPlan(id), listActions: (f) => listActions(f), decisions: (scope) => buildUnifiedDecisions(scope), generateActions: async (ctx, input, brandName) => (await runGenerator(ctx, input, brandName, { maxOptions: 5 })).result },
+  crm: crmDeps,
   // Ventes, objectifs, stock, catalogue, budget consommé, publicité, activité marketing : câblage de la couche Marketing Intelligence.
   ...realIntelDeps,
   findBrand, findClient, findProduct, findUser, clientIdsInCity,

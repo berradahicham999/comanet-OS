@@ -32,6 +32,8 @@ GESTION_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import
                                          # intégration gestion commerciale (journal, numérotation, ventes, achats, inventaires, règlements, bascule) — jamais sur la prod
 MEDICAL_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/medical-integration.ts
                                          # intégration Médical v2 (chrono, GPS, hors connexion, corrections, ordonnances) — jamais sur la prod
+CRM_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/crm-integration.ts
+                                         # intégration CRM commercial (portefeuilles, chrono, GPS, objectifs client, fusion, règles, imports) — jamais sur la prod
 ```
 
 Variables d'environnement : `DATABASE_URL`, `DATABASE_SSL`, `SESSION_SECRET`, `SETUP_KEY`,
@@ -58,10 +60,11 @@ src/lib/content/      planning éditorial (référentiels, workflow, notificatio
 src/lib/activations/  activations marketing hors digital (référentiels, workflow, budget, inventaire, ROI, démo)
 src/lib/medical/      médical (médecins, visites, chrono et GPS, ordonnances, analyses)
 src/lib/gestion/      gestion commerciale (montants exacts, numérotation, journal de stock, clients, fournisseurs, préparation de la bascule)
+src/lib/crm/          CRM commercial (portefeuilles, fréquence, visites chronométrées, objectifs client, chronologie, assortiment manquant)
 drizzle/              migrations SQL + meta/_journal.json
 ```
 
-Modules : Cockpit, Action Center, Ventes, Clients, Produits, Marques, Stock,
+Modules : Cockpit, Action Center, Ventes, Clients (dont **CRM commercial** : Ma tournée, Suivi des visites, Portefeuilles, onglet Suivi commercial), Produits, Marques, Stock,
 **Marketing** (Command Center, plan marketing, priorités & actions, campagnes, Influence, Digital Ads, contenu, activations, matériel & goodies, budget & dépenses, analytics, agent marketing),
 Terrain (animations, animatrices, saisie), **Médical** (médecins, Ma journée avec chrono et GPS, suivi terrain, ordonnances, analyses et tournée), Réglementaire, Tâches, Imports, Paramètres,
 **Gestion commerciale** (préparation de la bascule, stock réel, fournisseurs, pièces de vente : BL, factures, avoirs, PDF ; achats : commandes, réceptions, factures fournisseurs, retours ; inventaires ; règlements, relances, envoi au comptable ; bascule).
@@ -131,6 +134,11 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Command Center marketing (quoi pousser, budget, objectif, retards, alertes) | `src/lib/marketing-plan/command-center.ts` | `buildMarketingCommandCenter()` |
 | Dépense engagée (COMMITTED + SPENT) en SQL | `src/lib/budget.ts` | `engagedSql()` |
 | Générateur d'actions marketing (bibliothèque de 30 modèles, budget disponible par levier, estimation, score, non-répétition, opportunités, ajout au plan) | `src/lib/action-generator/catalog.ts` + `engine.ts` + `context.ts` + `server.ts` + `persist.ts` | `TEMPLATES`, `generate()` (seul moteur, pur), `axisAvailable()`, `proposedBudget()`, `splitBudget()`, `estimate()`, `scoreTemplate()`, `loadGeneratorData()`, `runGenerator()`, `brandOpportunities()`, `addProposalToPlan()` (seule écriture : plan, activation ou campagne, action, tâches, contenus, dépenses prévues) |
+| CRM commercial : mois de suivi, visites attendues / comptées (plafonnées à la fréquence), progression, rythme, objectif client, priorité de tournée, assortiment manquant | `src/lib/crm/portfolio-shared.ts` (pur) | `monthBounds()`, `monthElapsedPct()`, `expectedVisits()`, `countedVisits()`, `visitProgress()`, `paceVerdict()`, `monthlyTarget()`, `objectiveProgress()`, `headlineObjective()`, `tourPriority()`, `suggestTour()`, `rankMissingAssortment()` |
+| CRM commercial : portefeuilles (commercial attitré, fréquence, reprise depuis les droits), vue équipe / ville, visites du mois | `src/lib/crm/portfolio.ts` + `access.ts` / `access-shared.ts` | `portfolioOf()`, `teamOverview()`, `tourSuggestions()`, `visitsOfMonth()`, `assignAccountManager()` (seule affectation en masse), `setVisitFrequency()`, `applyDefaultFrequency()`, `managerProposals()`, `crmViewer()`, `canSeeUser()`, `canSeePositions()` |
+| Visite commerciale (Démarrer / Terminer / non effectuée, hors connexion, clôture auto, correction, position du point de vente, commande déduite) | `src/lib/crm/visits.ts` + `visits-shared.ts` | `recordClientVisitAction()` (seule écriture des heures, du statut et du contrôle de `client_visits`, et de `visit_events.client_visit_id`), `planClientVisit()`, `logClientContact()`, `saveClientVisitReport()`, `autoCloseStaleClientVisits()`, `correctClientVisit()`, `validatePointOfSale()`, `visitOutcomes()`, `countsInProgress()` |
+| Objectif client (CA HT sell-in, table `objectives.client_id`) | `src/lib/crm/objectives.ts` | `clientObjectives()`, `clientObjectiveProgress()`, `saveClientObjective()`, `deleteClientObjective()` ; toute lecture d'objectif de marque filtre `client_id is null` |
+| Chronologie et fiche pré-visite d'un client (lecture seule) | `src/lib/crm/timeline.ts` + `intelligence.ts` | `clientTimeline()`, `clientVisitBrief()`, `missingAssortment()`, `clientReceivables()` |
 | Client prêt à facturer, doublons de clients, groupe (enseigne), raisons sociales facturables, fusion de fiches | `src/lib/gestion/clients-shared.ts` + `clients.ts` | `billingReadiness()`, `duplicateCandidates()`, `createClient()`, `updateClientLegal()` (seule écriture de `group_id`), `listClientGroups()`, `clientLinks()`, `billingIdentity()` (identité imprimée), `saveLegalEntity()`, `mergePreview()`, `mergeClients()` (seule fusion) |
 
 `tests/definitions-uniques.test.ts` échoue si une seconde définition réapparaît.
@@ -272,6 +280,21 @@ différer). Ordonnances : import `PRESCRIPTIONS` (liste blanche, colonne patient
 observée, tournée) : `/medical/analyses`. Copilote : `get_doctor_profile`, `get_field_control` (aucune coordonnée).
 Test d'intégration : `MEDICAL_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/medical-integration.ts`.
 
+**CRM commercial** (`docs/guide-crm-commercial.md`, plan `docs/plan-crm-commercial.md`, migration 0045). Portefeuille =
+`clients.account_manager_id` (un commercial attitré par client, il entre dans sa portée « assignés ») ; fréquence de visite
+`clients.visit_frequency_monthly` (NULL = non définie, hors progression ; 0 = ne pas visiter) ; visites `client_visits`
+(PLANIFIEE, EN_COURS, EFFECTUEE, NON_EFFECTUEE, ANNULEE ; VISITE, APPEL, MESSAGE) ; le journal `visit_events` est partagé avec
+le médical (`visit_id` OU `client_visit_id`, contrainte, triggers d'écriture seule) ; objectifs client = `objectives.client_id`
+(hors des totaux par marque). Progression = visites effectuées du mois **plafonnées à la fréquence** de chaque client ; seuls les
+types de `settings.crm.countedKinds` comptent (visite physique par défaut). Contrôle de présence : `verifyVisit()` avec la position
+du point de vente (`clients.gps_*`, proposée au premier Démarrer, validée par la direction ou le manager `users.manager_id`) et les
+seuils de `settings.crm`. Heures et positions : direction et manager seulement (`canSeePositions()`), jamais le copilote. Commande
+« prise en visite » et relevé « fait en visite » sont **déduits** (`visitOutcomes()`), seul lien mesuré visite → vente. Écrans :
+`/clients/tournee` (mobile, file hors connexion `fieldQueue("crm")`, route `/api/crm/visit-events`), `/clients/visites` (équipe, ville,
+détail, carte, export), `/clients/portefeuilles` (affectation en masse, reprise depuis les droits), onglet « Suivi commercial » de la
+fiche client. Aucun nouveau module de droits : tout sur `clients`. Règles Action Center : `src/lib/rules/crm-rules.ts` (alertes de
+contrôle portées par `crmUserId`). Copilote : `get_client_portfolio`, `get_client_visits`.
+
 **P&L** (`/gestion/pnl`, section du `docs/guide-gestion-commerciale.md`, migration 0031). Réservé aux administrateurs
 (`requireAdmin()` : salaires). Compte de résultat mensuel HT : CA = ventes directes (sites de `settings.pnl.directSites`)
 + ventes en bloc aux distributeurs (`pnl_bulk_sales`, saisies à l'arrivage : Cospharma achète tout le stock Gamarde / Ainhoa)
@@ -317,7 +340,7 @@ plan et actions via `marketing` (Créer / Modifier / Valider pour clôturer ou s
 Modifier ; enveloppe et CA objectif via « Valider une dépense » ou Administration (comme `saveBudget`).
 
 **Générateur d'actions / Opportunity Center** (`docs/plan-action-generator.md`, guide dans `docs/guide-marketing-os.md`,
-migration 0045). `/marketing/priorites` n'est plus une liste de tâches : « Opportunités du moment » (produit désigné par le
+migration 0046). `/marketing/priorites` n'est plus une liste de tâches : « Opportunités du moment » (produit désigné par le
 moteur de décision × meilleure action finançable, pourquoi maintenant), « Actions au plan » (objectif, budget, impact,
 avancement des tâches, échéance, statut), bouton « + Générer une action » (`/marketing/priorites/generer` : marque,
 objectif, levier, budget, période, cible, produit → 3 à 5 options ; fiche `/generer/[modèle]`). Une proposition sort de la

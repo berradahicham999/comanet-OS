@@ -164,11 +164,13 @@ export async function clientLinks(id: string): Promise<{ label: string; n: numbe
       (select count(*)::int from inventory_movements where client_id = ${id}::uuid) as materiel,
       (select count(*)::int from tasks where entity_id = ${id}::uuid) as tasks,
       (select count(*)::int from sales_documents where client_id = ${id}::uuid) as pieces,
-      (select count(*)::int from payments where client_id = ${id}::uuid) as payments`);
+      (select count(*)::int from payments where client_id = ${id}::uuid) as payments,
+      (select count(*)::int from client_visits where client_id = ${id}::uuid) as visits`);
   const x = r.rows[0] ?? {};
   const labels: Record<string, string> = {
     sales: "lignes de vente", animations: "animations", activations: "activations", activation_clients: "activations rattachées",
     readings: "relevés de stock", materiel: "sorties de matériel", tasks: "tâches", pieces: "pièces de vente", payments: "règlements",
+    visits: "visites commerciales",
   };
   return Object.entries(labels).map(([k, label]) => ({ label, n: Number(x[k] ?? 0) })).filter((l) => l.n > 0);
 }
@@ -293,15 +295,16 @@ export async function setLegalEntityActive(clientId: string, id: string, active:
  */
 export const MERGE_MOVED_TABLES = [
   "sales", "animations", "client_stock_readings", "activations", "inventory_movements", "pnl_bulk_sales",
-  "client_delivery_addresses", "client_aliases", "client_legal_entities", "prescriptions",
+  "client_delivery_addresses", "client_aliases", "client_legal_entities", "prescriptions", "client_visits",
 ] as const;
 /** Pièces, règlements et relances (une relance porte sur une facture validée) : la fusion est refusée s'il y en a. */
-export const MERGE_SPECIAL_TABLES = ["sales_documents", "payments", "payment_reminders", "user_client_assignments", "client_brand_discounts", "activation_clients"] as const;
+export const MERGE_SPECIAL_TABLES = ["sales_documents", "payments", "payment_reminders", "user_client_assignments", "client_brand_discounts", "activation_clients", "objectives"] as const;
 
 const MOVE_LABELS: Record<string, string> = {
   sales: "lignes de vente", animations: "animations", client_stock_readings: "relevés de stock", activations: "activations",
   inventory_movements: "sorties de matériel", pnl_bulk_sales: "ventes en bloc (P&L)",
   client_delivery_addresses: "adresses de livraison", client_aliases: "libellés d'import", client_legal_entities: "raisons sociales", prescriptions: "lignes d'ordonnance",
+  client_visits: "visites commerciales", objectives: "objectifs client",
   activation_clients: "activations rattachées", user_client_assignments: "assignations d'utilisateurs", client_brand_discounts: "remises par marque",
   drafts: "pièces en brouillon", tasks: "tâches",
 };
@@ -327,6 +330,7 @@ async function mergeState(t: Tx | typeof db, kept: ClientRow, absorbed: ClientRo
       (select count(*)::int from activation_clients where client_id = ${absorbed.id}::uuid) as activation_clients,
       (select count(*)::int from user_client_assignments where client_id = ${absorbed.id}::uuid) as user_client_assignments,
       (select count(*)::int from client_brand_discounts where client_id = ${absorbed.id}::uuid) as client_brand_discounts,
+      (select count(*)::int from objectives where client_id = ${absorbed.id}::uuid) as objectives,
       (select count(*)::int from sales_documents where client_id = ${absorbed.id}::uuid and status = 'BROUILLON') as drafts,
       (select count(*)::int from tasks where entity_id = ${absorbed.id}::uuid) as tasks,
       (select count(*)::int from sales_documents where client_id = ${absorbed.id}::uuid and status <> 'BROUILLON') as absorbed_docs,
@@ -394,6 +398,11 @@ export async function mergeClients(keptId: string, absorbedId: string, actor: Au
     await tx.execute(sql`delete from user_client_assignments where client_id = ${a}::uuid`);
     await tx.execute(sql`insert into client_brand_discounts (client_id, brand_id, discount_pct) select ${k}::uuid, brand_id, discount_pct from client_brand_discounts where client_id = ${a}::uuid on conflict do nothing`);
     await tx.execute(sql`delete from client_brand_discounts where client_id = ${a}::uuid`);
+    // Objectifs client : repris sur la fiche gardée pour les périodes qu'elle n'a pas ; sinon l'objectif de la fiche gardée l'emporte.
+    await tx.execute(sql`update objectives o set client_id = ${k}::uuid where o.client_id = ${a}::uuid and not exists (
+      select 1 from objectives x where x.client_id = ${k}::uuid and x.year = o.year and coalesce(x.month, 0) = coalesce(o.month, 0)
+        and coalesce(x.brand_id, '00000000-0000-0000-0000-000000000000'::uuid) = coalesce(o.brand_id, '00000000-0000-0000-0000-000000000000'::uuid))`);
+    await tx.execute(sql`delete from objectives where client_id = ${a}::uuid`);
     await tx.execute(sql`update tasks set entity_id = ${k}::uuid where entity_id = ${a}::uuid`);
     await tx.execute(sql`update notifications set entity_id = ${k}::uuid where entity_id = ${a}::uuid`);
     // Le nom de la fiche absorbée reste reconnu par les imports.
@@ -402,7 +411,7 @@ export async function mergeClients(keptId: string, absorbedId: string, actor: Au
 
     // Champs vides de la fiche gardée complétés par la fiche absorbée (la fiche gardée l'emporte toujours).
     const fill: Partial<ClientRow> = {};
-    const keys = ["code", "groupId", "phone", "email", "contactName", "salesRep", "channel", "sector", "city", "accountManagerId", "paymentModeKey", "paymentDays", "defaultDiscountPct", "creditLimit"] as const;
+    const keys = ["code", "groupId", "phone", "email", "contactName", "salesRep", "channel", "sector", "city", "accountManagerId", "paymentModeKey", "paymentDays", "defaultDiscountPct", "creditLimit", "visitFrequencyMonthly"] as const;
     for (const key of keys) if ((kept[key] === null || kept[key] === "") && absorbed[key] !== null && absorbed[key] !== "") (fill as Record<string, unknown>)[key] = absorbed[key];
     // Même société (aucune raison sociale ajoutée) : son code Sage revient à la fiche gardée si elle n'en a pas.
     if (!state.newEntity && !kept.accountCode && absorbed.accountCode) fill.accountCode = absorbed.accountCode;

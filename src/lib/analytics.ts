@@ -201,7 +201,7 @@ export async function objectiveFor(year: number, month: number, brandId?: string
   const scope = brandId ? sql`brand_id = ${brandId}::uuid` : sql`brand_id is null`;
   const r = await db.execute(sql`
     select amount::float8 as amount, month from objectives
-    where year = ${year} and product_id is null and ${scope} and (month = ${month} or month is null)
+    where year = ${year} and product_id is null and client_id is null and ${scope} and (month = ${month} or month is null)
     order by month nulls last limit 1`);
   const row = r.rows[0] as { amount: number; month: number | null } | undefined;
   if (!row) return null;
@@ -210,10 +210,10 @@ export async function objectiveFor(year: number, month: number, brandId?: string
 
 export async function annualObjective(year: number, brandId?: string | null): Promise<number | null> {
   const scope = brandId ? sql`brand_id = ${brandId}::uuid` : sql`brand_id is null`;
-  const r = await db.execute(sql`select amount::float8 as amount, month from objectives where year = ${year} and product_id is null and ${scope} and month is null limit 1`);
+  const r = await db.execute(sql`select amount::float8 as amount, month from objectives where year = ${year} and product_id is null and client_id is null and ${scope} and month is null limit 1`);
   const row = r.rows[0] as { amount: number } | undefined;
   if (row) return row.amount;
-  const m = await db.execute(sql`select sum(amount)::float8 as amount from objectives where year = ${year} and product_id is null and ${scope} and month is not null`);
+  const m = await db.execute(sql`select sum(amount)::float8 as amount from objectives where year = ${year} and product_id is null and client_id is null and ${scope} and month is not null`);
   const a = (m.rows[0] as { amount: number | null }).amount;
   return a ?? null;
 }
