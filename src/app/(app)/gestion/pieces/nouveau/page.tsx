@@ -29,7 +29,7 @@ export default async function NewDocumentPage(props: { searchParams: Promise<{ t
         eyebrow={<Link href={`/gestion/pieces?type=${type}`} className="hover:underline">Pièces de vente</Link>}
         title={type === "COMMANDE" ? "Nouvelle commande client" : type === "BL" ? "Nouveau bon de livraison" : type === "AVOIR" ? "Nouvel avoir financier" : "Nouvelle facture de services"}
         subtitle={type === "COMMANDE"
-          ? "Ce que le client commande, saisi sur place. Prix et remises pré-remplis depuis sa fiche, stock disponible affiché. Confirmer donne un numéro BC ; le BL se prépare ensuite en un clic et reste modifiable."
+          ? "Ce que le client commande, saisi sur place : produits et quantités au PPH, stock disponible affiché, sans remise. Confirmer donne un numéro BC ; le BL se prépare ensuite en un clic, avec la remise du client posée automatiquement, et reste modifiable."
           : type === "BL"
           ? "Prix de base = PPH ÷ (1 + TVA), remise par défaut du client sur la marque. Le stock sort à la validation, lot au plus proche de la péremption."
           : type === "AVOIR"

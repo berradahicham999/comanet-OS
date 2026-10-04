@@ -233,7 +233,8 @@ source du « réel ou simulation »), `importBlockedByCutover()` (C5), page `/ge
 mode, rapport), reprise Sage (`importOpeningInvoices()`, source SAGE_REPRISE). Envoi au comptable : sélection multiple des pièces et ZIP de leurs PDF assemblé dans le navigateur (`piece-exporter.tsx`) + récapitulatif Excel du mois (`exports.ts`). Retours de tests : P.U. TTC sur le BL, nom du client imprimé corrigeable sur une pièce validée (`renameDocumentClient()`, seule clé `legalName` de l'identité figée, migration 0030), avoir financier sans origine (lignes libres par marque, motif sans retour).
 Commandes clients (migration 0042) : type `COMMANDE`, série `BC` toujours réelle (pas une pièce fiscale), statuts
 VALIDE (confirmée) → LIVRE_PARTIEL → LIVRE, `delivered_qty` par ligne ; saisie mobile avec produits habituels du client
-(`/api/gestion/produits-habituels/[clientId]`) ; `createBLFromOrder()` prépare un BL brouillon **entièrement modifiable**
+(`/api/gestion/produits-habituels/[clientId]`), **sans remise** (le serveur force 0 ; la remise du client est posée sur le BL
+préparé) ; `createBLFromOrder()` prépare un BL brouillon **entièrement modifiable**
 (lignes `source_line_id` libres sur un BL, figées sur facture et avoir) ; la validation du BL fait avancer la quantité
 livrée, son annulation la rend. Confirmer = Créer sur `livraisons` (le commercial confirme sa saisie). Règles Action
 Center `gestion-commandes-a-preparer`, `gestion-commandes-stock-insuffisant` ; seuil `settings.gestion.orderPrepAlertDays`.

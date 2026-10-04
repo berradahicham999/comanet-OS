@@ -182,7 +182,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
               <table className="w-full text-[12.5px]">
                 <thead><tr className="text-left text-faint border-b border-line">
                   <th className="px-3 py-2 font-medium">Article</th><th className="px-3 py-2 font-medium text-right">Qté</th><th className="px-3 py-2 font-medium text-right">UG</th>
-                  <th className="px-3 py-2 font-medium text-right">P.U. HT</th><th className="px-3 py-2 font-medium text-right">Remise</th><th className="px-3 py-2 font-medium text-right">Net HT</th>
+                  <th className="px-3 py-2 font-medium text-right">P.U. HT</th>{type !== "COMMANDE" && <th className="px-3 py-2 font-medium text-right">Remise</th>}<th className="px-3 py-2 font-medium text-right">Net HT</th>
                   {type === "BL" && <th className="px-3 py-2 font-medium text-right">Facturé</th>}
                   {type === "COMMANDE" && !draft && <th className="px-3 py-2 font-medium text-right">Livré</th>}
                 </tr></thead>
@@ -196,7 +196,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
                       <td className="px-3 py-2 text-right tabular-nums">{fmtNum(Number(l.quantity), 0)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted">{Number(l.freeQuantity) ? fmtNum(Number(l.freeQuantity)) : ""}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(l.unitPriceHt)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-muted">{Number(l.discountPct) ? `${Number(l.discountPct).toLocaleString("fr-FR")} %` : ""}</td>
+                      {type !== "COMMANDE" && <td className="px-3 py-2 text-right tabular-nums text-muted">{Number(l.discountPct) ? `${Number(l.discountPct).toLocaleString("fr-FR")} %` : ""}</td>}
                       <td className="px-3 py-2 text-right tabular-nums font-medium">{fmtMoney(l.netHt)}</td>
                       {type === "BL" && <td className="px-3 py-2 text-right tabular-nums text-muted">{fmtNum(Number(l.invoicedQty))} / {fmtNum(Number(l.quantity))}</td>}
                       {type === "COMMANDE" && !draft && <td className={`px-3 py-2 text-right tabular-nums ${Number(l.deliveredQty) >= Number(l.quantity) ? "text-green" : "text-muted"}`}>{fmtNum(Number(l.deliveredQty))} / {fmtNum(Number(l.quantity))}</td>}

@@ -188,7 +188,9 @@ async function main() {
   const blADoc = (await D.getDocument(blA))!;
   assert.equal(blADoc.type, "BL");
   assert.equal(blADoc.originDocumentId, bc);
-  assert.deepEqual(blADoc.lines.map((l) => [l.quantity, l.freeQuantity, l.discountPct]), [["10.000", "1.000", "10.00"], ["4.000", "0.000", "0.00"]]);
+  // La commande ne porte pas de remise (la remise 10 % saisie est ignorée) ; le BL préparé reçoit la remise du client (25 %).
+  assert.deepEqual((await D.getDocument(bc))!.lines.map((l) => l.discountPct), ["0.00", "0.00"]);
+  assert.deepEqual(blADoc.lines.map((l) => [l.quantity, l.freeQuantity, l.discountPct]), [["10.000", "1.000", "25.00"], ["4.000", "0.000", "25.00"]]);
   await refused("second BL brouillon sur la même commande", () => D.createBLFromOrder(bc, who), /brouillon existe déjà/);
   // Le BL reste à la main : on livre 6 sur 10 à 12 % de remise, et rien du second article.
   await D.saveDraft({ id: blA, type: "BL", clientId: client.id, date: day, site: "COMANET", deliveryAddress: null, salesRepId: null, paymentModeKey: null, globalDiscountPct: "0", notes: null, originDocumentId: bc,
@@ -202,7 +204,9 @@ async function main() {
   const blB = (await one<{ id: string }>(sql`select id from sales_documents where origin_document_id = ${bc}::uuid and type = 'BL' and status = 'BROUILLON'`)).id;
   const blBDoc = (await D.getDocument(blB))!;
   assert.deepEqual(blBDoc.lines.map((l) => [l.quantity, l.freeQuantity]), [["4.000", "0.000"], ["4.000", "0.000"]]); // reste 4 de p1 (UG déjà livrées), 4 de p2
-  await D.validateDocument(blB, who);
+  // Avec la remise client de 25 %, le prix net passe sous le coût de revient : blocage à lever, comme sur tout BL.
+  await assert.rejects(D.validateDocument(blB, who), (e) => e instanceof D.CommercialBlockError && /coût de revient/.test(e.message));
+  await D.validateDocument(blB, who, { override: true });
   bcDoc = (await D.getDocument(bc))!;
   assert.equal(bcDoc.status, "LIVRE");
   assert.equal(D.orderRemaining(bcDoc.lines), 0n);
