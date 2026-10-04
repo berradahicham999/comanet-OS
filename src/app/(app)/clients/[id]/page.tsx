@@ -48,7 +48,7 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
       select a.id, a.date::text as date, a.status::text as status, u.name as animatrice, b.name as brand, coalesce(sum(al.quantity_sold),0)::int as sold, coalesce(sum(al.stock_observed),0)::int as stock
       from animations a left join users u on u.id = a.animatrice_id left join brands b on b.id = a.brand_id left join animation_lines al on al.animation_id = a.id
       where a.client_id = ${id}::uuid group by a.id, u.name, b.name order by a.date desc limit 10`),
-    db.select().from(tasksTable).where(sql`${tasksTable.entityId} = ${id}::uuid and ${tasksTable.status} in ('TODO','IN_PROGRESS')`).orderBy(desc(tasksTable.createdAt)),
+    db.select().from(tasksTable).where(sql`${tasksTable.entityId} = ${id}::uuid and ${tasksTable.status} in ('TODO','IN_PROGRESS','BLOCKED')`).orderBy(desc(tasksTable.createdAt)),
     db.execute(sql`select alias from client_aliases where client_id = ${id}::uuid order by alias`),
     readingsForClient(id),
     canDo("clients", "edit"),

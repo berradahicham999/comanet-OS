@@ -333,3 +333,25 @@ describe("Médical v2 — chrono, GPS, ordonnances", () => {
     assert.doesNotMatch(block, /key: "(patient|age|phone|telephone|cin|patientName)/i);
   });
 });
+
+describe("Marketing OS — une seule création d'action, une seule écriture des décisions, un seul « engagé »", () => {
+  test("seul `src/lib/marketing-plan/actions.ts` insère dans `marketing_actions`", () => {
+    const found = codeHits(/insert\(marketingActions\)|insert into marketing_actions/i, ["lib/marketing-plan/actions.ts"]);
+    assert.deepEqual(found, [], `Création d'action concurrente dans : ${found.join(", ")}`);
+  });
+  test("seul `src/lib/decisions/store.ts` écrit dans `marketing_decisions`", () => {
+    const found = codeHits(/(insert|update|delete)\(marketingDecisions\)|(insert into|update|delete from) marketing_decisions\b/i, ["lib/decisions/store.ts"]);
+    assert.deepEqual(found, [], `Écriture concurrente des décisions dans : ${found.join(", ")}`);
+  });
+  test("le statut « engagé » (COMMITTED + SPENT) n'est écrit qu'une fois : `engagedSql()` dans budget.ts", () => {
+    const found = hits(/export function engagedSql/);
+    assert.deepEqual(found, ["src/lib/budget.ts"]);
+    const raw = codeHits(/in \('COMMITTED','SPENT'\)/, ["lib/budget.ts"]);
+    assert.deepEqual(raw, [], `Statut engagé recopié dans : ${raw.join(", ")}`);
+  });
+  test("le statut d'une action est celui de sa tâche : aucune colonne de statut sur marketing_actions", () => {
+    const schema = FILES.find((f) => f.path === "src/db/schema.ts")!.code;
+    const block = schema.slice(schema.indexOf('"marketing_actions"'), schema.indexOf('"marketing_decisions"'));
+    assert.doesNotMatch(block, /\bstatus:/);
+  });
+});

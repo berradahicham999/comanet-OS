@@ -28,6 +28,7 @@ export type CollabRow = {
   brand_color: string | null;
   product: string | null;
   campaign_id: string | null;
+  axis_id: string | null;
   campaign: string | null;
   content_type: string | null;
   stories: number;
@@ -110,7 +111,7 @@ export async function listCollaborations(range: Range, filter?: { brandId?: stri
   const res = await db.execute(sql`
     select c.id, c.date::text as date, c.influencer_id, i.name as influencer, i.followers, i.engagement_rate::float8 as engagement_rate,
            i.category, i.city, c.brand_id, b.name as brand, b.color as brand_color,
-           p.name as product, c.campaign_id, ca.name as campaign, c.content_type,
+           p.name as product, c.campaign_id, ca.name as campaign, c.axis_id, c.content_type,
            c.stories, c.reels, c.posts, c.fee::float8 as fee, c.product_value::float8 as product_value, c.status,
            c.reach, c.impressions, c.views, c.likes, c.comments, c.shares, c.saves, c.link_clicks,
            c.promo_code, c.conversions, c.attributed_revenue::float8 as attributed_revenue, c.product_id, c.notes

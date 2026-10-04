@@ -87,10 +87,10 @@ export const getTasks: AiTool<typeof taskSchema> = {
     const rows = await deps.listTasks({ assigneeId, brandIds: access.brandIds, overdue: input.status === "overdue", includeDone: input.status === "done" || input.status === "proposed" });
     const now = ctx.now.toISOString().slice(0, 10);
     let list = rows;
-    if (input.status === "open") list = rows.filter((t) => t.status === "TODO" || t.status === "IN_PROGRESS");
+    if (input.status === "open") list = rows.filter((t) => t.status === "TODO" || t.status === "IN_PROGRESS" || t.status === "BLOCKED");
     else if (input.status === "done") list = rows.filter((t) => t.status === "DONE");
     else if (input.status === "proposed") list = rows.filter((t) => t.status === "PROPOSED");
-    else list = rows.filter((t) => t.status === "TODO" || t.status === "IN_PROGRESS");
+    else list = rows.filter((t) => t.status === "TODO" || t.status === "IN_PROGRESS" || t.status === "BLOCKED");
     const out = list.slice(0, limitOf(input.limit, 20));
     if (!list.length) return unavailable(`Aucune tâche (${input.status})${who ? ` — ${who}` : ""}.`, "Créer une tâche dans Tâches ou depuis une recommandation de l'Action Center.", "Tâches");
     return {
@@ -99,7 +99,7 @@ export const getTasks: AiTool<typeof taskSchema> = {
       scope: scopeLabel(access, [who, `statut ${input.status}`]),
       data: {
         count: list.length,
-        overdue: list.filter((t) => t.dueDate && t.dueDate < now && (t.status === "TODO" || t.status === "IN_PROGRESS")).length,
+        overdue: list.filter((t) => t.dueDate && t.dueDate < now && (t.status === "TODO" || t.status === "IN_PROGRESS" || t.status === "BLOCKED")).length,
         rows: out.map((t) => ({ id: t.id, title: t.title, status: t.status, priority: t.priority, due_date: t.dueDate, overdue: !!t.dueDate && t.dueDate < now && t.status !== "DONE", assignee: t.assignee, brand: t.brand, source: t.source, href: `/taches/${t.id}` })),
       },
       rowCount: out.length,

@@ -9,7 +9,7 @@ import { parseAmount } from "@/lib/influence-shared";
 
 const base: CollabRow = {
   id: "c1", date: "2026-09-10", influencer_id: "i1", influencer: "Sara", followers: 50_000, engagement_rate: null, category: null, city: "Casablanca",
-  brand_id: "b1", brand: "Gamarde", brand_color: null, product: null, campaign_id: null, campaign: null, content_type: null,
+  brand_id: "b1", brand: "Gamarde", brand_color: null, product: null, campaign_id: null, axis_id: null, campaign: null, content_type: null,
   stories: 0, reels: 1, posts: 0, fee: 1000, product_value: 200, status: "PUBLIE",
   reach: 10_000, impressions: null, views: null, likes: 300, comments: 50, shares: 0, saves: 50, link_clicks: 40,
   promo_code: "SARA10", conversions: 5, attributed_revenue: 3000, product_id: null, notes: null,

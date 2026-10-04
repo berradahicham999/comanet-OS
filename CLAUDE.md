@@ -62,7 +62,7 @@ drizzle/              migrations SQL + meta/_journal.json
 ```
 
 Modules : Cockpit, Action Center, Ventes, Clients, Produits, Marques, Stock,
-**Marketing** (vue d'ensemble, campagnes, Digital Ads, Influence, planning éditorial, activations, matériel, budgets, analytics, agent marketing),
+**Marketing** (Command Center, plan marketing, priorités & actions, campagnes, Influence, Digital Ads, contenu, activations, matériel & goodies, budget & dépenses, analytics, agent marketing),
 Terrain (animations, animatrices, saisie), **Médical** (médecins, Ma journée avec chrono et GPS, suivi terrain, ordonnances, analyses et tournée), Réglementaire, Tâches, Imports, Paramètres,
 **Gestion commerciale** (préparation de la bascule, stock réel, fournisseurs, pièces de vente : BL, factures, avoirs, PDF ; achats : commandes, réceptions, factures fournisseurs, retours ; inventaires ; règlements, relances, envoi au comptable ; bascule).
 
@@ -125,6 +125,11 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Journée terrain (ordre, temps en visite / entre visites) et indicateurs du suivi | `src/lib/medical/field-report-shared.ts` + `field-report.ts` | `buildTimeline()`, `fieldVisits()`, `fieldKpis()` |
 | Rapprochement d'un nom de médecin | `src/lib/medical/matching.ts` | `doctorNameTokens()`, `doctorAliasKey()`, `doctorNameScore()`, `matchDoctor()` |
 | Ordonnances : potentiel A/B/C, segments, produits à présenter, impact des visites, tournée | `src/lib/medical/prescriptions-shared.ts` + `prescriptions.ts` + `analyses.ts` | `doctorPotential()`, `doctorSegment()`, `recommendProducts()`, `visitImpact()`, `tourPriority()`, `refreshDoctorPotentials()` (seule écriture du potentiel AUTO), `doctorBrief()` |
+| Plan marketing (cadrage, chaîne planifié → alloué → engagé → dépensé → reste, allocation proposée, axes, plan mensuel) | `src/lib/marketing-plan/shared.ts` + `allocation.ts` + `plan.ts` | `planFraming()`, `budgetChain()`, `splitMonthBudget()`, `proposeAllocation()` (« non mesurable » sans historique), `savePlan()` (seule écriture des plans ; budget → `budgets`, CA objectif → `objectives`), `saveAllocation()` (→ `budget_lines`), `currentPlanFor()`, `axisOptions()` |
+| Action marketing (budget prévu, canal, justification ; qui / quand / statut = sa tâche) | `src/lib/marketing-plan/actions.ts` | `createAction()` (seule création, tâche + action dans la même transaction), `updateAction()`, `setActionStatus()` (écrit `tasks.status`), `attachExpense()`, `listActions()`, `actionCounters()` |
+| Décision unifiée (règles + intelligence Ads + intelligence marketing → une structure ; statut humain) | `src/lib/decisions/types.ts` + `adapters.ts` + `store.ts` + `store-shared.ts` + `build.ts` | `fromRule()`, `fromAdsIntel()`, `fromMarketingIntel()`, `buildUnifiedDecisions()`, `effectiveStatus()`, `approveDecision()` (crée l'action), `rejectDecision()` (écarte aussi la règle), `measureDecision()` (seule écriture de `marketing_decisions`) |
+| Command Center marketing (quoi pousser, budget, objectif, retards, alertes) | `src/lib/marketing-plan/command-center.ts` | `buildMarketingCommandCenter()` |
+| Dépense engagée (COMMITTED + SPENT) en SQL | `src/lib/budget.ts` | `engagedSql()` |
 | Client prêt à facturer, doublons de clients, groupe (enseigne), raisons sociales facturables, fusion de fiches | `src/lib/gestion/clients-shared.ts` + `clients.ts` | `billingReadiness()`, `duplicateCandidates()`, `createClient()`, `updateClientLegal()` (seule écriture de `group_id`), `listClientGroups()`, `clientLinks()`, `billingIdentity()` (identité imprimée), `saveLegalEntity()`, `mergePreview()`, `mergeClients()` (seule fusion) |
 
 `tests/definitions-uniques.test.ts` échoue si une seconde définition réapparaît.
@@ -288,6 +293,27 @@ irréversible ou externe ; tout ce qui touche l'argent (enveloppes annuelles, en
 passe par Administration ou l'interrupteur « Valider une dépense » ; personne ne modifie ses propres
 droits ; le dernier administrateur ne peut être ni rétrogradé ni suspendu. La prévisualisation
 « en tant que » pose un cookie signé et refuse toute server action.
+
+**Marketing Operating System** (`docs/guide-marketing-os.md`, audit et plan `docs/plan-marketing-os.md`, migration 0044). La
+boucle objectifs → plan → budget → allocation → actions → exécution → dépenses → résultats → analyse → réallocation, sans
+second référentiel : le budget d'un plan EST la ligne `budgets` (marque × année), son CA objectif la ligne `objectives`
+annuelle, son allocation par canal les `budget_lines`, sa consommation `budgetConsumption()`. Tables nouvelles :
+`marketing_plans`, `marketing_plan_objectives`, `marketing_axes`, `marketing_plan_months`, `marketing_actions` (1:1 avec
+une tâche `tasks` source MARKETING, `entity_type = 'marketing_action'` : responsable, échéance, priorité et statut y
+vivent, `BLOCKED` ajouté à `task_status`), `marketing_decisions` (statut humain d'une décision : PROPOSED → APPROVED /
+REJECTED → EXECUTED → MEASURED / EXPIRED, instantané de la recommandation). Colonnes de rattachement, NULL sur
+l'historique et jamais fabriquées : `campaigns.axis_id`, `collaborations.axis_id`, `content_items.axis_id`,
+`activations.axis_id`, `marketing_expenses.action_id`. Allocation proposée (`proposeAllocation()`, pure) = part réelle
+N-1 par catégorie (dépenses engagées + régie, CONFIRMED) × ajustement par verdict de canal (`channelVerdicts()`),
+seuils `settings.marketingPlan` ; sans historique suffisant « NON MESURABLE », jamais appliquée d'office. Couche de
+décision unifiée (`src/lib/decisions/`) : aucun moteur modifié, adaptateurs purs ; approuver crée l'action et sa tâche,
+refuser écarte aussi la recommandation de l'Action Center ; exécutée = tâche DONE, expirée = revue dépassée. Pages :
+`/marketing` (Command Center : quoi pousser maintenant, budget, objectif, actions en retard, alertes), `/marketing/plan`
+(+ `[id]`), `/marketing/priorites` (+ `[id]`), `/marketing/analytics/plan` (plan vs réel, lecture produit du moteur),
+`/marketing/analytics/360` (ancienne vue d'ensemble). Règles Action Center : `plan-rules.ts` (actions en retard, plan sans
+allocation, mois sans action). Agent : `get_marketing_plan`, `get_marketing_actions`, `get_unified_decisions`. Droits :
+plan et actions via `marketing` (Créer / Modifier / Valider pour clôturer ou supprimer) ; allocation via `budgets`
+Modifier ; enveloppe et CA objectif via « Valider une dépense » ou Administration (comme `saveBudget`).
 
 **Prévision saisonnière** (`docs/guide-prevision-saisonniere.md`). Le stock cible et la commande conseillée ne reposent
 plus sur la moyenne plate de 3 mois mais sur une **prévision mensuelle modélisée** : base désaisonnalisée des

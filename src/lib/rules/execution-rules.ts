@@ -62,7 +62,7 @@ export const overdueTasksRule: Rule = {
       select coalesce(u.id::text, '') as user_id, coalesce(u.name, 'Non assigné') as name, count(*)::int as n, min(t.due_date)::text as oldest,
              string_agg(t.title, ' · ' order by t.due_date) as titles
       from tasks t left join users u on u.id = t.assignee_id
-      where t.status in ('TODO','IN_PROGRESS') and t.due_date < ${iso(today)}::date
+      where t.status in ('TODO','IN_PROGRESS','BLOCKED') and t.due_date < ${iso(today)}::date
       group by u.id, u.name order by n desc`);
     return (r.rows as { user_id: string; name: string; n: number; oldest: string; titles: string }[]).map((row) => ({
       key: `tasks-overdue:${row.user_id || "none"}`,

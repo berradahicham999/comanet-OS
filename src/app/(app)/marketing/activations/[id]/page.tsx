@@ -18,6 +18,7 @@ import { ActivationTypeIcon } from "@/components/activation-type-icon";
 import { fmtDate, fmtAgo, fmtMAD, initials, iso, today } from "@/lib/format";
 import { listInventory } from "@/lib/activations/inventory";
 import { salesImpact } from "@/lib/activations/roi";
+import { axisOptions } from "@/lib/marketing-plan/plan";
 import { roiVerdict, VERDICT_LABELS, VERDICT_TONES } from "@/lib/activations/shared";
 import { consumeForActivation, returnFromActivation } from "../../materiel/actions";
 import {
@@ -47,11 +48,12 @@ export default async function ActivationPage(props: { params: Promise<{ id: stri
   const a = await getActivation(id, scope, refs, settings.activations, todayIso);
   if (!a) notFound();
 
-  const [budget, assets, options, cities, brands, users, templates, canEdit, canValidatePerm, isValidator, comments, history] = await Promise.all([
+  const [budget, assets, options, cities, brands, users, templates, canEdit, canValidatePerm, isValidator, comments, history, axes] = await Promise.all([
     activationBudget(id), listAssets({ activationId: id }), pickerOptions(), knownCities(), listBrands(), listUsers(), listActivationTemplates(),
     canDoActivation("edit"), canDoActivation("validate"), canValidateActivation(a.brandId),
     db.execute<{ id: string; body: string; created_at: string; user: string | null }>(sql`select c.id, c.body, c.created_at::text as created_at, u.name as "user" from activation_comments c left join users u on u.id = c.user_id where c.activation_id = ${id}::uuid order by c.created_at`),
     db.execute<{ from_status: string | null; to_status: string; comment: string | null; created_at: string; user: string | null }>(sql`select h.from_status, h.to_status, h.comment, h.created_at::text as created_at, u.name as "user" from activation_status_history h left join users u on u.id = h.user_id where h.activation_id = ${id}::uuid order by h.created_at desc`),
+    axisOptions(a.brandId),
   ]);
   const inventory = canEdit ? await listInventory({}, todayIso, settings.activations.inventoryDormantDays) : [];
   const impact = await salesImpact(a, settings.activations, todayIso);
@@ -109,6 +111,7 @@ export default async function ActivationPage(props: { params: Promise<{ id: stri
                 <label className="block"><span className="label block mb-1">Objectif</span><select name="objectiveKey" defaultValue={a.objectiveKey ?? ""} className="select h-9"><option value="">—</option>{refs.objectives.filter((o) => o.active || o.key === a.objectiveKey).map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}</select></label>
                 <label className="block"><span className="label block mb-1">Cible</span><select name="targetKey" defaultValue={a.targetKey ?? ""} className="select h-9"><option value="">—</option>{refs.targets.filter((o) => o.active || o.key === a.targetKey).map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}</select></label>
                 <label className="block"><span className="label block mb-1">Campagne parente</span><select name="campaignId" defaultValue={a.campaignId ?? ""} className="select h-9"><option value="">—</option>{options.campaigns.filter((k) => !a.brandId || k.brandId === a.brandId || k.id === a.campaignId).map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}</select></label>
+                <label className="block"><span className="label block mb-1">Axe du plan marketing</span><select name="axisId" defaultValue={a.axisId ?? ""} className="select h-9"><option value="">— hors plan —</option>{axes.map((k) => <option key={k.id} value={k.id}>{k.label}</option>)}</select></label>
                 <label className="block"><span className="label block mb-1">Préparation dès le</span><input type="date" name="prepDate" defaultValue={a.prepDate ?? ""} className="input h-9" /></label>
                 <label className="block"><span className="label block mb-1">Début</span><input type="date" name="date" defaultValue={a.date} className="input h-9" required /></label>
                 <label className="block"><span className="label block mb-1">Fin</span><input type="date" name="endDate" defaultValue={a.endDate ?? ""} className="input h-9" /></label>

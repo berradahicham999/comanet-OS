@@ -11,6 +11,7 @@ import { campaignSales, campaignStock } from "@/lib/marketing";
 import { kpis, type AdRow } from "@/lib/ads";
 import { saveCampaign, deleteCampaign, setCampaignStatus, saveExpense, deleteExpense, linkAdCampaigns, unlinkAdCampaign } from "../../actions";
 import { linkedAdCampaigns, linkCandidates } from "@/lib/meta/links";
+import { axisOptions } from "@/lib/marketing-plan/plan";
 import { BUDGET_CATEGORIES, BUDGET_CATEGORY_LABELS } from "@/lib/budget-categories";
 
 export const dynamic = "force-dynamic";
@@ -27,8 +28,7 @@ type Campaign = {
   start_date: string | null; end_date: string | null; budget: number | null;
   brand_id: string; brand: string; brand_color: string;
   objective: string | null; audience: string | null; message: string | null; offer: string | null;
-  kpi_target: string | null; kpi_actual: string | null; responsible_id: string | null; notes: string | null;
-};
+  kpi_target: string | null; kpi_actual: string | null; responsible_id: string | null; notes: string | null; axis_id: string | null };
 
 export default async function CampagneDetailPage(props: { params: Promise<{ id: string }> }) {
   await requireAccess("marketing");
@@ -39,7 +39,7 @@ export default async function CampagneDetailPage(props: { params: Promise<{ id: 
     select c.id, c.name, c.type, c.status::text as status, c.channel::text as channel,
            c.start_date::text as start_date, c.end_date::text as end_date, c.budget::float8 as budget,
            c.brand_id, b.name as brand, b.color as brand_color,
-           c.objective, c.audience, c.message, c.offer, c.kpi_target, c.kpi_actual, c.responsible_id, c.notes
+           c.objective, c.audience, c.message, c.offer, c.kpi_target, c.kpi_actual, c.responsible_id, c.notes, c.axis_id
     from campaigns c join brands b on b.id = c.brand_id where c.id = ${id}::uuid`);
   const c = cRes.rows[0] as Campaign | undefined;
   if (!c) notFound();
@@ -70,7 +70,7 @@ export default async function CampagneDetailPage(props: { params: Promise<{ id: 
     campaignStock(id),
   ]);
 
-  const [links, candidates] = await Promise.all([linkedAdCampaigns(id), linkCandidates(c.brand_id)]);
+  const [links, candidates, axes] = await Promise.all([linkedAdCampaigns(id), linkCandidates(c.brand_id), axisOptions(c.brand_id)]);
 
   type Expense = { id: string; label: string; category: string; status: string; amount: number; date: string; revenue: number | null; conversions: number | null };
   const expenses = expenseRes.rows as Expense[];
@@ -414,6 +414,9 @@ export default async function CampagneDetailPage(props: { params: Promise<{ id: 
               <label className="block"><span className="label block mb-1">KPI atteint (bilan)</span><input name="kpiActual" defaultValue={c.kpi_actual ?? ""} className="input h-9" /></label>
               <label className="block"><span className="label block mb-1">Responsable</span>
                 <select name="responsibleId" defaultValue={c.responsible_id ?? ""} className="select h-9"><option value="">— non assigné —</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
+              </label>
+              <label className="block"><span className="label block mb-1">Axe du plan marketing</span>
+                <select name="axisId" defaultValue={c.axis_id ?? ""} className="select h-9"><option value="">— hors plan —</option>{axes.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}</select>
               </label>
               <label className="block sm:col-span-2"><span className="label block mb-1">Notes / bilan</span><textarea name="notes" defaultValue={c.notes ?? ""} className="input min-h-20 py-2" /></label>
               <div className="sm:col-span-2">

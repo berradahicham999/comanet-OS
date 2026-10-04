@@ -49,7 +49,7 @@ export default async function MedecinFichePage({ params }: { params: Promise<{ i
   const cab = gps.rows[0];
   const control = hasFieldControl(scope);
   const existingTask = rec
-    ? await db.query.tasks.findFirst({ where: and(eq(tasks.sourceKey, rec.key), inArray(tasks.status, ["TODO", "IN_PROGRESS"])), with: { assignee: true } })
+    ? await db.query.tasks.findFirst({ where: and(eq(tasks.sourceKey, rec.key), inArray(tasks.status, ["TODO", "IN_PROGRESS", "BLOCKED"])), with: { assignee: true } })
     : null;
 
   return (

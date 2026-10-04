@@ -10,6 +10,7 @@ import { ContentWorkflow } from "@/components/content-workflow";
 import { ContentUpload } from "@/components/content-upload";
 import { REG_STATUS } from "@/components/regulatory-form";
 import { contentRefs, listBriefTemplates } from "@/lib/content/refs";
+import { axisOptions } from "@/lib/marketing-plan/plan";
 import { nextTransitions, safeTone, lateness, toneClass } from "@/lib/content/shared";
 import { canValidateBrand } from "@/lib/content/workflow";
 import { listAssets, isPreviewable } from "@/lib/content/assets";
@@ -30,7 +31,7 @@ type Row = {
   brand_id: string; brand: string; color: string; platform: string | null; format: string | null; objective: string | null;
   brief: string | null; key_message: string | null; angle: string | null; hook: string | null; caption: string | null; hashtags: string | null; cta: string | null;
   constraints: string | null; mandatory_mentions: string | null; forbidden_claims: string | null; references: { url: string; label?: string }[]; deliverables: string | null;
-  responsible_id: string | null; responsible: string | null; validator_id: string | null; validator: string | null; created_by: string | null; campaign_id: string | null;
+  responsible_id: string | null; responsible: string | null; validator_id: string | null; validator: string | null; created_by: string | null; campaign_id: string | null; axis_id: string | null;
   link: string | null; reach: number | null; engagement: number | null; perf_notes: string | null; created_at: string; updated_at: string; template_id: string | null;
 };
 type Prod = { id: string; name: string; benefits: string | null; claims: string | null; actives: string | null; target: string | null; marketing_angle: string | null; image_url: string | null; reg_status: string | null; reg_id: string | null; reg_expiry: string | null };
@@ -45,7 +46,7 @@ export default async function ContentPage(props: { params: Promise<{ id: string 
     select c.id, c.date::text as date, c.publish_time::text as publish_time, c.deadline::text as deadline, c.title, c.status,
       c.brand_id, b.name as brand, b.color, c.platform, c.format, c.objective,
       c.brief, c.key_message, c.angle, c.hook, c.caption, c.hashtags, c.cta, c.constraints, c.mandatory_mentions, c.forbidden_claims, c.references, c.deliverables,
-      c.responsible_id, ru.name as responsible, c.validator_id, vu.name as validator, cu.name as created_by, c.campaign_id,
+      c.responsible_id, ru.name as responsible, c.validator_id, vu.name as validator, cu.name as created_by, c.campaign_id, c.axis_id,
       c.link, c.reach, c.engagement, c.perf_notes, c.created_at::text as created_at, c.updated_at::text as updated_at, c.template_id
     from content_items c join brands b on b.id = c.brand_id
     left join users ru on ru.id = c.responsible_id left join users vu on vu.id = c.validator_id left join users cu on cu.id = c.created_by_id
@@ -55,7 +56,7 @@ export default async function ContentPage(props: { params: Promise<{ id: string 
   const scope = await brandFilter();
   if (scope && !scope.includes(c.brand_id)) notFound();
 
-  const [refs, brands, users, templates, canEdit, canValidatePerm, isValidator, assets, prods, brandProducts, comments, history, campaigns] = await Promise.all([
+  const [refs, brands, users, templates, canEdit, canValidatePerm, isValidator, assets, prods, brandProducts, comments, history, campaigns, axes] = await Promise.all([
     contentRefs(), listBrands(), listUsers(), listBriefTemplates(), canDo("marketing", "edit"), canDo("marketing", "validate"), canValidateBrand(c.brand_id), listAssets(id),
     db.execute<Prod>(sql`
       select p.id, p.name, p.benefits, p.claims, p.actives, p.target, p.marketing_angle, p.image_url, rf.status::text as reg_status, rf.id as reg_id, rf.expiry_date::text as reg_expiry
@@ -66,6 +67,7 @@ export default async function ContentPage(props: { params: Promise<{ id: string 
     db.execute<{ id: string; body: string; created_at: string; user: string | null }>(sql`select cc.id, cc.body, cc.created_at::text as created_at, u.name as "user" from content_comments cc left join users u on u.id = cc.user_id where cc.content_id = ${id}::uuid order by cc.created_at`),
     db.execute<{ from_status: string | null; to_status: string; comment: string | null; created_at: string; user: string | null }>(sql`select h.from_status, h.to_status, h.comment, h.created_at::text as created_at, u.name as "user" from content_status_history h left join users u on u.id = h.user_id where h.content_id = ${id}::uuid order by h.created_at desc`),
     db.execute<{ id: string; name: string }>(sql`select id, name from campaigns where brand_id = ${c.brand_id}::uuid and status not in ('DONE','ANALYZED') order by start_date desc nulls last, name`),
+    axisOptions(c.brand_id),
   ]);
   const st = refs.statuses.find((s) => s.key === c.status);
   const pf = refs.platforms.find((p) => p.key === c.platform);
@@ -108,6 +110,7 @@ export default async function ContentPage(props: { params: Promise<{ id: string 
                 <label className="block"><span className="label block mb-1">Heure</span><input type="time" name="publishTime" defaultValue={c.publish_time?.slice(0, 5) ?? ""} className="input h-9" /></label>
                 <label className="block"><span className="label block mb-1">Deadline du livrable</span><input type="date" name="deadline" defaultValue={c.deadline ?? ""} className="input h-9" /></label>
                 <label className="block"><span className="label block mb-1">Campagne liée</span><select name="campaignId" defaultValue={c.campaign_id ?? ""} className="select h-9"><option value="">—</option>{campaigns.rows.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}</select></label>
+                <label className="block"><span className="label block mb-1">Axe du plan marketing</span><select name="axisId" defaultValue={c.axis_id ?? ""} className="select h-9"><option value="">— hors plan —</option>{axes.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}</select></label>
                 <label className="block"><span className="label block mb-1">Responsable création</span><select name="responsibleId" defaultValue={c.responsible_id ?? ""} className="select h-9"><option value="">—</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
                 <label className="block"><span className="label block mb-1">Validateur</span><select name="validatorId" defaultValue={c.validator_id ?? ""} className="select h-9"><option value="">Validateurs de la marque / Direction</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
               </div>

@@ -37,8 +37,8 @@ export default async function TaskPage(props: { params: Promise<{ id: string }> 
           <Card title="Avancement">
             <form action={setTaskStatus} className="flex flex-wrap gap-2">
               <input type="hidden" name="id" value={id} />
-              {(["TODO", "IN_PROGRESS", "DONE", "CANCELLED"] as const).map((s) => (
-                <button key={s} type="submit" name="status" value={s} className={task.status === s ? "btn-primary btn-sm" : "btn-secondary btn-sm"}>{{ TODO: "À faire", IN_PROGRESS: "En cours", DONE: "Terminée", CANCELLED: "Annulée" }[s]}</button>
+              {(["TODO", "IN_PROGRESS", "BLOCKED", "DONE", "CANCELLED"] as const).map((s) => (
+                <button key={s} type="submit" name="status" value={s} className={task.status === s ? "btn-primary btn-sm" : "btn-secondary btn-sm"}>{{ TODO: "À faire", IN_PROGRESS: "En cours", BLOCKED: "Bloquée", DONE: "Terminée", CANCELLED: "Annulée" }[s]}</button>
               ))}
             </form>
             {task.description && <div className="mt-4 whitespace-pre-wrap text-[14px] text-ink-2">{task.description}</div>}

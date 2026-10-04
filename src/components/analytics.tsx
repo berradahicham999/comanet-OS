@@ -57,5 +57,7 @@ export const ANALYTICS_TABS = [
   { href: "/marketing/analytics/marques", label: "Par marque" },
   { href: "/marketing/analytics/canaux", label: "Par canal" },
   { href: "/marketing/analytics/produits", label: "Par produit" },
+  { href: "/marketing/analytics/plan", label: "Plan vs réel" },
+  { href: "/marketing/analytics/360", label: "Vue 360" },
   { href: "/marketing/analytics/qualite", label: "Qualité des données" },
 ];

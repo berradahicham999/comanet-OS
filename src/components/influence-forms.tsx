@@ -11,12 +11,14 @@ import { fmtMAD, fmtNum } from "@/lib/format";
 export type FormBrand = { id: string; name: string };
 export type FormInfluencer = { id: string; name: string; instagram: string | null; tiktok: string | null; followers: number | null; engagement_rate: number | null; category: string | null; city: string | null; usual_rate: number | null; contact: string | null; notes: string | null; active: boolean };
 export type FormCampaign = { id: string; name: string; brand_id: string };
+/** Axe d'un plan marketing (filtré par marque côté serveur ; `brand_id` pour filtrer ici). */
+export type FormAxis = { id: string; label: string; brand_id: string };
 export type FormProduct = { id: string; name: string; brand_id: string | null };
 /** Filtres de la page (et `path` pour la page détail), renvoyés à l'action pour revenir au même écran. */
 export type ReturnParams = Record<string, string>;
 
 export type CollabInitial = {
-  id: string; influencer_id: string; brand_id: string; date: string; status: string; campaign_id: string | null; product_id: string | null;
+  id: string; influencer_id: string; brand_id: string; date: string; status: string; campaign_id: string | null; product_id: string | null; axis_id?: string | null;
   reels: number; stories: number; posts: number; fee: number; product_value: number;
   reach: number | null; impressions: number | null; views: number | null; likes: number | null; comments: number | null; shares: number | null; saves: number | null;
   link_clicks: number | null; promo_code: string | null; conversions: number | null; attributed_revenue: number | null; notes: string | null;
@@ -34,14 +36,15 @@ const v = (x: number | string | null | undefined) => (x === null || x === undefi
  * Formulaire de collaboration, en création comme en modification. Campagnes et produits
  * sont filtrés par la marque choisie ; l'influenceuse se cherche par nom, réseau ou ville.
  */
-export function CollabForm({ action, brands, influencers, campaigns, products, initial, seeCosts, returnParams, defaultBrandId, onDone }: {
-  action: Action; brands: FormBrand[]; influencers: FormInfluencer[]; campaigns: FormCampaign[]; products: FormProduct[];
+export function CollabForm({ action, brands, influencers, campaigns, products, axes = [], initial, seeCosts, returnParams, defaultBrandId, onDone }: {
+  action: Action; brands: FormBrand[]; influencers: FormInfluencer[]; campaigns: FormCampaign[]; products: FormProduct[]; axes?: FormAxis[];
   initial?: CollabInitial; seeCosts: boolean; returnParams: ReturnParams; defaultBrandId?: string | null; onDone?: () => void;
 }) {
   const [brandId, setBrandId] = useState(initial?.brand_id ?? defaultBrandId ?? "");
   const [influencerId, setInfluencerId] = useState(initial?.influencer_id ?? "");
   const [query, setQuery] = useState("");
   const brandCampaigns = useMemo(() => campaigns.filter((c) => c.brand_id === brandId), [campaigns, brandId]);
+  const brandAxes = useMemo(() => axes.filter((a) => a.brand_id === brandId), [axes, brandId]);
   const brandProducts = useMemo(() => products.filter((p) => !p.brand_id || p.brand_id === brandId), [products, brandId]);
   const hits = useMemo(() => {
     const k = normKey(query);
@@ -73,6 +76,11 @@ export function CollabForm({ action, brands, influencers, campaigns, products, i
       <label className="block"><span className="label block mb-1">Campagne</span>
         <select name="campaignId" className="select h-9" defaultValue={initial?.campaign_id ?? ""} disabled={!brandId}><option value="">{brandId ? (brandCampaigns.length ? "— aucune —" : "— aucune campagne influence pour cette marque —") : "— choisir d'abord la marque —"}</option>{brandCampaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
       </label>
+      {brandAxes.length > 0 && (
+        <label className="block"><span className="label block mb-1">Axe du plan marketing</span>
+          <select name="axisId" className="select h-9" defaultValue={initial?.axis_id ?? ""}><option value="">— hors plan —</option>{brandAxes.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}</select>
+        </label>
+      )}
       <label className="block sm:col-span-2"><span className="label block mb-1">Produit poussé</span>
         <select name="productId" className="select h-9" defaultValue={initial?.product_id ?? ""} disabled={!brandId}><option value="">{brandId ? "— aucun —" : "— choisir d'abord la marque —"}</option>{brandProducts.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
       </label>
