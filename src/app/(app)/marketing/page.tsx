@@ -64,7 +64,7 @@ export default async function MarketingCommandCenterPage(props: { searchParams: 
   return (
     <>
       <PageHeader eyebrow="Marketing" title="Command Center" subtitle={<>Quoi pousser maintenant, pourquoi, avec quel budget, par qui et pour quand. Ventes au {fmtDate(refDate.ref)}{refDate.staleDays > 3 ? ` (retard ${refDate.staleDays} j)` : ""} · calculé à {fmtTime(data.decisions.computedAt)} · période {data.period.label}.</>}
-        actions={<><Link href="/marketing/plan" className="btn-secondary btn-sm">Plan marketing</Link><Link href="/marketing/priorites" className="btn-primary btn-sm">Priorités & actions</Link></>}>
+        actions={<><Link href="/marketing/studio" className="btn-secondary btn-sm">Studio créatif</Link><Link href="/marketing/plan" className="btn-secondary btn-sm">Plan marketing</Link><Link href="/marketing/priorites" className="btn-primary btn-sm">Priorités & actions</Link></>}>
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <Tabs current={href(scope.selectedBrandId, period)} tabs={[{ href: href(null, period), label: "Toutes les marques" }, ...scope.allBrands.map((b) => ({ href: href(b.id, period), label: b.name }))]} />
           <div className="flex gap-1 ml-auto">{PERIODS.map((p) => <Link key={p.key} href={href(scope.selectedBrandId, p.key)} className={clsx("text-[12px] px-2 py-1 rounded-md border", p.key === period ? "bg-black/5 border-line-2" : "border-line hover:border-line-2")}>{p.label}</Link>)}</div>

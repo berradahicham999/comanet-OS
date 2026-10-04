@@ -8,6 +8,8 @@ import { settings } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import type { ForecastSettings } from "./forecast-shared";
 
+import type { CreativeThresholds } from "@/lib/creative/types";
+
 export type ComanetSettings = {
   /** Couverture de stock (mois) : seuils vert / jaune / orange. En dessous d'orange = rouge. */
   coverage: { green: number; yellow: number; orange: number };
@@ -97,6 +99,24 @@ export type ComanetSettings = {
   forecast: ForecastSettings;
   /** Marketing OS : allocation proposée du budget par canal, revue des décisions, retard des actions. */
   marketingPlan: MarketingPlanSettings;
+  /** Studio créatif (Intelligence contenu) : fatigue des territoires, doublons, nombre d'opportunités et de concepts, budget de test, modèles. */
+  creative: CreativeSettings;
+};
+
+/**
+ * Seuils du studio créatif (`src/lib/creative/`). Les scores sont des aides à la décision ; les apprentissages exigent
+ * un volume minimal ; le budget de test payant est toujours borné par le disponible du levier (générateur d'actions).
+ */
+export type CreativeSettings = CreativeThresholds & {
+  /** Modèle des étapes de raisonnement (tension, concepts, revue) : rapide ou avancé. */
+  conceptTier: "fast" | "advanced";
+  /** Modèle de la construction du contenu (script, découpage, variations) : sortie longue, rapide par défaut. */
+  builderTier: "fast" | "advanced";
+};
+
+export const DEFAULT_CREATIVE: CreativeSettings = {
+  fatigueWindowDays: 90, duplicateThreshold: 0.75, saturationMinCount: 3, maxOpportunities: 6, maxConcepts: 4, paidTestBudgetMad: 3000, minLearningCreatives: 2,
+  conceptTier: "advanced", builderTier: "fast",
 };
 
 /**
@@ -781,6 +801,7 @@ export const DEFAULT_SETTINGS: ComanetSettings = {
   pnl: DEFAULT_PNL,
   forecast: DEFAULT_FORECAST,
   marketingPlan: DEFAULT_MARKETING_PLAN,
+  creative: DEFAULT_CREATIVE,
 };
 
 export const SETTINGS_KEY = "comanet.rules";
@@ -811,6 +832,7 @@ export function mergeSettings(stored: Partial<ComanetSettings> | null | undefine
     pnl: { ...DEFAULT_PNL, ...(stored.pnl ?? {}) },
     forecast: mergeForecast(stored.forecast),
     marketingPlan: { ...DEFAULT_MARKETING_PLAN, ...(stored.marketingPlan ?? {}) },
+    creative: { ...DEFAULT_CREATIVE, ...(stored.creative ?? {}) },
   };
 }
 

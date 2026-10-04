@@ -70,6 +70,7 @@ export const NAV: NavGroup[] = [
       { href: "/marketing/influence", label: "Influence", icon: "Heart", module: "influence" },
       { href: "/marketing/ads", label: "Digital Ads", icon: "MousePointerClick", module: "marketing" },
       { href: "/marketing/planning", label: "Contenu", icon: "CalendarDays", module: "marketing" },
+      { href: "/marketing/studio", label: "Studio créatif", icon: "Clapperboard", module: "marketing" },
       { href: "/marketing/activations", label: "Activations", icon: "PartyPopper", module: ["marketing", "clients"] },
       { href: "/marketing/materiel", label: "Matériel & goodies", icon: "Boxes", module: ["marketing", "clients"] },
       { href: "/marketing/budgets", label: "Budget & dépenses", icon: "Wallet", module: "budgets" },

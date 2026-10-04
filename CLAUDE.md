@@ -61,11 +61,12 @@ src/lib/activations/  activations marketing hors digital (référentiels, workfl
 src/lib/medical/      médical (médecins, visites, chrono et GPS, ordonnances, analyses)
 src/lib/gestion/      gestion commerciale (montants exacts, numérotation, journal de stock, clients, fournisseurs, préparation de la bascule)
 src/lib/crm/          CRM commercial (portefeuilles, fréquence, visites chronométrées, objectifs client, chronologie, assortiment manquant)
+src/lib/creative/     Studio créatif / Intelligence contenu (tensions, territoires, opportunités, concepts, package, brief, apprentissage, étapes IA)
 drizzle/              migrations SQL + meta/_journal.json
 ```
 
 Modules : Cockpit, Action Center, Ventes, Clients (dont **CRM commercial** : Ma tournée, Suivi des visites, Portefeuilles, onglet Suivi commercial), Produits, Marques, Stock,
-**Marketing** (Command Center, plan marketing, priorités & actions, campagnes, Influence, Digital Ads, contenu, activations, matériel & goodies, budget & dépenses, analytics, agent marketing),
+**Marketing** (Command Center, plan marketing, priorités & actions, campagnes, Influence, Digital Ads, contenu, **Studio créatif**, activations, matériel & goodies, budget & dépenses, analytics, agent marketing),
 Terrain (animations, animatrices, saisie), **Médical** (médecins, Ma journée avec chrono et GPS, suivi terrain, ordonnances, analyses et tournée), Réglementaire, Tâches, Imports, Paramètres,
 **Gestion commerciale** (préparation de la bascule, stock réel, fournisseurs, pièces de vente : BL, factures, avoirs, PDF ; achats : commandes, réceptions, factures fournisseurs, retours ; inventaires ; règlements, relances, envoi au comptable ; bascule).
 
@@ -141,6 +142,9 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Objectif client (CA HT sell-in, table `objectives.client_id`) | `src/lib/crm/objectives.ts` | `clientObjectives()`, `clientObjectiveProgress()`, `saveClientObjective()`, `deleteClientObjective()` ; toute lecture d'objectif de marque filtre `client_id is null` |
 | Chronologie et fiche pré-visite d'un client (lecture seule) | `src/lib/crm/timeline.ts` + `intelligence.ts` | `clientTimeline()`, `clientVisitBrief()`, `missingAssortment()`, `clientReceivables()` |
 | Client prêt à facturer, doublons de clients, groupe (enseigne), raisons sociales facturables, fusion de fiches | `src/lib/gestion/clients-shared.ts` + `clients.ts` | `billingReadiness()`, `duplicateCandidates()`, `createClient()`, `updateClientLegal()` (seule écriture de `group_id`), `listClientGroups()`, `clientLinks()`, `billingIdentity()` (identité imprimée), `saveLegalEntity()`, `mergePreview()`, `mergeClients()` (seule fusion) |
+
+| Studio créatif : catégorie créative et discipline des allégations d'un produit, tensions consommateur activées par la fiche, taxonomie des mécaniques, empreinte et fatigue, apprentissage créatif (corrélation observée), scores explicables, opportunités, squelettes déterministes, brief | `src/lib/creative/` (`product-intel.ts`, `consumer.ts`, `territories.ts`, `fingerprint.ts`, `learning.ts`, `scoring.ts`, `opportunities.ts`, `rules.ts`, `brief.ts`, `compliance.ts`) | `creativeCategoryOf()`, `buildProductIntelligence()`, `matchTensions()`, `MECHANICS`, `creativeFingerprint()`, `similarity()`, `territoryUsage()`, `creativeLearning()`, `historicalFit()`, `scoreOpportunity()`, `scoreConcept()`, `buildOpportunities()`, `rankMechanics()`, `rulesConcepts()`, `draftPackage()`, `draftVariations()`, `buildBrief()`, `checkText()` / `checkPackage()` (seul contrôle des allégations) |
+| Studio créatif : données, étapes IA, persistance | `src/lib/creative/context.ts` + `stages.ts` + `llm.ts` + `store.ts` + `server.ts` | `loadCreativeData()`, `creativePerformances()` (mémoire créative), `runStage()` (seul appel au modèle, sortie structurée), `findOpportunities()`, `generateConceptsFor()`, `buildPackageFor()`, `variationsFor()`, `sendToPlanning()` (seule création de contenu depuis le studio), `saveConcepts()` / `savePackage()` / `setConceptStatus()` (seules écritures de `creative_*`) |
 
 `tests/definitions-uniques.test.ts` échoue si une seconde définition réapparaît.
 
@@ -373,6 +377,24 @@ des leviers, favoris, écartés, note ; critère de score de 10 points (favori 1
 influenceuse, Gamarde = conseil comptoir (vidéo médicale à tester), CygneLab = point de vente + digital, Alphascience =
 médecins + un peu de point de vente. Droits : Marketing Modifier (créer, modifier, dupliquer, importer, enregistrer comme
 modèle), Valider (désactiver, revenir à la version livrée, supprimer, ce qui marche par marque).
+
+**Studio créatif / Intelligence contenu** (`docs/guide-studio-creatif.md`, migration 0048). Le générateur d'actions devient un
+moteur créatif : DONNÉE → PRIORITÉ (moteur de décision marketing) → PRODUIT → TENSION CONSOMMATEUR → OPPORTUNITÉ → CONCEPT →
+PACKAGE → BRIEF → PLANNING ÉDITORIAL → PERFORMANCE → APPRENTISSAGE. Aucun second référentiel : produit et priorité viennent de
+`buildRecommendations()`, le budget de `loadGeneratorData()`, la fiche de `products`, la mémoire créative des créatives Meta
+étiquetées (`autoTags()`), des contenus publiés (`content_items.reach / engagement`) et des collaborations ; le contenu produit est un
+`content_items` ordinaire (brief complet, tâche du responsable). Tables : `creative_concepts` (empreinte territoire|mécanique|tension|
+accroche|produit, score, statut PROPOSED → APPROVED / REJECTED → BUILT → SENT, lien `content_item_id`) et `creative_packages` ; seul
+`store.ts` les écrit. Les opportunités sont recalculées à chaque lecture (clé rejouable). Taxonomie : 5 territoires, 38 mécaniques
+avec métadonnées ; 22 tensions par catégorie (soin, dermo-cosmétique, solaire, complément) activées par les mots de la fiche, tension
+par défaut sinon, jamais inventée. Scores = aide à la décision (dix critères /10, étiquetés), jamais une mesure ; apprentissages =
+corrélations observées avec volume minimal. Conformité déterministe avant et après l'IA (`compliance.ts`) : un BLOCK interdit
+l'envoi en production. IA par étapes séparées (`src/lib/ai/prompts/creative-*.md`, sortie structurée Zod via `runStage()`, mêmes
+limites et suivi de coût que le copilote, surface « creative ») ; sans clé ou sur échec, squelette déterministe signalé
+(`generatedBy: "RULES"`). Seuils dans `settings.creative`. Pages : `/marketing/studio` (opportunités, apprentissages, territoires
+saturés), `/marketing/studio/opportunite/[clé]` (concepts : générer, approuver, écarter, construire), `/marketing/studio/concept/[id]`
+(Content Studio, 11 onglets, variations, envoi au planning), `/marketing/studio/concept/[id]/brief` (imprimable). Droits : Marketing
+Voir / Créer / Modifier. Agent : `get_creative_opportunities` (lecture seule).
 
 **Prévision saisonnière** (`docs/guide-prevision-saisonniere.md`). Le stock cible et la commande conseillée ne reposent
 plus sur la moyenne plate de 3 mois mais sur une **prévision mensuelle modélisée** : base désaisonnalisée des

@@ -40,7 +40,7 @@ export async function usageByUser(days = 30): Promise<UsageRow[]> {
   return fold(r.rows).sort((a, b) => b.costUsd - a.costUsd);
 }
 
-export const SURFACE_LABEL: Record<string, string> = { chat: "Panneau (questions libres)", explain: "Expliquer (cartes)", brief: "Brief du matin", plan: "Détailler (Action Center)", report: "Rapports" };
+export const SURFACE_LABEL: Record<string, string> = { chat: "Panneau (questions libres)", explain: "Expliquer (cartes)", brief: "Brief du matin", plan: "Détailler (Action Center)", report: "Rapports", marketing: "Agent marketing", creative: "Studio créatif" };
 
 export async function usageBySurface(days = 30): Promise<UsageRow[]> {
   const r = await db.execute<Raw>(sql`

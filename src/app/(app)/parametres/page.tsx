@@ -139,6 +139,20 @@ export default async function ParametresPage(props: { searchParams: Promise<{ ta
               <Field name="mi_maxDecisions" label="Recommandations rendues (max)" value={s.marketingIntel.maxDecisions} />
             </div>
           </Card>
+          <Card title="Studio créatif (Intelligence contenu)">
+            <p className="text-[12px] text-muted mb-2">Opportunités, concepts et packages de contenu. Les scores sont des aides à la décision ; un apprentissage exige un volume minimal ; le budget de test payant est borné par le disponible du levier.</p>
+            <div className="grid grid-cols-2 gap-2">
+              <Field name="cr_fatigueWindowDays" label="Fenêtre de fatigue (jours)" value={s.creative.fatigueWindowDays} hint="Contenus et concepts récents comptés" />
+              <Field name="cr_duplicateThreshold" label="Doublon si proximité ≥ (0 à 1)" value={s.creative.duplicateThreshold} step="0.05" />
+              <Field name="cr_saturationMinCount" label="Territoire saturé à partir de (contenus)" value={s.creative.saturationMinCount} />
+              <Field name="cr_maxOpportunities" label="Opportunités affichées (max)" value={s.creative.maxOpportunities} />
+              <Field name="cr_maxConcepts" label="Concepts par génération" value={s.creative.maxConcepts} hint="3 à 5" />
+              <Field name="cr_paidTestBudgetMad" label="Budget de test payant (MAD)" value={s.creative.paidTestBudgetMad} hint="Jamais au-delà du disponible" />
+              <Field name="cr_minLearningCreatives" label="Apprentissage : volume minimal" value={s.creative.minLearningCreatives} hint="Créatives ou publications par motif" />
+              <label className="block text-[13px]"><span className="label block mb-1">Modèle des concepts</span><select name="cr_conceptTier" className="select h-9" defaultValue={s.creative.conceptTier}><option value="advanced">avancé</option><option value="fast">rapide</option></select></label>
+              <label className="block text-[13px]"><span className="label block mb-1">Modèle de construction</span><select name="cr_builderTier" className="select h-9" defaultValue={s.creative.builderTier}><option value="fast">rapide</option><option value="advanced">avancé</option></select></label>
+            </div>
+          </Card>
           <Card title="Plan marketing (Marketing OS)">
             <p className="text-[12px] text-muted mb-2">Allocation proposée du budget par canal : part réelle de l&apos;année précédente, ajustée par le verdict de chaque canal (Analytics marketing). Sans historique suffisant, « non mesurable ».</p>
             <div className="grid grid-cols-2 gap-2">

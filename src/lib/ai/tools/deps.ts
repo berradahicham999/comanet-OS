@@ -19,6 +19,8 @@ import { getPlan, listPlans } from "@/lib/marketing-plan/plan";
 import { listActions } from "@/lib/marketing-plan/actions";
 import { buildUnifiedDecisions } from "@/lib/decisions/build";
 import { runGenerator } from "@/lib/action-generator/server";
+import { findOpportunities } from "@/lib/creative/server";
+import { listBrands } from "@/lib/users";
 import { getRecommendations } from "@/lib/rules";
 import { listTasks } from "@/lib/tasks";
 import { searchEntities } from "@/lib/search";
@@ -186,6 +188,15 @@ export const realDeps: ToolDeps = {
   // Marketing OS : plan, actions et décisions unifiées (lecture seule ; `src/lib/marketing-plan/`, `src/lib/decisions/`).
   marketingPlan: { listPlans: (ids) => listPlans(ids), getPlan: (id) => getPlan(id), listActions: (f) => listActions(f), decisions: (scope) => buildUnifiedDecisions(scope), generateActions: async (ctx, input, brandName) => (await runGenerator(ctx, input, brandName, { maxOptions: 5 })).result },
   crm: crmDeps,
+  // Studio créatif (lecture seule) : même moteur que la page /marketing/studio, portée reconstruite depuis les droits de la personne.
+  creative: {
+    board: async (o) => {
+      const rows = await listBrands();
+      const allBrands = rows.filter((b) => b.active && !b.mergedIntoId && (o.brandIds === null || o.brandIds.includes(b.id))).map((b) => ({ id: b.id, name: b.name, color: b.color }));
+      const selectedBrandId = o.selectedBrandId && allBrands.some((b) => b.id === o.selectedBrandId) ? o.selectedBrandId : null;
+      return findOpportunities({ ctx: o.ctx, perms: o.perms, brands: selectedBrandId ? allBrands.filter((b) => b.id === selectedBrandId) : allBrands, period: "30d", allBrands, selectedBrandId });
+    },
+  },
   // Ventes, objectifs, stock, catalogue, budget consommé, publicité, activité marketing : câblage de la couche Marketing Intelligence.
   ...realIntelDeps,
   findBrand, findClient, findProduct, findUser, clientIdsInCity,
