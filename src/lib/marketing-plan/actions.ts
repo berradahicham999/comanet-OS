@@ -28,6 +28,10 @@ export type ActionRow = {
   /** Dépense engagée + dépensée rattachée (`marketing_expenses.action_id`, hors PLANNED). */
   committed: number; spent: number; expenses: number;
   createdAt: string; completedAt: string | null;
+  /** Générateur d'actions : modèle, jour J, activation d'exécution, fiche figée. */
+  templateKey: string | null; eventDate: string | null; activationId: string | null; spec: Record<string, unknown> | null;
+  /** Tâches d'exécution (rétroplanning) rattachées à l'action, hors tâche principale. */
+  stepsTotal: number; stepsDone: number;
 };
 
 export type ActionFilter = { brandIds?: string[] | null; brandId?: string | null; planId?: string | null; axisId?: string | null; month?: string | null; assigneeId?: string | null; includeDone?: boolean; limit?: number };
@@ -38,9 +42,12 @@ export async function listActions(f: ActionFilter = {}): Promise<ActionRow[]> {
       a.brand_id, b.name as brand_name, b.color as brand_color, a.product_id, pr.name as product_name, a.campaign_id, c.name as campaign_name,
       a.category::text as category, a.title, a.objective, a.why, a.expected_result, a.budget_planned::float8 as budget_planned, a.source::text as source, a.decision_key,
       a.task_id, t.status::text as status, t.priority::text as priority, t.due_date::text as due_date, t.assignee_id, u.name as assignee_name, a.created_at::text as created_at, t.completed_at::text as completed_at,
-      coalesce((select sum(e.amount) from marketing_expenses e where e.action_id = a.id and ${engagedSql("e")}), 0)::float8 as committed,
-      coalesce((select sum(e.amount) from marketing_expenses e where e.action_id = a.id and e.status = 'SPENT'), 0)::float8 as spent,
-      (select count(*) from marketing_expenses e where e.action_id = a.id)::int as expenses
+      coalesce((select sum(e.amount) from marketing_expenses e where (e.action_id = a.id or (a.activation_id is not null and e.activation_id = a.activation_id and e.action_id is null)) and ${engagedSql("e")}), 0)::float8 as committed,
+      coalesce((select sum(e.amount) from marketing_expenses e where (e.action_id = a.id or (a.activation_id is not null and e.activation_id = a.activation_id and e.action_id is null)) and e.status = 'SPENT'), 0)::float8 as spent,
+      (select count(*) from marketing_expenses e where e.action_id = a.id or (a.activation_id is not null and e.activation_id = a.activation_id and e.action_id is null))::int as expenses,
+      a.template_key, a.event_date::text as event_date, a.activation_id, a.spec,
+      (select count(*) from tasks st where st.entity_type = 'marketing_action' and st.entity_id = a.id and st.id <> a.task_id and st.status <> 'CANCELLED')::int as steps_total,
+      (select count(*) from tasks st where st.entity_type = 'marketing_action' and st.entity_id = a.id and st.id <> a.task_id and st.status = 'DONE')::int as steps_done
     from marketing_actions a
     join tasks t on t.id = a.task_id
     join brands b on b.id = a.brand_id
@@ -67,6 +74,8 @@ export async function listActions(f: ActionFilter = {}): Promise<ActionRow[]> {
     source: x.source as MarketingActionSource, decisionKey: x.decision_key ? String(x.decision_key) : null,
     taskId: String(x.task_id), status: x.status as TaskStatus, priority: x.priority as TaskPriority, dueDate: x.due_date ? String(x.due_date) : null, assigneeId: x.assignee_id ? String(x.assignee_id) : null, assigneeName: x.assignee_name ? String(x.assignee_name) : null,
     committed: Number(x.committed), spent: Number(x.spent), expenses: Number(x.expenses), createdAt: String(x.created_at), completedAt: x.completed_at ? String(x.completed_at) : null,
+    templateKey: x.template_key ? String(x.template_key) : null, eventDate: x.event_date ? String(x.event_date) : null, activationId: x.activation_id ? String(x.activation_id) : null,
+    spec: (x.spec as Record<string, unknown> | null) ?? null, stepsTotal: Number(x.steps_total), stepsDone: Number(x.steps_done),
   }));
 }
 
@@ -82,14 +91,21 @@ export type ActionInput = {
   category?: BudgetCategory | null; objective?: string | null; why?: string | null; expectedResult?: string | null; budgetPlanned?: number;
   source?: MarketingActionSource; decisionKey?: string | null;
   priority?: TaskPriority; dueDate?: string | null; assigneeId?: string | null;
+  /** Générateur d'actions (source GENERATOR). */
+  templateKey?: string | null; spec?: Record<string, unknown> | null; activationId?: string | null; eventDate?: string | null;
 };
 
-/** LA création d'une action : la ligne et sa tâche dans la même transaction. */
-export async function createAction(input: ActionInput, actor: AuditActor): Promise<{ id: string; taskId: string }> {
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * LA création d'une action : la ligne et sa tâche dans la même transaction (celle de l'appelant si `tx` est fourni,
+ * ex. l'ajout au plan d'une action générée, qui crée aussi activation, campagne, contenus et tâches d'exécution).
+ */
+export async function createAction(input: ActionInput, actor: AuditActor, tx?: Tx, presetId?: string): Promise<{ id: string; taskId: string }> {
   if (!input.title.trim()) throw new Error("Le titre de l'action est obligatoire.");
-  const id = randomUUID();
+  const id = presetId ?? randomUUID();
   const description = [input.why ? `Pourquoi : ${input.why}` : null, input.objective ? `Objectif : ${input.objective}` : null, input.expectedResult ? `Résultat attendu : ${input.expectedResult}` : null, input.budgetPlanned ? `Budget prévu : ${Math.round(input.budgetPlanned).toLocaleString("fr-FR")} MAD` : null].filter(Boolean).join("\n");
-  return db.transaction(async (tx) => {
+  const run = async (tx: Tx) => {
     const [task] = await tx.insert(tasks).values({
       title: input.title.trim(), description: description || null, priority: input.priority ?? "MEDIUM", dueDate: input.dueDate ?? null, assigneeId: input.assigneeId ?? null, brandId: input.brandId,
       source: "MARKETING", sourceKey: actionTaskKey(id), entityType: "marketing_action", entityId: id, expectedImpact: input.expectedResult ?? null, createdById: actor.id,
@@ -98,10 +114,14 @@ export async function createAction(input: ActionInput, actor: AuditActor): Promi
       id, planId: input.planId ?? null, axisId: input.axisId ?? null, month: input.month ?? null, brandId: input.brandId, productId: input.productId ?? null, campaignId: input.campaignId ?? null,
       category: input.category ?? null, title: input.title.trim(), objective: input.objective ?? null, why: input.why ?? null, expectedResult: input.expectedResult ?? null,
       budgetPlanned: (input.budgetPlanned ?? 0).toFixed(2), source: input.source ?? "MANUAL", decisionKey: input.decisionKey ?? null, taskId: task.id, createdById: actor.id,
+      templateKey: input.templateKey ?? null, spec: input.spec ?? null, activationId: input.activationId ?? null, eventDate: input.eventDate ?? null,
     });
-    await audit({ actor, action: "CREATE", module: "marketing", entity: "marketing_action", entityId: id, label: input.title, after: { ...input, taskId: task.id } }, tx);
+    const { spec: _spec, ...auditable } = input;
+    void _spec;
+    await audit({ actor, action: "CREATE", module: "marketing", entity: "marketing_action", entityId: id, label: input.title, after: { ...auditable, taskId: task.id } }, tx);
     return { id, taskId: task.id };
-  });
+  };
+  return tx ? run(tx) : db.transaction(run);
 }
 
 export type ActionPatch = Partial<Omit<ActionInput, "brandId" | "source" | "decisionKey">>;
@@ -141,6 +161,8 @@ export async function setActionStatus(id: string, status: TaskStatus, actor: Aud
     const before = await tx.query.marketingActions.findFirst({ where: eq(marketingActions.id, id), with: { task: true } });
     if (!before) throw new Error("Action introuvable.");
     await tx.update(tasks).set({ status, completedAt: status === "DONE" ? new Date() : null }).where(eq(tasks.id, before.taskId));
+    // Action annulée : ses tâches d'exécution encore ouvertes sont annulées avec elle (rien n'est supprimé).
+    if (status === "CANCELLED") await tx.update(tasks).set({ status: "CANCELLED" }).where(and(eq(tasks.entityType, "marketing_action"), eq(tasks.entityId, id), sql`${tasks.status} in ('TODO','IN_PROGRESS','BLOCKED')`));
     await audit({ actor, action: "UPDATE", module: "marketing", entity: "marketing_action", entityId: id, label: before.title, before: { status: before.task.status }, after: { status } }, tx);
   });
 }

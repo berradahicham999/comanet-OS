@@ -23,6 +23,8 @@ import type { MarketingIntelDeps } from "@/lib/marketing-intel/types";
 import type { PlanSummary, PlanDetail } from "@/lib/marketing-plan/plan";
 import type { ActionFilter, ActionRow } from "@/lib/marketing-plan/actions";
 import type { DecisionScope, DecisionSet as UnifiedDecisionSet } from "@/lib/decisions/build";
+import type { GeneratorInput, GeneratorResult } from "@/lib/action-generator/types";
+import type { IntelContext } from "@/lib/marketing-intel/types";
 
 /** Droits de la personne connectée, tels que résolus par `permissions.ts`. `brandIds`/`clientIds` à `null` = tout. */
 export type ToolAccess = {
@@ -85,6 +87,8 @@ export type MarketingPlanToolDeps = {
   getPlan(id: string): Promise<PlanDetail | null>;
   listActions(f: ActionFilter): Promise<ActionRow[]>;
   decisions(scope: DecisionScope): Promise<UnifiedDecisionSet>;
+  /** Générateur d'actions (lecture seule : propose, n'ajoute rien au plan). */
+  generateActions(ctx: IntelContext, input: GeneratorInput, brandName: string): Promise<GeneratorResult>;
 };
 
 export type ToolDeps = MarketingIntelDeps & {

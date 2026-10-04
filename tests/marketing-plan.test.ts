@@ -6,7 +6,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { DEFAULT_MARKETING_PLAN } from "@/lib/settings";
-import { actionLateDays, budgetChain, monthsBetween, planFraming, splitMonthBudget } from "@/lib/marketing-plan/shared";
+import { actionLateDays, budgetChain, monthsBetween, planFraming } from "@/lib/marketing-plan/shared";
 import { proposeAllocation, type HistoryLine } from "@/lib/marketing-plan/allocation";
 
 describe("cadrage du plan", () => {
@@ -44,14 +44,6 @@ describe("mois et actions", () => {
     assert.equal(actionLateDays({ status: "DONE", dueDate: "2026-10-01" }, "2026-10-04"), 0);
     assert.equal(actionLateDays({ status: "TODO", dueDate: null }, "2026-10-04"), 0);
     assert.equal(actionLateDays({ status: "TODO", dueDate: "2026-10-04" }, "2026-10-04"), 0);
-  });
-  test("répartition d'un budget mensuel au prorata de l'allocation, somme exacte, arrondi à 100", () => {
-    const lines = splitMonthBudget(50_000, [{ category: "META", amount: 300_000 }, { category: "INFLUENCE", amount: 150_000 }, { category: "TRADE", amount: 200_000 }, { category: "GOODIES", amount: 0 }]);
-    assert.equal(lines.reduce((s, l) => s + l.amount, 0), 50_000);
-    assert.equal(lines.length, 3);
-    for (const l of lines) assert.equal(l.amount % 100, 0, `${l.category} arrondi`);
-    assert.deepEqual(splitMonthBudget(0, [{ category: "META", amount: 10 }]), []);
-    assert.deepEqual(splitMonthBudget(1000, []), []);
   });
 });
 

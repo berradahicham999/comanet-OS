@@ -6,7 +6,7 @@
  * qu'assembler ces nombres (cadrage, reste à allouer, chaîne planifié → alloué → engagé → dépensé → reste)
  * et porter les référentiels du plan (objectifs, sources d'action, statuts).
  */
-import type { BudgetCategory, MarketingActionSource, MarketingPlanStatus, TaskStatus } from "@/db/schema";
+import type { MarketingActionSource, MarketingPlanStatus, TaskStatus } from "@/db/schema";
 
 /* ------------------------------ Référentiels ------------------------------ */
 
@@ -32,7 +32,7 @@ export const PLAN_STATUS: Record<MarketingPlanStatus, { label: string; tone: "gr
   CLOSED: { label: "Clôturé", tone: "blue" },
 };
 
-export const ACTION_SOURCE_LABELS: Record<MarketingActionSource, string> = { PLAN: "Plan", DECISION: "Décision", MANUAL: "Manuelle" };
+export const ACTION_SOURCE_LABELS: Record<MarketingActionSource, string> = { PLAN: "Plan", DECISION: "Décision", MANUAL: "Manuelle", GENERATOR: "Générateur" };
 
 /** Statuts d'une tâche (donc d'une action) encore à faire. */
 export const OPEN_TASK_STATUSES: readonly TaskStatus[] = ["TODO", "IN_PROGRESS", "BLOCKED"];
@@ -122,14 +122,4 @@ export type ActionLike = { status: TaskStatus; dueDate: string | null };
 export function actionLateDays(a: ActionLike, todayIso: string): number {
   if (!isOpenStatus(a.status) || !a.dueDate || a.dueDate >= todayIso) return 0;
   return Math.round((new Date(todayIso + "T00:00:00Z").getTime() - new Date(a.dueDate + "T00:00:00Z").getTime()) / 86_400_000);
-}
-
-/** Répartition d'un budget mensuel sur les canaux, au prorata d'une allocation (lignes d'un plan). Arrondi à 100 MAD, écart posé sur la plus grosse ligne. */
-export function splitMonthBudget(monthBudget: number, allocation: { category: BudgetCategory; amount: number }[]): { category: BudgetCategory; amount: number }[] {
-  const total = allocation.reduce((a, l) => a + Math.max(0, l.amount), 0);
-  if (monthBudget <= 0 || total <= 0) return [];
-  const lines = allocation.filter((l) => l.amount > 0).map((l) => ({ category: l.category, amount: Math.round((monthBudget * l.amount) / total / 100) * 100 }));
-  const diff = monthBudget - lines.reduce((a, l) => a + l.amount, 0);
-  if (lines.length && diff !== 0) { const big = lines.reduce((m, l) => (l.amount > m.amount ? l : m), lines[0]); big.amount += diff; }
-  return lines.filter((l) => l.amount > 0);
 }

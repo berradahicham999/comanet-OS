@@ -6,11 +6,9 @@ import type { BudgetCategory, MarketingPlanStatus } from "@/db/schema";
 import { requirePermission, requireFlag, brandInScope } from "@/lib/access";
 import { requireAccessContext } from "@/lib/permissions";
 import { isAdmin } from "@/lib/permissions-shared";
-import { BUDGET_CATEGORIES, BUDGET_CATEGORY_LABELS } from "@/lib/budget-categories";
-import { addDays, iso } from "@/lib/format";
-import { deleteAxis, deleteObjective, getPlan, saveAllocation, saveAxis, saveMonth, saveObjective, savePlan, setPlanStatus } from "@/lib/marketing-plan/plan";
-import { createAction } from "@/lib/marketing-plan/actions";
-import { PLAN_OBJECTIVE_KEYS, splitMonthBudget } from "@/lib/marketing-plan/shared";
+import { BUDGET_CATEGORIES } from "@/lib/budget-categories";
+import { deleteAxis, deleteObjective, saveAllocation, saveAxis, saveMonth, saveObjective, savePlan, setPlanStatus } from "@/lib/marketing-plan/plan";
+import { PLAN_OBJECTIVE_KEYS } from "@/lib/marketing-plan/shared";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim() || null;
 const num = (fd: FormData, k: string) => { const s = String(fd.get(k) ?? "").replace(/\s| | /g, "").replace(",", "."); const n = Number(s); return s === "" || Number.isNaN(n) ? null : n; };
@@ -110,31 +108,3 @@ export async function saveMonthAction(formData: FormData) {
   refresh(planId);
 }
 
-/**
- * Génère les actions d'un mois : une action par canal, au prorata de l'allocation du plan sur le budget du
- * mois (`splitMonthBudget`, pur). Chaque action naît avec sa tâche (échéance : fin du mois, responsable à
- * choisir). Les montants sont une répartition proposée, modifiable ensuite action par action.
- */
-export async function generateMonthActionsAction(formData: FormData) {
-  const user = await requirePermission("marketing", "create");
-  const planId = str(formData, "planId"); const month = str(formData, "month");
-  if (!isUuid(planId) || !isDate(month)) return;
-  const plan = await getPlan(planId);
-  if (!plan) throw new Error("Plan introuvable.");
-  const m = plan.months.find((x) => x.month === month);
-  if (!m || m.budget <= 0) throw new Error("Renseigner d'abord le budget du mois.");
-  if (m.actions.length) throw new Error("Ce mois a déjà des actions : les compléter depuis Priorités & actions.");
-  const lines = splitMonthBudget(m.budget, plan.allocation.map((a) => ({ category: a.category as BudgetCategory, amount: a.planned })));
-  if (!lines.length) throw new Error("Aucune allocation par canal sur le plan : la répartition du mois ne peut pas être proposée.");
-  const monthEnd = iso(addDays(new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 1)), -1));
-  const focus = m.focusProductName ? ` — ${m.focusProductName}` : "";
-  for (const l of lines) {
-    await createAction({
-      brandId: plan.plan.brandId, planId, month, productId: m.focusProductId, category: l.category, budgetPlanned: l.amount, source: "PLAN",
-      title: `${BUDGET_CATEGORY_LABELS[l.category]}${focus} · ${month.slice(0, 7)}`,
-      objective: m.objective, why: `Plan ${plan.plan.name} : budget du mois ${Math.round(m.budget).toLocaleString("fr-FR")} MAD réparti au prorata de l'allocation par canal.`,
-      expectedResult: m.objective, dueDate: monthEnd, priority: "MEDIUM",
-    }, { id: user.id, name: user.name });
-  }
-  refresh(planId);
-}

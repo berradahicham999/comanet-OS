@@ -4001,7 +4001,7 @@ export const pnlBulkSales = pgTable(
  * ---------------------------------------------------------------------------------------------- */
 
 export const marketingPlanStatusEnum = pgEnum("marketing_plan_status", ["DRAFT", "ACTIVE", "CLOSED"]);
-export const marketingActionSourceEnum = pgEnum("marketing_action_source", ["PLAN", "DECISION", "MANUAL"]);
+export const marketingActionSourceEnum = pgEnum("marketing_action_source", ["PLAN", "DECISION", "MANUAL", "GENERATOR"]);
 export const marketingDecisionStatusEnum = pgEnum("marketing_decision_status", ["PROPOSED", "APPROVED", "REJECTED", "EXECUTED", "MEASURED", "EXPIRED"]);
 
 export const marketingPlans = pgTable(
@@ -4106,6 +4106,14 @@ export const marketingActions = pgTable(
     source: marketingActionSourceEnum("source").notNull().default("MANUAL"),
     /** Clé de la décision unifiée à l'origine (source DECISION). */
     decisionKey: text("decision_key"),
+    /** Modèle de la bibliothèque d'actions (source GENERATOR, `src/lib/action-generator/catalog.ts`) : non-répétition. */
+    templateKey: text("template_key"),
+    /** Fiche complète figée à l'ajout au plan (concept, budget détaillé, rétroplanning, KPI, hypothèses, score). */
+    spec: jsonb("spec").$type<Record<string, unknown>>(),
+    /** Activation qui exécute l'action (événementiel, trade) : ses dépenses comptent dans l'engagé de l'action. */
+    activationId: uuid("activation_id").references((): AnyPgColumn => activations.id, { onDelete: "set null" }),
+    /** Jour J (événement, lancement, début d'opération). */
+    eventDate: date("event_date"),
     taskId: uuid("task_id").notNull().references(() => tasks.id, { onDelete: "cascade" }),
     createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -4119,6 +4127,8 @@ export const marketingActions = pgTable(
     index("marketing_actions_product_idx").on(t.productId),
     index("marketing_actions_campaign_idx").on(t.campaignId),
     index("marketing_actions_decision_idx").on(t.decisionKey),
+    index("marketing_actions_template_idx").on(t.brandId, t.templateKey),
+    index("marketing_actions_activation_idx").on(t.activationId),
     index("marketing_actions_created_by_idx").on(t.createdById),
   ],
 );
@@ -4191,6 +4201,7 @@ export const marketingActionsRelations = relations(marketingActions, ({ one, man
   brand: one(brands, { fields: [marketingActions.brandId], references: [brands.id] }),
   product: one(products, { fields: [marketingActions.productId], references: [products.id] }),
   campaign: one(campaigns, { fields: [marketingActions.campaignId], references: [campaigns.id] }),
+  activation: one(activations, { fields: [marketingActions.activationId], references: [activations.id] }),
   task: one(tasks, { fields: [marketingActions.taskId], references: [tasks.id] }),
   createdBy: one(users, { fields: [marketingActions.createdById], references: [users.id] }),
   expenses: many(marketingExpenses),

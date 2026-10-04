@@ -9,6 +9,10 @@ import { z } from "zod";
 import { BUDGET_CATEGORY_LABELS } from "@/lib/budget-categories";
 import { ACTION_SOURCE_LABELS, actionLateDays, isOpenStatus } from "@/lib/marketing-plan/shared";
 import { DECISION_STATUS, DOMAIN_LABELS } from "@/lib/decisions/types";
+import { AXES, AXIS_KEYS, OBJECTIVES, OBJECTIVE_KEYS, TARGET_KEYS, COMPLEXITY_LABELS } from "@/lib/action-generator/catalog";
+import { LEVEL_LABELS } from "@/lib/action-generator/engine";
+import { generatorQuery } from "@/lib/action-generator/params";
+import type { AxisKey, ObjectiveKey, TargetKey } from "@/lib/action-generator/types";
 import type { AiTool, ToolResult } from "./types";
 import { DATA_TAGS_LEGEND, freshnessNotes, intelContext, limitOf, marketingPeriodSchema, resolveBrand, round, scopeLabel, unavailable } from "./shared";
 
@@ -133,5 +137,56 @@ export const getUnifiedDecisions: AiTool<typeof decisionsSchema> = {
     const notes = freshnessNotes(ctx);
     notes.push(...set.notes);
     return { available: true, source: "Couche de décision unifiée (règles Action Center · intelligence Ads · intelligence marketing)", scope: scopeLabel(ctx.access, [`marque ${brand.name}`]), data, rowCount: n + set.decided.length, links: [{ label: "Command Center", href: `/marketing?brand=${brand.id}` }, { label: "Priorités & actions", href: `/marketing/priorites?brand=${brand.id}` }], notes };
+  },
+};
+
+/* ------------------------------ generate_marketing_actions ------------------------------ */
+
+const genSchema = z.object({
+  brand: z.string().describe("Marque. Obligatoire."),
+  objective: z.enum(OBJECTIVE_KEYS as [ObjectiveKey, ...ObjectiveKey[]]).default("SELL_OUT").describe(`Objectif : ${OBJECTIVE_KEYS.map((k) => `${k} (${OBJECTIVES[k]})`).join(", ")}.`),
+  axis: z.enum(AXIS_KEYS as [AxisKey, ...AxisKey[]]).optional().describe(`Levier : ${AXIS_KEYS.map((k) => `${k} (${AXES[k].label})`).join(", ")} ; absent = tous les leviers.`),
+  product: z.string().optional().describe("Produit à pousser (nom). Facultatif."),
+  budget_mad: z.number().positive().optional().describe("Budget disponible saisi (MAD) ; absent = budget réellement disponible calculé (allocation − engagé − prévu)."),
+  month: z.string().regex(/^\d{4}-\d{2}$/).optional().describe("Période (AAAA-MM) ; défaut : mois en cours, ou suivant après le 20."),
+  target: z.enum(TARGET_KEYS as [TargetKey, ...TargetKey[]]).default("FEMMES_25_45").describe("Cible."),
+});
+
+export const generateMarketingActions: AiTool<typeof genSchema> = {
+  name: "generate_marketing_actions",
+  description:
+    "Générateur d'actions marketing : à partir d'une marque, d'un objectif, d'un levier (événementiel, trade, digital, influence, contenu), d'un produit et du budget disponible, propose 3 à 5 actions concrètes issues de la bibliothèque COMANET, adaptées aux données (ventes, stock, budget, historique, saison, villes, pharmacies, influenceuses, coût par résultat Meta) : nom, objectif chiffré, concept, budget détaillé, jour J et rétroplanning, KPI, résultat attendu (hypothèses), score de pertinence, raisons. Lecture seule : l'ajout au plan se fait par la personne (lien fourni). Répond à « quelle action faire, avec quel budget, pour quel résultat ? ».",
+  module: "marketing",
+  action: "view",
+  schema: genSchema,
+  async run(input, ctx): Promise<ToolResult> {
+    const mp = ctx.deps.marketingPlan; if (!mp) return noDeps();
+    const { brand, error } = await resolveBrand(ctx, input.brand);
+    if (error) return error;
+    if (!brand) return unavailable("Préciser la marque.", "Indiquer le nom de la marque.");
+    let productId: string | null = null;
+    if (input.product) { const p = await ctx.deps.findProduct(input.product); if (!p) return unavailable(`Produit « ${input.product} » introuvable.`, "Donner le nom exact du produit."); productId = p.id; }
+    const now = ctx.now;
+    const month = input.month ? `${input.month}-01` : (now.getUTCDate() > 20 ? new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)) : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))).toISOString().slice(0, 10);
+    const gi = { brandId: brand.id, objective: input.objective, axis: input.axis ?? null, budget: input.budget_mad ?? null, month, target: input.target, productId };
+    const r = await mp.generateActions(intelContext(ctx), gi, brand.name);
+    if (r.blocked) return unavailable(r.blocked, "Voir Stock & achats (rupture) ou saisir un budget.", "Générateur d'actions COMANET");
+    if (!r.options.length) return unavailable("Aucune action finançable avec ces paramètres.", `Raisons : ${r.excluded.slice(0, 5).map((e) => `${e.name} — ${e.reason}`).join(" ; ") || "aucun modèle compatible"}.`, "Générateur d'actions COMANET");
+    const data = {
+      brand: brand.name, objective: OBJECTIVES[input.objective], axis: input.axis ? AXES[input.axis].label : "tous les leviers", month: month.slice(0, 7),
+      budget_available_mad: r.available === null ? "non défini" : round(r.available), budget_basis_mad: round(r.budgetUsed), budget_source: r.budgetSource,
+      options: r.options.map((p, i) => ({
+        rank: i + 1, name: p.name, lever: AXES[p.axis].label, family: p.family, objective: p.objectiveText, concept: p.concept, target: p.target, channels: p.channels,
+        budget_mad: p.budget, budget_lines: p.lines.map((l) => `${l.label} : ${l.amount} MAD`), day_j: p.eventDate, end: p.endDate,
+        timeline: p.steps.map((s) => `${s.dayLabel} (${s.date}) ${s.label} — ${s.role.toLowerCase()}${s.assigneeName ? ` (${s.assigneeName})` : ""}`),
+        kpis: p.kpis.map((k) => `${k.label} : ${k.target} [${k.tag}]`), assumptions: p.estimate.assumptions,
+        impact: LEVEL_LABELS[p.impact], roi_potential: p.estimate.roi === null ? "non mesurable" : `${p.estimate.roi.toFixed(1)}× [INFERRED]`, complexity: COMPLEXITY_LABELS[p.complexity],
+        relevance_score: p.score, why: p.why, warnings: p.warnings, compliance: p.compliance,
+        suggestions: p.suggestions, add_to_plan_link: `/marketing/priorites/generer/${p.templateKey}?${generatorQuery({ ...gi, axis: gi.axis ?? p.axis, budget: gi.budget ?? p.budget })}`,
+      })),
+      excluded: r.excluded.slice(0, 10).map((e) => `${e.name} — ${e.reason}`), notes: r.notes,
+      rule: "Les résultats attendus sont des hypothèses du modèle (INFERRED), jamais une mesure ; un CA n'est attribué que par code promo ou montant saisi. La personne choisit et ajoute au plan.",
+    };
+    return { available: true, source: "Générateur d'actions COMANET (bibliothèque d'actions × données de la marque)", scope: scopeLabel(ctx.access, [`marque ${brand.name}`]), data, rowCount: r.options.length, links: [{ label: "Ouvrir le générateur", href: `/marketing/priorites/generer?${generatorQuery(gi)}` }], notes: freshnessNotes(ctx) };
   },
 };

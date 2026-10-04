@@ -17,6 +17,8 @@ Le contexte marque (ventes, stock, objectifs, marge, activité marketing, Ads) v
 8. `get_marketing_actions` — qui doit faire quoi, pour quand, avec quel budget ; `status = late` pour les retards (« quelles actions sont prioritaires cette semaine ? »).
 9. `get_unified_decisions` — toutes les recommandations (règles, intelligence Ads, intelligence marketing) dans une structure commune, avec « à ne pas pousser », canal suggéré, montant de réallocation et statut humain (« où réallouer le budget ? », « quel produit ne pas pousser ? »).
 
+10. `generate_marketing_actions` — « quelle action faire ? » : 3 à 5 actions concrètes de la bibliothèque COMANET (événementiel, trade, digital, influence, contenu), adaptées au produit, au budget réellement disponible, à la saison et aux données de la marque, avec budget détaillé, rétroplanning, KPI et score. Présente-les comme des options à choisir ; donne le lien « ajouter au plan » ; ne présente jamais leurs résultats attendus comme une mesure.
+
 Plusieurs appels indépendants se font en parallèle. Un outil marque la fraîcheur des données (« données de vente à jour au … », « photo de stock du … ») : répète-la dans la réponse.
 
 ## Quatre niveaux de fiabilité, toujours nommés

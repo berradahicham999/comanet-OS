@@ -3,12 +3,15 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { BudgetCategory, TaskPriority, TaskStatus } from "@/db/schema";
-import { requirePermission, brandInScope } from "@/lib/access";
+import { requirePermission, brandInScope, canDo } from "@/lib/access";
 import { BUDGET_CATEGORIES } from "@/lib/budget-categories";
 import { attachExpense, createAction, getAction, setActionStatus, updateAction } from "@/lib/marketing-plan/actions";
 import { approveDecision, measureDecision, rejectDecision, reopenDecision } from "@/lib/decisions/store";
 import { findDecision } from "@/lib/decisions/build";
 import { decisionScopeFor } from "@/lib/decisions/server";
+import { parseGeneratorParams } from "@/lib/action-generator/params";
+import { defaultMonth, runGenerator } from "@/lib/action-generator/server";
+import { addProposalToPlan } from "@/lib/action-generator/persist";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim() || null;
 const num = (fd: FormData, k: string) => { const s = String(fd.get(k) ?? "").replace(/\s| | /g, "").replace(",", "."); const n = Number(s); return s === "" || Number.isNaN(n) ? null : n; };
@@ -116,4 +119,30 @@ export async function measureDecisionAction(formData: FormData) {
   if (!key || !note) return;
   await measureDecision(key, note, { id: user.id, name: user.name });
   refresh();
+}
+
+/**
+ * « Ajouter au plan » d'une action générée. La proposition est RECALCULÉE côté serveur à partir des paramètres
+ * (marque, objectif, levier, budget, période, cible, produit) : rien de ce que la page affichait n'est cru tel quel.
+ */
+export async function addGeneratedActionAction(formData: FormData) {
+  const user = await requirePermission("marketing", "create");
+  const get = (k: string) => String(formData.get(k) ?? "").trim() || undefined;
+  const scope0 = await decisionScopeFor(get("brand") ?? null);
+  const input = parseGeneratorParams({ brand: get("brand"), objectif: get("objectif"), levier: get("levier"), budget: get("budget"), mois: get("mois"), cible: get("cible"), produit: get("produit") }, { month: defaultMonth(scope0.ctx.now) });
+  const templateKey = get("template");
+  if (!input || !templateKey) throw new Error("Paramètres de l'action incomplets.");
+  const brand = scope0.allBrands.find((b) => b.id === input.brandId);
+  if (!brand || !(await brandInScope(input.brandId))) throw new Error("Marque hors de votre périmètre.");
+  const { result, data } = await runGenerator(scope0.ctx, input, brand.name, { maxOptions: 100 });
+  const proposal = result.options.find((o) => o.templateKey === templateKey);
+  if (!proposal) throw new Error(result.blocked ?? (result.excluded.find((e) => e.templateKey === templateKey)?.reason ? `Action non disponible : ${result.excluded.find((e) => e.templateKey === templateKey)!.reason}.` : "Cette action n'est plus proposée : les données ont changé depuis l'affichage."));
+  const planAxisId = get("planAxisId");
+  const before = data.budgets[proposal.axis].available;
+  const res = await addProposalToPlan(proposal, input, { id: user.id, name: user.name }, { planAxisId: planAxisId && isUuid(planAxisId) ? planAxisId : null, withPlannedExpenses: await canDo("budgets", "create") });
+  refresh(res.actionId);
+  const q = new URLSearchParams({ ajout: "1" });
+  if (before !== null) { q.set("avant", String(Math.round(before))); q.set("apres", String(Math.round(before - proposal.budget))); }
+  if (res.planCreated) q.set("plan", "cree");
+  redirect(`${BASE}/${res.actionId}?${q.toString()}`);
 }

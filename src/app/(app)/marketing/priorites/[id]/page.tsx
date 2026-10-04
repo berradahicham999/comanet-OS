@@ -5,6 +5,8 @@ import { db } from "@/db";
 import { requireAccess, brandInScope, canDo } from "@/lib/access";
 import { listUsers } from "@/lib/users";
 import { getAction } from "@/lib/marketing-plan/actions";
+import type { ActionProposal } from "@/lib/action-generator/types";
+import { ProposalSheet } from "@/components/action-proposal";
 import { axisOptions, listPlans } from "@/lib/marketing-plan/plan";
 import { ACTION_SOURCE_LABELS, actionLateDays, isOpenStatus } from "@/lib/marketing-plan/shared";
 import { decisionsByAction } from "@/lib/decisions/store";
@@ -25,21 +27,28 @@ export async function generateMetadata(props: { params: Promise<{ id: string }> 
 
 const STATUS_LABEL = { PLANNED: "Prévu", COMMITTED: "Engagé", SPENT: "Dépensé" } as const;
 
-export default async function MarketingActionPage(props: { params: Promise<{ id: string }> }) {
+export default async function MarketingActionPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ ajout?: string; avant?: string; apres?: string; plan?: string }> }) {
   await requireAccess("marketing");
   const { id } = await props.params;
+  const sp = await props.searchParams;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const a = await getAction(id);
   if (!a || !(await brandInScope(a.brandId))) notFound();
   const year = (a.month ?? a.dueDate ?? iso(today())).slice(0, 4);
-  const [users, canEdit, canBudget, plans, axes, products, campaigns, expenses, candidates, decisionMap] = await Promise.all([
+  const [users, canEdit, canBudget, plans, axes, products, campaigns, expenses, candidates, decisionMap, stepRows, contentRows] = await Promise.all([
     listUsers(), canDo("marketing", "edit"), canDo("budgets", "edit"), listPlans([a.brandId]), axisOptions(a.brandId),
     db.execute<{ id: string; name: string }>(sql`select id, name from products where active and brand_id = ${a.brandId}::uuid order by name`),
     db.execute<{ id: string; name: string }>(sql`select id, name from campaigns where brand_id = ${a.brandId}::uuid and status not in ('DONE','ANALYZED') order by name`),
-    db.execute<{ id: string; label: string; date: string; amount: number; status: "PLANNED" | "COMMITTED" | "SPENT"; category: string }>(sql`select id, label, date::text as date, amount::float8 as amount, status::text as status, category::text as category from marketing_expenses where action_id = ${id}::uuid order by date desc`),
+    db.execute<{ id: string; label: string; date: string; amount: number; status: "PLANNED" | "COMMITTED" | "SPENT"; category: string }>(sql`select id, label, date::text as date, amount::float8 as amount, status::text as status, category::text as category from marketing_expenses where action_id = ${id}::uuid ${a.activationId ? sql`or (activation_id = ${a.activationId}::uuid and action_id is null)` : sql``} order by date desc`),
     db.execute<{ id: string; label: string; date: string; amount: number; status: string }>(sql`select id, label, date::text as date, amount::float8 as amount, status::text as status from marketing_expenses where brand_id = ${a.brandId}::uuid and action_id is null and extract(year from date) = ${Number(year)} order by date desc limit 100`),
     decisionsByAction([id]),
+    // Tâches du rétroplanning (action générée) : clé `marketing-action:<id>:etape:<n>`.
+    db.execute<{ id: string; status: string; source_key: string; assignee: string | null }>(sql`select t.id, t.status::text as status, t.source_key, u.name as assignee from tasks t left join users u on u.id = t.assignee_id where t.entity_type = 'marketing_action' and t.entity_id = ${id}::uuid and t.source_key like ${`marketing-action:${id}:etape:%`}`),
+    db.execute<{ id: string; title: string; date: string }>(sql`select id, title, date::text as date from content_items where archived_at is null and ((${a.activationId}::uuid is not null and activation_id = ${a.activationId}::uuid) or (${a.campaignId}::uuid is not null and campaign_id = ${a.campaignId}::uuid)) order by date limit 20`),
   ]);
+  const spec = a.spec as ActionProposal | null;
+  const taskStatus = new Map(stepRows.rows.map((r) => [Number(r.source_key.split(":etape:")[1]), { id: r.id, status: r.status, assignee: r.assignee }]));
+  const execHref = a.activationId ? `/marketing/activations/${a.activationId}` : a.campaignId ? `/marketing/campagnes/${a.campaignId}` : null;
   const decision = decisionMap.get(id) ?? null;
   const todayIso = iso(today());
   const late = actionLateDays(a, todayIso);
@@ -58,6 +67,25 @@ export default async function MarketingActionPage(props: { params: Promise<{ id:
           <Kpi label="Décision d'origine" value={decision ? DECISION_STATUS[decision.status].label : a.decisionKey ? "liée" : "—"} sub={decision ? DOMAIN_LABELS[decision.domain as DecisionDomain] ?? decision.domain : "créée à la main ou par le plan"} />
         </div>
       </PageHeader>
+
+      {sp.ajout && (
+        <div className="rounded-xl border border-green/30 bg-green/5 px-4 py-3 mb-4 text-[13px]">
+          <b>Action ajoutée au plan{sp.plan === "cree" ? " (plan de l'année créé en brouillon)" : ""}.</b>{" "}
+          {sp.avant && sp.apres && <>Budget disponible du levier : <b>{fmtMAD(Number(sp.avant))} → {fmtMAD(Number(sp.apres))}</b>. </>}
+          {spec && <>{spec.steps.length} tâches datées, {spec.contents.length} contenu(s) au planning{execHref ? <>, <Link href={execHref} className="underline">{a.activationId ? "activation" : "campagne"} créée</Link></> : null}.</>}
+        </div>
+      )}
+      {spec && (
+        <div className="mb-4">
+          <div className="flex flex-wrap items-center gap-2 mb-3 text-[12.5px]">
+            <span className="label">Exécution</span>
+            {execHref && <Link href={execHref} className="btn-secondary btn-sm">{a.activationId ? "Activation (budget par poste)" : "Campagne"}</Link>}
+            {contentRows.rows.length > 0 && <Link href={`/marketing/planning?brand=${a.brandId}`} className="btn-ghost btn-sm">{contentRows.rows.length} contenu(s) au planning</Link>}
+            <Link href={`/taches?brand=${a.brandId}`} className="btn-ghost btn-sm">{a.stepsDone}/{a.stepsTotal} tâches faites</Link>
+          </div>
+          <ProposalSheet p={spec} taskStatus={taskStatus} />
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-[1fr_380px] gap-4 items-start">
         <div className="space-y-4">

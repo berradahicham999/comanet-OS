@@ -355,3 +355,19 @@ describe("Marketing OS — une seule création d'action, une seule écriture des
     assert.doesNotMatch(block, /\bstatus:/);
   });
 });
+
+describe("Générateur d'actions — une seule bibliothèque, un seul moteur, aucune action générique par canal", () => {
+  test("la répartition mécanique d'un budget mensuel en actions par canal n'existe plus", () => {
+    const found = codeHits(/generateMonthActionsAction|splitMonthBudget/);
+    assert.deepEqual(found, [], `Génération générique encore présente dans : ${found.join(", ")}`);
+  });
+  test("le moteur de génération n'est défini qu'une fois", () => {
+    assert.deepEqual(hits(/export function generate\(/), ["src/lib/action-generator/engine.ts"]);
+    assert.deepEqual(hits(/export const TEMPLATES: ActionTemplate\[\]/), ["src/lib/action-generator/catalog.ts"]);
+  });
+  test("l'ajout au plan d'une action générée passe par createAction() (aucune insertion directe d'action)", () => {
+    const persist = FILES.find((f) => f.path === "src/lib/action-generator/persist.ts")!.code;
+    assert.match(persist, /createAction\(/);
+    assert.doesNotMatch(persist, /insert\(marketingActions\)/);
+  });
+});
