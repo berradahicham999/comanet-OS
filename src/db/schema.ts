@@ -4321,3 +4321,82 @@ export const brandMarketingPlaybooks = pgTable(
   },
   (t) => [index("brand_marketing_playbooks_updated_by_idx").on(t.updatedById)],
 );
+
+/* ------------------------------------------------------------------------------------------------
+ * Intelligence contenu — Studio créatif (migration 0048). Une opportunité créative est recalculée à chaque lecture
+ * (jamais stockée) ; ce qui est persisté : les concepts générés (empreinte créative, score explicable, statut humain,
+ * lien vers le contenu du planning quand il part en production, instantané de performance) et leurs packages de
+ * contenu (script, découpage, plans, variations, brief, revue). Seul `src/lib/creative/store.ts` les écrit. La mémoire
+ * créative se lit dans les sources existantes (créatives Meta étiquetées, contenus publiés, collaborations) : aucune
+ * seconde table de performance.
+ * ---------------------------------------------------------------------------------------------- */
+
+export const creativeConcepts = pgTable(
+  "creative_concepts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    brandId: uuid("brand_id").notNull().references(() => brands.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
+    /** Clé rejouable de l'opportunité (marque:produit:objectif:tension:mécanique). */
+    opportunityKey: text("opportunity_key").notNull(),
+    /** Empreinte créative : territoire|mécanique|tension|accroche|produit (non-répétition). */
+    fingerprint: text("fingerprint").notNull(),
+    territory: text("territory").notNull(),
+    mechanic: text("mechanic").notNull(),
+    tensionKey: text("tension_key").notNull(),
+    hookType: text("hook_type").notNull(),
+    format: text("format").notNull(),
+    funnelStage: text("funnel_stage").notNull(),
+    objective: text("objective").notNull(),
+    title: text("title").notNull(),
+    /** `CreativeConcept` complet (scores détaillés, conformité, revue). */
+    concept: jsonb("concept").$type<Record<string, unknown>>().notNull(),
+    score: integer("score").notNull().default(0),
+    /** PROPOSED | APPROVED | REJECTED | BUILT | SENT | ARCHIVED */
+    status: text("status").notNull().default("PROPOSED"),
+    rejectReason: text("reject_reason"),
+    /** Contenu du planning éditorial créé à l'envoi en production. */
+    contentItemId: uuid("content_item_id").references((): AnyPgColumn => contentItems.id, { onDelete: "set null" }),
+    /** AI | RULES (squelette déterministe sans copilote). */
+    generatedBy: text("generated_by").notNull().default("RULES"),
+    model: text("model"),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    decidedById: uuid("decided_by_id").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    /** Instantané de performance mesurée du contenu produit (mémoire créative), rafraîchi à la lecture. */
+    performance: jsonb("performance").$type<Record<string, unknown>>(),
+    performanceAt: timestamp("performance_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("creative_concepts_brand_status_idx").on(t.brandId, t.status),
+    index("creative_concepts_opportunity_idx").on(t.opportunityKey),
+    index("creative_concepts_fingerprint_idx").on(t.fingerprint),
+    index("creative_concepts_product_idx").on(t.productId),
+    index("creative_concepts_content_idx").on(t.contentItemId),
+    index("creative_concepts_created_by_idx").on(t.createdById),
+    index("creative_concepts_decided_by_idx").on(t.decidedById),
+  ],
+);
+
+export const creativePackages = pgTable(
+  "creative_packages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conceptId: uuid("concept_id").notNull().references(() => creativeConcepts.id, { onDelete: "cascade" }),
+    version: integer("version").notNull().default(1),
+    /** `ContentPackage` complet. */
+    package: jsonb("package").$type<Record<string, unknown>>().notNull(),
+    /** `VariationSet`, généré à la demande. */
+    variations: jsonb("variations").$type<Record<string, unknown>>(),
+    briefMd: text("brief_md").notNull().default(""),
+    /** Revue créative et conformité (IA + contrôle déterministe). */
+    review: jsonb("review").$type<Record<string, unknown>>(),
+    model: text("model"),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("creative_packages_concept_idx").on(t.conceptId), index("creative_packages_created_by_idx").on(t.createdById)],
+);

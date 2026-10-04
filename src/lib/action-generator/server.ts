@@ -30,7 +30,8 @@ export function defaultMonth(now: Date): string {
 export type Opportunity = { brandId: string; brandName: string; brandColor: string; input: GeneratorInput; proposal: ActionProposal; signal: string; available: number | null; alternatives: number };
 export type OpportunityAlert = { brandId: string; brandName: string; message: string };
 
-const OBJECTIVE_OF: Partial<Record<MarketingAction, ObjectiveKey>> = {
+/** Objectif du générateur déduit d'une décision du moteur marketing (réutilisé par le studio créatif). */
+export const OBJECTIVE_OF: Partial<Record<MarketingAction, ObjectiveKey>> = {
   PUSH: "SELL_OUT", BOOST_DIGITAL: "SELL_OUT", CREATE_CONTENT: "NOTORIETE", ACTIVATE_INFLUENCER: "ACQUISITION", CREATE_PROMOTION: "ECOULEMENT", FOCUS_SELL_OUT: "SELL_OUT", MAINTAIN: "FIDELISATION",
 };
 

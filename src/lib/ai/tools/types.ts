@@ -25,6 +25,7 @@ import type { ActionFilter, ActionRow } from "@/lib/marketing-plan/actions";
 import type { DecisionScope, DecisionSet as UnifiedDecisionSet } from "@/lib/decisions/build";
 import type { GeneratorInput, GeneratorResult } from "@/lib/action-generator/types";
 import type { IntelContext } from "@/lib/marketing-intel/types";
+import type { OpportunityBoard } from "@/lib/creative/server";
 
 /** Droits de la personne connectée, tels que résolus par `permissions.ts`. `brandIds`/`clientIds` à `null` = tout. */
 export type ToolAccess = {
@@ -102,11 +103,17 @@ export type CrmToolDeps = {
   brief(clientId: string): Promise<import("@/lib/crm/intelligence").VisitBrief | null>;
 };
 
+/** Studio créatif (lecture seule) : opportunités, apprentissages et territoires saturés. */
+export type CreativeToolDeps = {
+  board(o: { ctx: IntelContext; perms: PermissionSet; brandIds: string[] | null; selectedBrandId: string | null }): Promise<OpportunityBoard>;
+};
+
 export type ToolDeps = MarketingIntelDeps & {
   /** Facultatif : les doublures de test des autres domaines n'ont pas à le fournir. */
   medical?: MedicalToolDeps;
   marketingPlan?: MarketingPlanToolDeps;
   crm?: CrmToolDeps;
+  creative?: CreativeToolDeps;
   // Référentiels (résolution d'un nom saisi par le modèle vers un identifiant)
   findBrand(query: string): Promise<Ref | null>;
   findClient(query: string): Promise<Ref | null>;

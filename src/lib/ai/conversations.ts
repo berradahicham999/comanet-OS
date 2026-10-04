@@ -8,7 +8,7 @@ import { aiConversations, aiMessages } from "@/db/schema";
 export type ConversationSummary = { id: string; title: string | null; contextPath: string | null; updatedAt: string };
 
 /** Surfaces automatiques : leurs conversations servent au suivi des coûts, pas à l'historique du panneau. */
-export const HIDDEN_CONTEXT_MODULES = ["explain", "brief", "plan", "report"];
+export const HIDDEN_CONTEXT_MODULES = ["explain", "brief", "plan", "report", "creative"];
 export type StoredMessage = { id: string; role: "user" | "assistant"; content: string; toolCalls: unknown; createdAt: string; model: string | null; latencyMs: number | null };
 
 export async function listConversations(userId: string, limit = 20): Promise<ConversationSummary[]> {

@@ -119,6 +119,17 @@ export async function updateSettings(formData: FormData) {
       maxDecisions: Math.max(1, Math.round(num(formData, "mp_maxDecisions", cur.marketingPlan.maxDecisions))),
     },
     crm: parseCrm(formData, cur.crm),
+    creative: {
+      fatigueWindowDays: Math.max(7, Math.round(num(formData, "cr_fatigueWindowDays", cur.creative.fatigueWindowDays))),
+      duplicateThreshold: Math.min(1, Math.max(0.3, num(formData, "cr_duplicateThreshold", cur.creative.duplicateThreshold))),
+      saturationMinCount: Math.max(1, Math.round(num(formData, "cr_saturationMinCount", cur.creative.saturationMinCount))),
+      maxOpportunities: Math.min(12, Math.max(1, Math.round(num(formData, "cr_maxOpportunities", cur.creative.maxOpportunities)))),
+      maxConcepts: Math.min(5, Math.max(3, Math.round(num(formData, "cr_maxConcepts", cur.creative.maxConcepts)))),
+      paidTestBudgetMad: Math.max(0, num(formData, "cr_paidTestBudgetMad", cur.creative.paidTestBudgetMad)),
+      minLearningCreatives: Math.max(1, Math.round(num(formData, "cr_minLearningCreatives", cur.creative.minLearningCreatives))),
+      conceptTier: String(formData.get("cr_conceptTier") ?? cur.creative.conceptTier) === "fast" ? "fast" : "advanced",
+      builderTier: String(formData.get("cr_builderTier") ?? cur.creative.builderTier) === "advanced" ? "advanced" : "fast",
+    },
   };
   if (!next.regulatoryAlertDays.length) next.regulatoryAlertDays = cur.regulatoryAlertDays;
   await saveSettings(next);
