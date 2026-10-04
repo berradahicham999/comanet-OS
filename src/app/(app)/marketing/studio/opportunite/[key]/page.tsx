@@ -9,6 +9,7 @@ import { listConcepts } from "@/lib/creative/store";
 import { tensionOf } from "@/lib/creative/consumer";
 import { FUNNEL_LABELS, HOOK_LABELS, TERRITORY_LABELS, mechanicOf } from "@/lib/creative/territories";
 import { PageHeader, Card, Kpi, Badge, Section, Empty } from "@/components/ui";
+import { PendingSubmit } from "@/components/pending-submit";
 import { ConceptCard, PRIORITY_LABEL, PRIORITY_TONE, ScoreList, Tag, TERRITORY_TONE, conceptHref } from "@/components/creative-studio";
 import { fmtMAD } from "@/lib/format";
 import { buildPackageAction, conceptStatusAction, generateConceptsAction } from "../../actions";
@@ -21,7 +22,7 @@ export const metadata = { title: "Opportunité créative" };
 function GenerateForm({ opportunityKey, regenerate }: { opportunityKey: string; regenerate: boolean }) {
   return (
     <form action={generateConceptsAction}><input type="hidden" name="key" value={opportunityKey} />{regenerate && <input type="hidden" name="regenerate" value="1" />}
-      <button type="submit" className={regenerate ? "btn-secondary btn-sm" : "btn-primary btn-sm"}>{regenerate ? <><RefreshCw size={14} /> Régénérer</> : <><Sparkles size={14} /> Générer les concepts</>}</button>
+      <PendingSubmit className={regenerate ? "btn-secondary btn-sm" : "btn-primary btn-sm"} pendingLabel="Génération en cours, environ 2 minutes…">{regenerate ? <><RefreshCw size={14} /> Régénérer</> : <><Sparkles size={14} /> Générer les concepts</>}</PendingSubmit>
     </form>
   );
 }
@@ -95,7 +96,7 @@ export default async function OpportunityPage(props: { params: Promise<{ key: st
               <ConceptCard key={s.id} s={s} actions={
                 <>
                   <Link href={conceptHref(s.id)} className="btn-secondary btn-sm">Ouvrir <ArrowUpRight size={14} /></Link>
-                  {(s.status === "PROPOSED" || s.status === "APPROVED") && canCreate && <form action={buildPackageAction}><input type="hidden" name="id" value={s.id} /><button type="submit" className="btn-primary btn-sm"><Clapperboard size={14} /> Construire le contenu</button></form>}
+                  {(s.status === "PROPOSED" || s.status === "APPROVED") && canCreate && <form action={buildPackageAction}><input type="hidden" name="id" value={s.id} /><PendingSubmit pendingLabel="Construction en cours, environ 2 minutes…"><Clapperboard size={14} /> Construire le contenu</PendingSubmit></form>}
                   {s.status === "PROPOSED" && canEdit && <form action={conceptStatusAction}><input type="hidden" name="id" value={s.id} /><input type="hidden" name="status" value="APPROVED" /><button type="submit" className="btn-ghost btn-sm">Approuver</button></form>}
                   {(s.status === "PROPOSED" || s.status === "APPROVED") && canEdit && (
                     <form action={conceptStatusAction} className="flex items-center gap-1"><input type="hidden" name="id" value={s.id} /><input type="hidden" name="status" value="REJECTED" />

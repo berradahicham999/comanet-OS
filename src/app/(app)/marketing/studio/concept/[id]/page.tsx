@@ -9,6 +9,7 @@ import { getConcept } from "@/lib/creative/store";
 import { FORMAT_LABELS, FUNNEL_LABELS, HOOK_LABELS, PERSONA_LABELS, TERRITORY_LABELS } from "@/lib/creative/territories";
 import type { Variation, VariationDimension } from "@/lib/creative/types";
 import { PageHeader, Card, Kpi, Badge, Tabs, Section } from "@/components/ui";
+import { PendingSubmit } from "@/components/pending-submit";
 import { ComplianceList, ConceptHeader, KV, ReviewPanel, STATUS_LABEL, STATUS_TONE, SceneTable, ScoreList, ShotTable, Tag, conceptHref, opportunityHref } from "@/components/creative-studio";
 import { addDays, iso, today, fmtMAD } from "@/lib/format";
 import { buildPackageAction, conceptStatusAction, sendToPlanningAction, variationsAction } from "../../actions";
@@ -46,7 +47,7 @@ export default async function ConceptPage(props: { params: Promise<{ id: string 
         subtitle={<span className="inline-flex flex-wrap items-center gap-2"><Badge tone={STATUS_TONE[c.status]}>{STATUS_LABEL[c.status]}</Badge><ConceptHeader c={k} /></span>}
         actions={<>
           {p && <Link href={`${conceptHref(id)}/brief`} className="btn-secondary btn-sm"><FileText size={14} /> Brief de production</Link>}
-          {!p && canCreate && (c.status === "PROPOSED" || c.status === "APPROVED") && <form action={buildPackageAction}><input type="hidden" name="id" value={id} /><button type="submit" className="btn-primary btn-sm"><Clapperboard size={14} /> Construire le contenu</button></form>}
+          {!p && canCreate && (c.status === "PROPOSED" || c.status === "APPROVED") && <form action={buildPackageAction}><input type="hidden" name="id" value={id} /><PendingSubmit pendingLabel="Construction en cours, environ 2 minutes…"><Clapperboard size={14} /> Construire le contenu</PendingSubmit></form>}
           {p && canCreate && c.status !== "SENT" && <Link href={conceptHref(id, "production")} className="btn-primary btn-sm"><Send size={14} /> Envoyer en production</Link>}
           {c.status === "SENT" && c.contentItemId && <Link href={`/marketing/planning/${c.contentItemId}`} className="btn-primary btn-sm">Voir au planning</Link>}
         </>}>
@@ -111,7 +112,7 @@ export default async function ConceptPage(props: { params: Promise<{ id: string 
 
       {tab === "variations" && p && (
         <Section title="Variations créatives" description={c.variations ? `Base : ${c.variations.baseLabel}. Chaque variation change une variable créative et dit laquelle.${c.variations.generatedBy === "RULES" ? " (déterministes, sans IA)" : ""}` : "Accroche (5), ouverture (3), structure (3), persona (2 à 3), angle émotionnel (2 à 3), CTA (2 à 3), format."}
-          action={canCreate ? <form action={variationsAction}><input type="hidden" name="id" value={id} /><button type="submit" className="btn-primary btn-sm"><Shuffle size={14} /> {c.variations ? "Régénérer les variations" : "Générer des variations"}</button></form> : undefined}>
+          action={canCreate ? <form action={variationsAction}><input type="hidden" name="id" value={id} /><PendingSubmit pendingLabel="Variations en cours, environ 1 minute…"><Shuffle size={14} /> {c.variations ? "Régénérer les variations" : "Générer des variations"}</PendingSubmit></form> : undefined}>
           {!c.variations ? <div className="card card-pad text-[13px] text-muted">Aucune variation générée pour l&apos;instant.</div> : (
             <div className="grid lg:grid-cols-2 gap-3">{(Object.keys(DIM_LABEL) as VariationDimension[]).filter((d) => byDim.has(d)).map((d) => (
               <Card key={d} title={DIM_LABEL[d]}><ul className="space-y-2">{byDim.get(d)!.map((v, i) => <li key={i} className="rounded-xl bg-surface-2 p-3 text-[13px]"><div className="flex items-center gap-2"><b>{v.label}</b>{v.format && <Badge tone="gray">{FORMAT_LABELS[v.format]}</Badge>}</div><p className="text-[12px] text-muted">Ce qui change : {v.changed}</p><p className="mt-1">{v.content}</p>{v.steps && v.steps.length > 0 && <ol className="list-decimal pl-5 mt-1 text-[12.5px]">{v.steps.map((s, j) => <li key={j}>{s}</li>)}</ol>}</li>)}</ul></Card>
@@ -145,7 +146,7 @@ export default async function ConceptPage(props: { params: Promise<{ id: string 
                 <label className="block"><span className="label">Livrable attendu le</span><input type="date" name="deadline" defaultValue={iso(addDays(today(), 5))} className="input mt-1" /></label>
                 <label className="block"><span className="label">Responsable</span><select name="responsibleId" className="select mt-1" defaultValue=""><option value="">— à définir —</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
                 <label className="block"><span className="label">Plateforme</span><select name="platform" className="select mt-1" defaultValue={refs.platforms.find((x) => x.active && /insta/i.test(x.key))?.key ?? ""}>{refs.platforms.filter((x) => x.active).map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}</select></label>
-                <div className="sm:col-span-2 flex items-center gap-2"><button type="submit" className="btn-primary btn-sm"><Send size={14} /> Créer le contenu au planning</button><span className="text-[12px] text-muted">Crée le brief complet dans le planning éditorial, rattache le produit et ouvre la tâche du responsable.</span></div>
+                <div className="sm:col-span-2 flex items-center gap-2"><PendingSubmit pendingLabel="Création au planning…"><Send size={14} /> Créer le contenu au planning</PendingSubmit><span className="text-[12px] text-muted">Crée le brief complet dans le planning éditorial, rattache le produit et ouvre la tâche du responsable.</span></div>
               </form>
             )}
           </Card>
