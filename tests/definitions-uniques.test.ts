@@ -400,3 +400,14 @@ describe("CRM commercial — visites, portefeuilles, objectifs client", () => {
     assert.deepEqual(found, [], `Affectation de portefeuille hors de crm/portfolio.ts : ${found.join(", ")}`);
   });
 });
+
+describe("Bibliothèque d'actions — une seule écriture des modèles et de « ce qui marche par marque »", () => {
+  test("seul `action-generator/library.ts` écrit `action_templates` et `brand_marketing_playbooks`", () => {
+    const found = codeHits(/(insert|update|delete)\((actionTemplates|brandMarketingPlaybooks)\)|(insert\s+into|update|delete\s+from)\s+(action_templates|brand_marketing_playbooks)\b/i, ["lib/action-generator/library.ts"]);
+    assert.deepEqual(found, [], `Écriture de la bibliothèque d'actions hors de library.ts : ${found.join(", ")}`);
+  });
+  test("le générateur lit la bibliothèque effective (modèles livrés + équipe), jamais `TEMPLATES` seul", () => {
+    const found = codeHits(/generate\([^)]*\bTEMPLATES\b/, ["tests/"]);
+    assert.deepEqual(found, [], `Génération sur les seuls modèles livrés : ${found.join(", ")}`);
+  });
+});

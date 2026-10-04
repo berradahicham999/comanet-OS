@@ -65,6 +65,7 @@ export const NAV: NavGroup[] = [
       { href: "/marketing", label: "Command Center", icon: "Megaphone", module: "marketing", exact: true },
       { href: "/marketing/plan", label: "Plan marketing", icon: "Map", module: "marketing" },
       { href: "/marketing/priorites", label: "Priorités & actions", icon: "Zap", module: "marketing" },
+      { href: "/marketing/bibliotheque", label: "Bibliothèque d'actions", icon: "LibraryBig", module: "marketing" },
       { href: "/marketing/campagnes", label: "Campagnes", icon: "Rocket", module: "marketing" },
       { href: "/marketing/influence", label: "Influence", icon: "Heart", module: "influence" },
       { href: "/marketing/ads", label: "Digital Ads", icon: "MousePointerClick", module: "marketing" },

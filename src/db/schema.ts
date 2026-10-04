@@ -4278,3 +4278,46 @@ export const marketingDecisionsRelations = relations(marketingDecisions, ({ one 
   decidedBy: one(users, { fields: [marketingDecisions.decidedById], references: [users.id] }),
   action: one(marketingActions, { fields: [marketingDecisions.actionId], references: [marketingActions.id] }),
 }));
+
+/* ------------------------------------------------------------------------------------------------
+ * Bibliothèque d'actions éditable (migration 0047). Les modèles livrés avec l'application vivent dans
+ * `src/lib/action-generator/catalog.ts` (valeurs par défaut, comme `DEFAULT_SETTINGS`) ; cette table ne contient
+ * que ce que l'équipe change : un modèle système modifié ou désactivé (même clé), un modèle créé, importé
+ * ou enregistré depuis une action réussie. Seul `src/lib/action-generator/library.ts` l'écrit.
+ * ---------------------------------------------------------------------------------------------- */
+export const actionTemplates = pgTable(
+  "action_templates",
+  {
+    key: text("key").primaryKey(),
+    /** Modèle complet (`ActionTemplate`, validé par `templateSchema`). */
+    data: jsonb("data").$type<Record<string, unknown>>().notNull(),
+    /** SYSTEME (modèle livré, modifié ou désactivé) | EQUIPE | IMPORT | ACTION | ACTIVATION */
+    source: text("source").notNull().default("EQUIPE"),
+    active: boolean("active").notNull().default(true),
+    originActionId: uuid("origin_action_id").references(() => marketingActions.id, { onDelete: "set null" }),
+    originActivationId: uuid("origin_activation_id").references(() => activations.id, { onDelete: "set null" }),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    updatedById: uuid("updated_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("action_templates_origin_action_idx").on(t.originActionId), index("action_templates_origin_activation_idx").on(t.originActivationId), index("action_templates_created_by_idx").on(t.createdById), index("action_templates_updated_by_idx").on(t.updatedById)],
+);
+
+/**
+ * Ce qui marche pour une marque, selon la direction : poids par levier (0 à 1), modèles favoris et écartés, note.
+ * Une conviction, pas une mesure : le générateur l'affiche comme telle (INFERRED) dans le score de pertinence.
+ */
+export const brandMarketingPlaybooks = pgTable(
+  "brand_marketing_playbooks",
+  {
+    brandId: uuid("brand_id").primaryKey().references(() => brands.id, { onDelete: "cascade" }),
+    levers: jsonb("levers").$type<Record<string, number>>().notNull().default({}),
+    favorites: jsonb("favorites").$type<string[]>().notNull().default([]),
+    avoid: jsonb("avoid").$type<string[]>().notNull().default([]),
+    note: text("note"),
+    updatedById: uuid("updated_by_id").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("brand_marketing_playbooks_updated_by_idx").on(t.updatedById)],
+);

@@ -23,6 +23,7 @@ import { addDays, iso } from "@/lib/format";
 import type { AdVerdict } from "@/lib/marketing-shared";
 import { AXES, AXIS_KEYS } from "./catalog";
 import { axisAvailable } from "./engine";
+import { playbookFor } from "./library";
 import type { AxisBudget, AxisKey, GeneratorData, HistoryItem, ProductData, StepRole } from "./types";
 
 const ACTIONABLE: ResultKind[] = ["message", "lead", "landing", "purchase", "click"];
@@ -84,12 +85,12 @@ export async function loadGeneratorData(ctx: IntelContext, o: { brandId: string;
   /* Produit */
   let product: ProductData | null = null;
   if (o.productId) {
-    const row = (await db.execute<{ id: string; name: string; short_name: string | null; category: string | null; price_retail: number | null; actives: string | null; marketing_angle: string | null }>(sql`
-      select id, name, short_name, category, price_retail::float8 as price_retail, actives, marketing_angle from products where id = ${o.productId}::uuid and brand_id = ${o.brandId}::uuid`)).rows[0];
+    const row = (await db.execute<{ id: string; name: string; short_name: string | null; category: string | null; price_retail: number | null; actives: string | null; marketing_angle: string | null; benefits: string | null; claims: string | null }>(sql`
+      select id, name, short_name, category, price_retail::float8 as price_retail, actives, marketing_angle, benefits, claims from products where id = ${o.productId}::uuid and brand_id = ${o.brandId}::uuid`)).rows[0];
     if (row) {
       const p = perf?.rows.find((r) => r.productId === row.id) ?? null;
       product = {
-        id: row.id, name: row.name, shortName: row.short_name, category: row.category, priceRetail: row.price_retail, actives: row.actives, marketingAngle: row.marketing_angle,
+        id: row.id, name: row.name, shortName: row.short_name, category: row.category, priceRetail: row.price_retail, actives: row.actives, marketingAngle: row.marketing_angle, benefits: row.benefits, claims: row.claims,
         profile: p?.profile ?? null, growthPct: p?.growthPct ?? null, revenue90: p ? p.revenue : null, contributionPct: p?.contributionPct ?? null,
         stockRisk: p?.stock?.risk ?? null, daysOfStock: p?.stock?.daysOfStock ?? null,
       };
@@ -136,8 +137,15 @@ export async function loadGeneratorData(ctx: IntelContext, o: { brandId: string;
   /* Équipe : une personne par rôle (proposition, modifiable sur chaque tâche). */
   const pick = (role: string) => users.find((u) => u.role === role) ?? null;
   const team: GeneratorData["team"] = {};
-  const map: Record<StepRole, string> = { MARKETING: "MARKETING", TRADE: "TRADE", REGLEMENTAIRE: "REGLEMENTAIRE", ANIMATRICE: "ANIMATRICE", DIRECTION: "ADMIN" };
-  for (const [k, role] of Object.entries(map) as [StepRole, string][]) { const u = pick(role); if (u) team[k] = { id: u.id, name: u.name }; }
+  const map: Record<StepRole, string[]> = { MARKETING: ["MARKETING"], TRADE: ["TRADE"], MEDICAL: ["MANAGER_MEDICAL", "DELEGUE_MEDICAL"], REGLEMENTAIRE: ["REGLEMENTAIRE"], ANIMATRICE: ["ANIMATRICE"], DIRECTION: ["ADMIN"] };
+  for (const [k, roles] of Object.entries(map) as [StepRole, string[]][]) { const u = roles.map(pick).find(Boolean); if (u) team[k] = { id: u.id, name: u.name }; }
+
+  /* Médecins liés à la marque, par potentiel (actions prescripteurs). */
+  const doc = (await db.execute<{ a: number; b: number; total: number }>(sql`
+    select count(*) filter (where d.potential = 'A')::int as a, count(*) filter (where d.potential = 'B')::int as b, count(*)::int as total
+    from doctors d join doctor_brands db2 on db2.doctor_id = d.id where db2.brand_id = ${o.brandId}::uuid and d.status <> 'INACTIF'`).catch(() => ({ rows: [] as { a: number; b: number; total: number }[] }))).rows[0];
+  const prescribers = doc && Number(doc.total) > 0 ? { a: Number(doc.a), b: Number(doc.b), total: Number(doc.total) } : null;
+  const playbook = await playbookFor(o.brandId);
 
   const verdicts: Partial<Record<BudgetCategory, AdVerdict>> = {};
   for (const v of verdictRows) verdicts[v.category] = v.verdict;
@@ -149,6 +157,6 @@ export async function loadGeneratorData(ctx: IntelContext, o: { brandId: string;
     topCity: cityRows.rows[0]?.city ?? null,
     topPos: posRows.rows.map((p) => ({ name: p.name, city: p.city, revenue: Number(p.revenue), trendPct: Number(p.prev) > 0 ? ((Number(p.revenue) - Number(p.prev)) / Number(p.prev)) * 100 : null })),
     influencers: inflRows.rows.map((i) => ({ name: i.name, followers: i.followers, usualRate: i.usual_rate, collabs: Number(i.collabs), lastReach: i.last_reach })),
-    team,
+    team, prescribers, playbook,
   };
 }

@@ -7,20 +7,23 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { DEFAULT_SETTINGS } from "@/lib/settings";
 import { AXES, AXIS_KEYS, TEMPLATES } from "@/lib/action-generator/catalog";
-import { axisAvailable, generate, heroWord, productKind, proposedBudget, remainingAfter, scheduleJ, splitBudget } from "@/lib/action-generator/engine";
+import { axisAvailable, extraKpiValue, firstItem, generate, heroWord, productKind, proposedBudget, remainingAfter, renderPattern, scheduleJ, splitBudget } from "@/lib/action-generator/engine";
+import { TEMPLATE_COLUMNS, fieldsToTemplate, sheetRowToFields, formatContents, formatKpis, formatLines, formatSteps, parseContents, parseKpis, parseLines, parseSteps, templateFromActivation, templateFromProposal, templateToFields, validateTemplate } from "@/lib/action-generator/library-shared";
 import { generatorQuery, parseGeneratorParams } from "@/lib/action-generator/params";
 import type { AxisKey, GeneratorData, GeneratorInput } from "@/lib/action-generator/types";
 import { BUDGET_CATEGORY_LABELS } from "@/lib/budget-categories";
+import * as XLSX from "xlsx";
+import { parseSheet } from "@/lib/import/parse";
 
 const COST_ITEMS = new Set(["LIEU", "TRAITEUR", "MATERIEL", "IMPRESSION", "TRANSPORT", "CACHET", "ECHANTILLONS", "GOODIES", "HOTESSES", "SPONSORING", "COMMUNICATION", "AGENCE", "AUTRE"]);
 const ACTIVATION_TYPES = new Set(["EVENEMENT", "SPONSORING", "SALON", "PLV", "SAMPLING", "GOODIES", "OPERATION_PHARMACIE", "RP", "COLLABORATION", "AUTRE"]);
 const SEASON_KEYS = new Set(DEFAULT_SETTINGS.forecast.events.map((e) => e.key));
 
 describe("bibliothèque d'actions", () => {
-  test("30 modèles, clés uniques, au moins 4 par levier", () => {
-    assert.equal(TEMPLATES.length, 30);
+  test("60 modèles, clés uniques, au moins 3 par levier", () => {
+    assert.ok(TEMPLATES.length >= 60, `${TEMPLATES.length} modèles`);
     assert.equal(new Set(TEMPLATES.map((t) => t.key)).size, TEMPLATES.length);
-    for (const a of AXIS_KEYS) assert.ok(TEMPLATES.filter((t) => t.axis === a).length >= 4, a);
+    for (const a of AXIS_KEYS) assert.ok(TEMPLATES.filter((t) => t.axis === a).length >= 3, a);
   });
   for (const t of TEMPLATES) {
     test(`${t.key} : cohérent`, () => {
@@ -35,9 +38,13 @@ describe("bibliothèque d'actions", () => {
         assert.ok(ACTIVATION_TYPES.has(t.execution.activationType), "type d'activation connu");
         for (const l of t.lines) assert.ok(l.costItem && COST_ITEMS.has(l.costItem), `poste d'activation pour « ${l.label} »`);
       }
-      const name = t.name({ hero: "Collagenium", brand: "Auracos", product: "Pro Collagenium", target: "Femmes 25-45 ans", city: "Casablanca", season: null, month: "2026-11-01" });
+      const vars = { heros: "Collagenium", marque: "Auracos", produit: "Pro Collagenium", cible: "femmes 25-45 ans", ville: "Casablanca", benefice: null, actif: null, angle: null, saison: null };
+      const name = renderPattern(t.name, vars), concept = renderPattern(t.concept, vars);
       assert.ok(name.length > 6 && !Object.values(BUDGET_CATEGORY_LABELS).includes(name), "un nom d'action, pas une catégorie");
-      assert.match(t.concept({ hero: "Collagenium", brand: "Auracos", product: "Pro Collagenium", target: "Femmes 25-45 ans", city: "Casablanca", season: null, month: "2026-11-01" }), /\w{20,}|.{80,}/);
+      assert.ok(concept.length >= 80, "un concept complet");
+      assert.doesNotMatch(name + concept, /[{}]/, "toutes les variables sont rendues (avec repli)");
+      const v = validateTemplate(t);
+      assert.ok(v.ok, v.ok ? "" : v.errors.join(" ; "));
     });
   }
 });
@@ -85,12 +92,13 @@ const axisB = (axis: AxisKey, available: number | null, source: "AXE" | "MARQUE"
 function data(over: Partial<GeneratorData> = {}): GeneratorData {
   return {
     today: "2026-10-04", brand: { id: "b1", name: "Auracos" },
-    product: { id: "p1", name: "AURACOS PRO COLLAGENIUM 30 sachets", shortName: null, category: "Complément", priceRetail: 290, actives: null, marketingAngle: null, profile: "GROWTH", growthPct: 18, revenue90: 120_000, contributionPct: 22, stockRisk: "HEALTHY", daysOfStock: 75 },
-    budgets: { EVENEMENTIEL: axisB("EVENEMENTIEL", 45_000), TRADE: axisB("TRADE", 30_000), DIGITAL: axisB("DIGITAL", 25_000), INFLUENCE: axisB("INFLUENCE", 20_000), CONTENU: axisB("CONTENU", 10_000) },
+    product: { id: "p1", name: "AURACOS PRO COLLAGENIUM 30 sachets", shortName: null, category: "Complément", priceRetail: 290, actives: "Collagène marin hydrolysé ; vitamine C", marketingAngle: null, benefits: "Peau plus ferme et éclatante en 8 semaines. Cheveux et ongles renforcés.", claims: null, profile: "GROWTH", growthPct: 18, revenue90: 120_000, contributionPct: 22, stockRisk: "HEALTHY", daysOfStock: 75 },
+    budgets: { EVENEMENTIEL: axisB("EVENEMENTIEL", 45_000), TRADE: axisB("TRADE", 30_000), MEDICAL: axisB("MEDICAL", 20_000), PARTENARIAT: axisB("PARTENARIAT", 15_000), DIGITAL: axisB("DIGITAL", 25_000), INFLUENCE: axisB("INFLUENCE", 60_000), CONTENU: axisB("CONTENU", 10_000) },
     brandAvailable: 200_000, monthRemaining: null, history: [], verdicts: {}, adsCost: null,
     seasonEvents: [], topCity: "Casablanca", topPos: [{ name: "Pharmacie Atlas", city: "Casablanca", revenue: 30_000, trendPct: -12 }],
     influencers: [{ name: "Sara", followers: 25_000, usualRate: 3000, collabs: 2, lastReach: 12_000 }],
     team: { MARKETING: { id: "u1", name: "Hicham" }, TRADE: { id: "u2", name: "Samy" } },
+    prescribers: { a: 12, b: 30, total: 80 }, playbook: null,
     ...over,
   };
 }
@@ -184,4 +192,150 @@ describe("paramètres d'URL", () => {
     assert.equal(parseGeneratorParams({ brand: "x" }, { month: "2026-10-01" }), null);
   });
   test("chaque levier a une catégorie principale dans ses catégories", () => { for (const a of AXIS_KEYS) assert.ok(AXES[a].categories.includes(AXES[a].mainCategory)); });
+});
+
+describe("fiches produits et textes à variables", () => {
+  test("renderPattern : variable, repli, variable vide", () => {
+    assert.equal(renderPattern("Atelier {heros} à {ville|la ville cible}", { heros: "Collagenium", ville: null }), "Atelier Collagenium à la ville cible");
+    assert.equal(renderPattern("{benefice|son bénéfice} ({actif})", { benefice: "peau plus ferme", actif: "" }), "peau plus ferme");
+  });
+  test("firstItem : premier élément de la fiche, minuscule initiale", () => {
+    assert.equal(firstItem("Peau plus ferme et éclatante en 8 semaines. Cheveux renforcés."), "peau plus ferme et éclatante en 8 semaines");
+    assert.equal(firstItem("Collagène marin hydrolysé ; vitamine C"), "collagène marin hydrolysé");
+    assert.equal(firstItem(null), null);
+  });
+  test("le concept reprend le bénéfice et l'actif de la fiche produit", () => {
+    const r = generate(input({ axis: "INFLUENCE", objective: "LANCEMENT" }), data(), TEMPLATES);
+    const ugc = r.options.find((o) => o.templateKey === "IN_UGC_CREATORS");
+    assert.ok(ugc, "créatrices UGC proposées");
+    assert.match(ugc!.concept, /peau plus ferme et éclatante en 8 semaines/);
+    assert.ok(ugc!.data.some((d) => d.label.startsWith("Bénéfice") && d.tag === "CONFIRMED"));
+  });
+  test("KPI propre : valeur fixe ou calculée sur le budget", () => {
+    assert.equal(extraKpiValue({ value: 4 }, 10_000), "4");
+    assert.equal(extraKpiValue({ per: 110 }, 11_000), "100");
+    assert.equal(extraKpiValue({ per: 20, factor: 0.5 }, 10_000), "250");
+  });
+});
+
+describe("ce qui marche par marque et calendrier", () => {
+  test("Auracos : la grosse influenceuse passe devant quand elle est favorite", () => {
+    const base = generate(input({ axis: "INFLUENCE", budget: 50_000 }), data(), TEMPLATES).options;
+    const pb = generate(input({ axis: "INFLUENCE", budget: 50_000 }), data({ playbook: { levers: { INFLUENCE: 1 }, favorites: ["IN_MACRO"], avoid: [], note: "grosse influenceuse" } }), TEMPLATES).options;
+    assert.equal(pb[0].templateKey, "IN_MACRO");
+    const before = base.find((o) => o.templateKey === "IN_MACRO")!, after = pb[0];
+    assert.ok(after.score > before.score);
+    assert.ok(after.scoreItems.some((i) => i.key === "marque" && i.points === 10 && i.tag === "INFERRED"));
+    assert.ok(after.why.some((w) => /ce qui marche pour Auracos/.test(w)));
+  });
+  test("tous leviers : la favorite passe devant les autres actions du levier pondéré à 100 %", () => {
+    const pb = data({ playbook: { levers: { INFLUENCE: 1, DIGITAL: 0.6 }, favorites: ["IN_MACRO"], avoid: [], note: null } });
+    const r = generate(input({ axis: null, objective: "NOTORIETE", budget: 150_000 }), pb, TEMPLATES);
+    const macro = r.options.find((o) => o.templateKey === "IN_MACRO");
+    assert.ok(macro, "la grosse influenceuse doit figurer dans les options");
+    const otherInfluence = r.options.filter((o) => o.axis === "INFLUENCE" && o.templateKey !== "IN_MACRO");
+    assert.ok(otherInfluence.every((o) => o.score <= macro.score));
+    assert.ok(otherInfluence.every((o) => o.scoreItems.find((i) => i.key === "marque")!.points === 7));
+  });
+  test("un modèle écarté pour la marque n'est jamais proposé", () => {
+    const r = generate(input({ axis: "EVENEMENTIEL" }), data({ playbook: { levers: {}, favorites: [], avoid: ["EVT_PADEL"], note: null } }), TEMPLATES);
+    assert.ok(!r.options.some((o) => o.templateKey === "EVT_PADEL"));
+    assert.ok(r.excluded.some((e) => e.templateKey === "EVT_PADEL" && /écarté/.test(e.reason)));
+  });
+  test("médical : actions prescripteurs avec les médecins A et B de la base", () => {
+    const r = generate(input({ axis: "MEDICAL", objective: "LANCEMENT" }), data(), TEMPLATES);
+    assert.ok(r.options.length >= 3);
+    assert.ok(r.options.every((o) => o.axis === "MEDICAL"));
+    assert.ok(r.options[0].why.some((w) => /42 médecins de potentiel A ou B/.test(w)));
+  });
+  test("modèles saisonniers : réservés à leur période", () => {
+    const nov = generate(input({ axis: "TRADE", objective: "SELL_OUT", month: "2026-11-01" }), data(), TEMPLATES);
+    assert.ok(nov.excluded.some((e) => e.templateKey === "SZ_AID_COFFRET" && /réservé/.test(e.reason)));
+    const ram = generate(input({ axis: "TRADE", objective: "SELL_OUT", month: "2027-02-01" }), data({ seasonEvents: [{ key: "ramadan", label: "Ramadan" }] }), TEMPLATES);
+    assert.ok(!ram.excluded.some((e) => e.templateKey === "SZ_AID_COFFRET"));
+    const bf = generate(input({ axis: "DIGITAL", objective: "ECOULEMENT", month: "2026-11-01", budget: 30_000 }), data(), TEMPLATES);
+    assert.ok(bf.options.some((o) => o.templateKey === "SZ_BLACK_FRIDAY"));
+  });
+});
+
+describe("bibliothèque éditable", () => {
+  test("formulaire et Excel : chaque modèle livré fait l'aller-retour sans perte", () => {
+    for (const t of TEMPLATES) {
+      const { raw, errors, active } = fieldsToTemplate(templateToFields(t, true));
+      assert.deepEqual(errors, [], `${t.key} : ${errors.join(" ; ")}`);
+      assert.equal(active, true);
+      const v = validateTemplate(raw);
+      assert.ok(v.ok, `${t.key} : ${v.ok ? "" : v.errors.join(" ; ")}`);
+      if (!v.ok) continue;
+      const back = v.template;
+      assert.equal(back.key, t.key); assert.equal(back.axis, t.axis); assert.equal(back.name, t.name); assert.equal(back.concept, t.concept);
+      assert.deepEqual(back.budget, t.budget); assert.deepEqual(back.execution, t.execution); assert.deepEqual(back.targets, t.targets);
+      assert.equal(back.steps.length, t.steps.length); assert.equal(back.lines.length, t.lines.length); assert.equal(back.contents.length, t.contents.length);
+      assert.ok(Math.abs(back.lines.reduce((s, l) => s + l.share, 0) - 1) < 0.01, `${t.key} : parts`);
+      assert.deepEqual(back.onlyWhen ?? null, t.onlyWhen ?? null, `${t.key} : réservé à`);
+      assert.deepEqual(back.seasons, t.seasons);
+      assert.equal(back.cityBased, t.cityBased); assert.equal(back.posBased, t.posBased); assert.equal(back.influencerBased, t.influencerBased);
+    }
+  });
+
+  test("Excel : export puis réimport de toute la bibliothèque par le lecteur d'import", () => {
+    const rows = TEMPLATES.map((t) => { const f = templateToFields(t, true); return Object.fromEntries(TEMPLATE_COLUMNS.map((c) => [c.label, f[c.key]])); });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows, { header: TEMPLATE_COLUMNS.map((c) => c.label) }), "Bibliothèque");
+    const sheet = parseSheet(XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer);
+    assert.equal(sheet.rows.length, TEMPLATES.length);
+    for (const row of sheet.rows) {
+      const { raw, errors } = fieldsToTemplate(sheetRowToFields(row));
+      assert.deepEqual(errors, [], String(row["Clé"]));
+      const v = validateTemplate(raw);
+      assert.ok(v.ok, `${row["Clé"]} : ${v.ok ? "" : v.errors.join(" ; ")}`);
+    }
+  });
+  test("Excel : en-têtes courts ou clés techniques reconnus", () => {
+    const f = sheetRowToFields({ "Étapes": "J-7 ; Préparer ; MARKETING", cle: "IM_X", "Budget min": 1000, Inconnu: "x" });
+    assert.equal(f.etapes, "J-7 ; Préparer ; MARKETING"); assert.equal(f.cle, "IM_X"); assert.equal(f.budget_min, "1000");
+  });
+
+  test("formulaire : « actif » à non désactive, champ manquant signalé", () => {
+    const f = templateToFields(TEMPLATES[0], false);
+    assert.equal(fieldsToTemplate(f).active, false);
+    const bad = fieldsToTemplate({ ...f, budget_min: "beaucoup", portee: "" });
+    assert.ok(bad.errors.some((e) => e.includes("budget_min")));
+    assert.ok(bad.errors.some((e) => e.includes("portée")));
+  });
+
+  test("syntaxe texte : aller-retour des postes, étapes, contenus, KPI", () => {
+    const t = TEMPLATES.find((x) => x.key === "EVT_PADEL")!;
+    const lines = parseLines(formatLines(t.lines)); assert.deepEqual(lines.errors, []); assert.deepEqual(lines.value, t.lines);
+    const steps = parseSteps(formatSteps(t.steps)); assert.deepEqual(steps.errors, []); assert.deepEqual(steps.value, [...t.steps].sort((a, b) => a.offset - b.offset));
+    const contents = parseContents(formatContents(t.contents)); assert.deepEqual(contents.errors, []); assert.deepEqual(contents.value, t.contents);
+    const k = parseKpis(formatKpis([{ label: "A", value: 4 }, { label: "B", per: 20, factor: 0.5 }, { label: "C", value: "≥ 80 %" }])); assert.deepEqual(k.value, [{ label: "A", value: 4 }, { label: "B", per: 20, factor: 0.5 }, { label: "C", value: "≥ 80 %" }]);
+  });
+  test("erreurs de saisie lisibles", () => {
+    assert.ok(parseLines("Location ; INCONNUE ; 50").errors[0].includes("ligne 1"));
+    assert.ok(parseSteps("demain ; préparer ; marketing").errors.length === 1);
+    const v = validateTemplate({ ...TEMPLATES[0], key: "x" });
+    assert.ok(!v.ok && v.errors.some((e) => /clé/.test(e)));
+  });
+  test("enregistrer une action réussie comme modèle : textes généralisés, parts à 100 %", () => {
+    const p = generate(input(), data(), TEMPLATES).options[0];
+    const t = templateFromProposal(p, TEMPLATES.find((x) => x.key === p.templateKey)!, { key: "EQ_TEST_ABCD", brand: "Auracos", hero: "Collagenium" });
+    const v = validateTemplate(t); assert.ok(v.ok, v.ok ? "" : v.errors.join(" ; "));
+    assert.doesNotMatch(t.name, /Collagenium/); assert.match(t.name, /\{heros\}/);
+    assert.equal(t.budget.typical, p.budget);
+  });
+  test("enregistrer une activation réalisée comme modèle", () => {
+    const t = templateFromActivation({ name: "Journée Sebo-Control Casablanca", type: "OPERATION_PHARMACIE", description: null, date: "2026-09-10", endDate: null, city: "Casablanca", brand: "Gamarde", product: null },
+      [{ costItem: "HOTESSES", label: "Animatrice", planned: 3000 }, { costItem: "ECHANTILLONS", label: "Échantillons", planned: 1500 }, { costItem: "AUTRE", label: "Divers", planned: 500 }],
+      [{ label: "Prévenir la pharmacie", dueDate: "2026-09-01" }, { label: "Installer", dueDate: "2026-09-10" }], "AC_TEST_ABCD");
+    const v = validateTemplate(t); assert.ok(v.ok, v.ok ? "" : v.errors.join(" ; "));
+    assert.equal(t.axis, "TRADE"); assert.equal(t.budget.typical, 5000); assert.equal(t.steps[0].offset, -9);
+    assert.match(t.name, /\{ville\|la ville cible\}/);
+    assert.equal(t.family, "Operation pharmacie (réalisé)");
+  });
+  test("activation générée : la note du générateur ne devient pas le concept", () => {
+    const t = templateFromActivation({ name: "Journées Vegan en pharmacie", type: "OPERATION_PHARMACIE", description: "Deux journées d'animation par officine avec une animatrice formée sur Vegan Lift.\n\nAction générée par COMANET (modèle « Journées en pharmacie ») : rétroplanning dans Priorités & actions.", date: "2026-09-10", endDate: null, city: null, brand: "Gamarde", product: "Vegan Lift" }, [], [], "AV_TEST_ABCD");
+    assert.doesNotMatch(t.concept, /Action générée/);
+    assert.match(t.concept, /\{produit\}/);
+  });
 });

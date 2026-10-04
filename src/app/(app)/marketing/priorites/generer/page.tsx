@@ -34,7 +34,8 @@ export default async function GenerateActionPage(props: { searchParams: Promise<
   return (
     <>
       <PageHeader eyebrow={<Link href="/marketing/priorites" className="hover:underline">Priorités & actions</Link>} title="Générer une action"
-        subtitle="Marque, objectif, levier et budget : COMANET propose 3 à 5 actions concrètes, chiffrées et planifiées, à partir de la bibliothèque d'actions et des données de la marque. Vous choisissez, vous ajoutez au plan." />
+        subtitle="Marque, objectif, levier et budget : COMANET propose 3 à 5 actions concrètes, chiffrées et planifiées, à partir de la bibliothèque d'actions et des données de la marque. Vous choisissez, vous ajoutez au plan."
+        actions={<Link href="/marketing/bibliotheque" className="btn-secondary btn-sm">Bibliothèque d&apos;actions</Link>} />
 
       <Card className="mb-5">
         <form method="get" className="grid sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-2 text-[13px] items-end">
@@ -79,6 +80,17 @@ export default async function GenerateActionPage(props: { searchParams: Promise<
             <span className="flex-1" />
             <Link href={`/marketing/plan`} className="btn-ghost btn-sm">Plan marketing</Link>
           </div>
+          {run?.data.playbook ? (
+            <div className="rounded-xl border border-accent/25 bg-accent-soft/50 px-3 py-2 mb-3 text-[12.5px] flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="label">Ce qui marche pour {brand.name}</span>
+              {AXIS_KEYS.filter((k) => (run.data.playbook!.levers[k] ?? 0) > 0).sort((x, y) => (run.data.playbook!.levers[y] ?? 0) - (run.data.playbook!.levers[x] ?? 0)).map((k) => <Badge key={k} tone={(run.data.playbook!.levers[k] ?? 0) >= 0.8 ? "accent" : "gray"}>{AXES[k].label} {Math.round((run.data.playbook!.levers[k] ?? 0) * 100)} %</Badge>)}
+              {run.data.playbook.note && <span className="italic text-muted">« {run.data.playbook.note} »</span>}
+              <span className="text-muted">hypothèse de la direction, 10 points sur 100</span>
+              <Link href={`/marketing/bibliotheque#marque-${brand.id}`} className="text-accent hover:underline">modifier</Link>
+            </div>
+          ) : (
+            <p className="text-[12.5px] text-muted mb-3">Aucune conviction saisie pour {brand.name} : le classement repose sur les seules données. <Link href={`/marketing/bibliotheque#marque-${brand.id}`} className="text-accent hover:underline">Dire ce qui marche pour la marque</Link></p>
+          )}
           {r.notes.length > 0 && <ul className="text-[12.5px] text-amber-800 mb-3 space-y-0.5">{r.notes.map((n, i) => <li key={i}>{n}</li>)}</ul>}
 
           {r.blocked ? (
@@ -86,7 +98,7 @@ export default async function GenerateActionPage(props: { searchParams: Promise<
           ) : r.options.length === 0 ? (
             <Empty title="Aucune action finançable" hint="Augmenter le budget, choisir un autre levier ou un autre objectif. Les modèles écartés et leur raison sont listés ci-dessous." />
           ) : (
-            <Section title={`Les ${r.options.length} meilleures actions finançables pour ${brand.name}${run?.data.product ? ` — ${run.data.product.name}` : ""}`} description={`Classées par pertinence (objectif, budget, potentiel commercial, historique, saison, stock, cible, faisabilité, non-répétition). Période : ${fmtMonth(input.month)}.`}>
+            <Section title={`Les ${r.options.length} meilleures actions finançables pour ${brand.name}${run?.data.product ? ` — ${run.data.product.name}` : ""}`} description={`Classées par pertinence (objectif, budget, potentiel commercial, ce qui marche pour la marque, historique, saison, stock, cible, faisabilité, non-répétition). Période : ${fmtMonth(input.month)}.`}>
               <div className="grid lg:grid-cols-2 gap-3">{r.options.map((p, i) => <ProposalCard key={p.key} p={p} rank={i + 1} input={{ ...input, axis: input.axis ?? p.axis, budget: input.budget ?? p.budget }} canAdd={canAdd} />)}</div>
             </Section>
           )}

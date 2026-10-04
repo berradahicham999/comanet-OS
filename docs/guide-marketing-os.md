@@ -63,10 +63,35 @@ La page ne liste plus des tâches : elle propose des **actions prêtes à exécu
   (événementiel, trade : budget par poste) ou la campagne (digital, influence, contenu : dépenses prévues), une tâche par
   étape, les contenus au planning éditorial. Le budget disponible du levier baisse aussitôt (« 45 000 → 30 000 MAD »).
 - **Actions au plan** : objectif, budget prévu / engagé, impact attendu, avancement des tâches, échéance, statut.
-- La bibliothèque compte 30 modèles (Padel Challenge, Beauty Morning, Masterclass, Pop-up, Sell-out Challenge, Gift With
-  Purchase, UGC Wave, 30-Day Challenge, Seeding Box, Ambassadrice, Avant / après…). Une action au plan n'est plus
-  reproposée ; une action réalisée récemment est pénalisée ; un produit en rupture n'a aucune option.
+- La bibliothèque livre 60 modèles sur 7 leviers (événementiel, trade, médical / prescripteurs, partenariats, digital,
+  influence, contenu). Une action au plan n'est plus reproposée ; une action réalisée récemment est pénalisée ; un produit
+  en rupture n'a aucune option ; un modèle saisonnier (Ramadan, Aïd, fête des mères, 8 mars, été, Black Friday, hiver)
+  n'est proposé que pendant sa période.
 - Les signaux des moteurs (règles, Ads, intelligence marketing) restent accessibles, repliés, avec approuver / refuser.
+
+## Bibliothèque d'actions
+
+Marketing → **Bibliothèque d'actions** (`/marketing/bibliotheque`).
+
+- **Modèles** : liste par levier, filtres (levier, origine, statut, recherche). Un modèle livré se modifie (la version
+  d'origine reste récupérable : « Revenir à la version livrée »), se désactive ou se duplique. « + Nouveau modèle » part
+  d'un modèle générique du levier choisi.
+- **Textes à variables** : `{heros}` (produit vedette), `{produit}`, `{marque}`, `{ville}`, `{cible}`, `{benefice}`,
+  `{actif}`, `{angle}` (fiche marketing du produit), `{saison}` ; `{variable|texte}` donne un repli quand la donnée manque.
+  Remplir les fiches marketing des produits (bénéfices, actifs, angle) rend les concepts plus précis.
+- **Excel** : « Exporter » donne toute la bibliothèque, une ligne par modèle ; compléter ou ajouter des lignes, puis
+  « Importer ». Même clé = remplace le modèle ; sans clé = nouveau modèle. Les lignes invalides sont refusées une par
+  une, avec la raison.
+- **Enregistrer comme modèle** : sur une action générée (Priorités & actions → l'action) ou une activation, le bouton
+  ajoute ce qui a été réellement fait à la bibliothèque (budget par poste, calendrier, textes avec le produit, la marque
+  et la ville remplacés par des variables). Relire le concept, les objectifs et la portée, puis enregistrer.
+- **Ce qui marche par marque** : poids de chaque levier (0 à 100 %), modèles favoris, modèles à écarter, note. Le
+  générateur en fait un critère de 10 points sur 100 (favori 10, levier pondéré jusqu'à 7, écarté = jamais proposé) et
+  l'affiche comme une **hypothèse de la direction**, jamais comme une mesure. Rempli au départ : Auracos = grosse
+  influenceuse ; Gamarde = conseil sell-out au comptoir, vidéo médicale à tester ; CygneLab = point de vente et digital ;
+  Alphascience = médecins et un peu de point de vente.
+- Droits : Marketing **Modifier** pour créer, modifier, dupliquer, importer et enregistrer comme modèle ; **Valider**
+  pour désactiver, revenir à la version livrée, supprimer et pour « ce qui marche par marque ».
 
 ## Command Center
 
@@ -106,3 +131,6 @@ marge restent ceux de l'Agent marketing et de l'Analytics.
 `0044_marketing_os` : statut `BLOCKED` sur les tâches, six tables, cinq colonnes de rattachement (NULL sur l'historique).
 Aucune ligne existante n'est modifiée ; un plan créé sur une année déjà budgétée reprend le budget, l'objectif et les
 lignes existants.
+
+`0047_bibliotheque_actions` : tables `action_templates` (modifications et modèles de l'équipe) et `brand_marketing_playbooks`
+(ce qui marche par marque, rempli pour Auracos, Gamarde, CygneLab et Alphascience). Aucune ligne existante n'est modifiée.
