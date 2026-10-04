@@ -305,9 +305,9 @@ describe("Clients — fusion et raisons sociales", () => {
 });
 
 describe("Médical v2 — chrono, GPS, ordonnances", () => {
-  test("seul `chrono.ts` écrit le journal des visites", () => {
-    const found = codeHits(/insert\(visitEvents\)|insert\s+into\s+visit_events/i, ["lib/medical/chrono.ts"]);
-    assert.deepEqual(found, [], `Écriture de visit_events hors de chrono.ts : ${found.join(", ")}`);
+  test("seuls `chrono.ts` (médical) et `crm/visits.ts` (commercial) écrivent le journal des visites", () => {
+    const found = codeHits(/insert\(visitEvents\)|insert\s+into\s+visit_events/i, ["lib/medical/chrono.ts", "lib/crm/visits.ts"]);
+    assert.deepEqual(found, [], `Écriture de visit_events hors de chrono.ts / crm/visits.ts : ${found.join(", ")}`);
   });
   test("seul `chrono.ts` écrit les heures et le statut de contrôle d'une visite", () => {
     const found = codeHits(/update\(doctorVisits\)\s*\.set\(\{[^}]*\b(startedAt|endedAt|verificationStatus|autoClosed)\b|update\s+doctor_visits\s+set[^`]*\b(started_at|ended_at|verification_status|auto_closed)\s*=/i, ["lib/medical/chrono.ts"]);
@@ -353,5 +353,34 @@ describe("Marketing OS — une seule création d'action, une seule écriture des
     const schema = FILES.find((f) => f.path === "src/db/schema.ts")!.code;
     const block = schema.slice(schema.indexOf('"marketing_actions"'), schema.indexOf('"marketing_decisions"'));
     assert.doesNotMatch(block, /\bstatus:/);
+  });
+});
+
+describe("CRM commercial — visites, portefeuilles, objectifs client", () => {
+  test("seul `crm/visits.ts` écrit les heures, le statut de visite et le contrôle de présence", () => {
+    const found = codeHits(/update\(clientVisits\)\s*\.set\(\{[^}]*\b(startedAt|endedAt|verificationStatus|autoClosed)\b|update\s+client_visits\s+set[^`]*\b(started_at|ended_at|verification_status|auto_closed)\s*=/i, ["lib/crm/visits.ts"]);
+    assert.deepEqual(found, [], `Heures ou contrôle de visite client écrits hors de crm/visits.ts : ${found.join(", ")}`);
+    const inserts = codeHits(/insert\(clientVisits\)|insert\s+into\s+client_visits/i, ["lib/crm/visits.ts"]);
+    assert.deepEqual(inserts, [], `Visite client créée hors de crm/visits.ts : ${inserts.join(", ")}`);
+  });
+  test("progression, rythme et priorité de tournée n'ont qu'une définition", () => {
+    for (const fn of ["visitProgress", "paceVerdict", "countedVisits", "monthElapsedPct", "objectiveProgress", "suggestTour", "rankMissingAssortment"]) {
+      assert.deepEqual(codeHits(new RegExp(`export function ${fn}\\(`)), ["src/lib/crm/portfolio-shared.ts"], `${fn} redéfini`);
+    }
+  });
+  test("le contrôle de présence d'une visite commerciale réutilise `verifyVisit()` (aucune seconde formule)", () => {
+    assert.ok(hits(/verifyVisit\(/).includes("src/lib/crm/visits.ts"));
+  });
+  test("toute lecture des objectifs de marque écarte les objectifs client", () => {
+    const readers = codeHits(/from\s+objectives\b/i, ["lib/crm/", "lib/import/run.ts", "lib/import/rollback.ts", "lib/import/workbook.ts", "produits/", "lib/gestion/clients.ts"]);
+    const missing = readers.filter((path) => !/client_id\s+is\s+null/i.test(FILES.find((f) => f.path === path)!.code));
+    assert.deepEqual(missing, [], `Lecture d'objectifs qui additionnerait les objectifs client : ${missing.join(", ")}`);
+    // Même règle pour le constructeur de requêtes : un objectif de marque se cherche avec `isNull(objectives.clientId)`.
+    const builder = codeHits(/isNull\(objectives\.productId\)/, ["lib/crm/"]).filter((path) => !/isNull\(objectives\.clientId\)/.test(FILES.find((f) => f.path === path)!.code));
+    assert.deepEqual(builder, [], `Recherche d'objectif de marque qui pourrait attraper un objectif client : ${builder.join(", ")}`);
+  });
+  test("seul `crm/portfolio.ts` affecte un portefeuille en masse", () => {
+    const found = codeHits(/update\s+clients\s+set\s+account_manager_id/i, ["lib/crm/portfolio.ts"]);
+    assert.deepEqual(found, [], `Affectation de portefeuille hors de crm/portfolio.ts : ${found.join(", ")}`);
   });
 });

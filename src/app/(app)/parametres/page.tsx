@@ -33,7 +33,7 @@ export default async function ParametresPage(props: { searchParams: Promise<{ ta
   const [s, brands, objRows, demoCount] = await Promise.all([
     getSettings(),
     listBrands(),
-    db.execute(sql`select brand_id, month, amount::float8 as amount from objectives where year = ${year} and product_id is null`),
+    db.execute(sql`select brand_id, month, amount::float8 as amount from objectives where year = ${year} and product_id is null and client_id is null`),
     db.execute(sql`select (select count(*) from animations where comment like '[DÉMO]%')::int + (select count(*) from regulatory_files where notes like '[DÉMO]%')::int + (select count(*) from tasks where description like '[DÉMO]%')::int + (select count(*) from content_items where brief like '[DÉMO]%')::int + (select count(*) from marketing_expenses where notes like '[DÉMO]%')::int + (select count(*) from activations where notes like '[DÉMO]%')::int + (select count(*) from inventory_items where notes like '[DÉMO]%')::int as n`),
   ]);
   const obj = new Map<string, number>();
@@ -77,6 +77,46 @@ export default async function ParametresPage(props: { searchParams: Promise<{ ta
               <Field name="clientRiskDropPct" label="À risque si baisse > (%)" value={s.clientRiskDropPct} hint="3 mois vs 3 mois précédents" />
               <Field name="clientGrowthPct" label="En croissance si hausse > (%)" value={s.clientGrowthPct} />
               <Field name="clientHighPotentialPercentile" label="Fort potentiel : percentile CA" value={s.clientHighPotentialPercentile} hint="80 = top 20 % des clients" />
+            </div>
+          </Card>
+          <Card title="CRM commercial (visites et objectifs clients)">
+            <input type="hidden" name="crm_present" value="1" />
+            <div className="text-[12px] text-muted mb-2">Fréquence proposée par type (visites / mois), appliquée seulement à la demande sur une sélection (Clients → Portefeuilles) :</div>
+            <div className="grid grid-cols-2 gap-2">
+              <Field name="crm_f_PHARMACIE" label="Pharmacie" value={s.crm.defaultFrequencyByType.PHARMACIE} />
+              <Field name="crm_f_PARAPHARMACIE" label="Parapharmacie" value={s.crm.defaultFrequencyByType.PARAPHARMACIE} />
+              <Field name="crm_f_GROSSISTE" label="Grossiste" value={s.crm.defaultFrequencyByType.GROSSISTE} />
+              <Field name="crm_f_AUTRE" label="Autre" value={s.crm.defaultFrequencyByType.AUTRE} />
+            </div>
+            <div className="mt-2 flex flex-wrap gap-4 text-[13px]">
+              <span className="label">Comptent dans la progression :</span>
+              <span>Visite ✓</span>
+              <label className="flex items-center gap-1.5"><input type="checkbox" name="crm_count_APPEL" defaultChecked={s.crm.countedKinds.includes("APPEL")} /> Appel</label>
+              <label className="flex items-center gap-1.5"><input type="checkbox" name="crm_count_MESSAGE" defaultChecked={s.crm.countedKinds.includes("MESSAGE")} /> Message</label>
+            </div>
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              <Field name="crm_lateVisitDayOfMonth" label="Alerte « non visité » à partir du (jour)" value={s.crm.lateVisitDayOfMonth} />
+              <Field name="crm_paceGapPts" label="Portefeuille en retard si écart > (points)" value={s.crm.paceGapPts} hint="Progression vs part du mois écoulée" />
+              <Field name="crm_objectiveLateRatio" label="Objectif en retard si réalisé < attendu × (ratio)" value={s.crm.objectiveLateRatio} step="0.05" hint="0,7 = 30 % de tolérance" />
+              <Field name="crm_objectiveCheckFromDay" label="Objectif comparé à partir du (jour)" value={s.crm.objectiveCheckFromDay} hint="Avant : « pas encore comparable »" />
+              <Field name="crm_orderWindowMinutes" label="Commande « en visite » jusqu'à (min après la fin)" value={s.crm.orderWindowMinutes} />
+              <Field name="crm_tourSuggestions" label="Clients suggérés « à voir aujourd'hui »" value={s.crm.tourSuggestions} />
+              <Field name="crm_assortmentMinPeers" label="Assortiment manquant : pairs minimum" value={s.crm.assortmentMinPeers} />
+              <Field name="crm_assortmentMinSharePct" label="… part de pairs acheteurs (%)" value={Math.round(s.crm.assortmentMinShare * 100)} />
+              <Field name="crm_assortmentTopN" label="… produits proposés" value={s.crm.assortmentTopN} />
+              <Field name="crm_autoCloseHours" label="Clôture auto d'une visite après (h)" value={s.crm.autoCloseHours} />
+            </div>
+            <div className="text-[12px] text-muted mt-3 mb-1">Contrôle de présence des visites (même moteur que le médical) :</div>
+            <div className="grid grid-cols-2 gap-2">
+              <Field name="crm_radiusM" label="Rayon du point de vente (m)" value={s.crm.radiusM} />
+              <Field name="crm_maxAccuracyM" label="Précision GPS max (m)" value={s.crm.maxAccuracyM} />
+              <Field name="crm_maxStartStopM" label="Démarrer ↔ Terminer max (m)" value={s.crm.maxStartStopM} />
+              <Field name="crm_minDurationMin" label="Durée min (min)" value={s.crm.minDurationMin} />
+              <Field name="crm_maxDurationMin" label="Durée max (min)" value={s.crm.maxDurationMin} />
+              <Field name="crm_maxSpeedKmh" label="Vitesse max entre visites (km/h)" value={s.crm.maxSpeedKmh} />
+              <Field name="crm_lateSyncHours" label="Envoi différé au-delà de (h)" value={s.crm.lateSyncHours} />
+              <Field name="crm_clockSkewMin" label="Décalage d'horloge toléré (min)" value={s.crm.clockSkewMin} />
+              <Field name="crm_gpsTimeoutS" label="Attente de la position (s)" value={s.crm.gpsTimeoutS} />
             </div>
           </Card>
           <Card title="Réglementaire">

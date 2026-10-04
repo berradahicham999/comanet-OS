@@ -43,6 +43,40 @@ function parseForecast(fd: FormData, cur: ForecastSettings): ForecastSettings {
   };
 }
 
+/** Réglages du CRM commercial (bornés : une saisie absurde garde la valeur précédente ou la borne). */
+function parseCrm(fd: FormData, cur: ComanetSettings["crm"]): ComanetSettings["crm"] {
+  if (!fd.has("crm_present")) return cur;
+  const int = (k: string, v: number, min: number, max: number) => Math.max(min, Math.min(max, Math.round(num(fd, k, v))));
+  const f = cur.defaultFrequencyByType;
+  return {
+    ...cur,
+    defaultFrequencyByType: {
+      PHARMACIE: int("crm_f_PHARMACIE", f.PHARMACIE, 0, 31), PARAPHARMACIE: int("crm_f_PARAPHARMACIE", f.PARAPHARMACIE, 0, 31),
+      GROSSISTE: int("crm_f_GROSSISTE", f.GROSSISTE, 0, 31), AUTRE: int("crm_f_AUTRE", f.AUTRE, 0, 31),
+    },
+    countedKinds: ["VISITE", ...(fd.get("crm_count_APPEL") ? ["APPEL" as const] : []), ...(fd.get("crm_count_MESSAGE") ? ["MESSAGE" as const] : [])],
+    lateVisitDayOfMonth: int("crm_lateVisitDayOfMonth", cur.lateVisitDayOfMonth, 1, 31),
+    paceGapPts: int("crm_paceGapPts", cur.paceGapPts, 0, 100),
+    objectiveLateRatio: Math.max(0.1, Math.min(1, num(fd, "crm_objectiveLateRatio", cur.objectiveLateRatio))),
+    objectiveCheckFromDay: int("crm_objectiveCheckFromDay", cur.objectiveCheckFromDay, 1, 31),
+    orderWindowMinutes: int("crm_orderWindowMinutes", cur.orderWindowMinutes, 0, 1440),
+    tourSuggestions: int("crm_tourSuggestions", cur.tourSuggestions, 0, 20),
+    assortmentMinPeers: int("crm_assortmentMinPeers", cur.assortmentMinPeers, 1, 500),
+    assortmentMinShare: int("crm_assortmentMinSharePct", Math.round(cur.assortmentMinShare * 100), 1, 100) / 100,
+    assortmentTopN: int("crm_assortmentTopN", cur.assortmentTopN, 1, 30),
+    autoCloseHours: int("crm_autoCloseHours", cur.autoCloseHours, 1, 24),
+    radiusM: int("crm_radiusM", cur.radiusM, 10, 5000),
+    maxAccuracyM: int("crm_maxAccuracyM", cur.maxAccuracyM, 5, 5000),
+    maxStartStopM: int("crm_maxStartStopM", cur.maxStartStopM, 10, 10000),
+    minDurationMin: int("crm_minDurationMin", cur.minDurationMin, 0, 240),
+    maxDurationMin: int("crm_maxDurationMin", cur.maxDurationMin, 5, 1440),
+    maxSpeedKmh: int("crm_maxSpeedKmh", cur.maxSpeedKmh, 5, 1000),
+    lateSyncHours: int("crm_lateSyncHours", cur.lateSyncHours, 0, 72),
+    clockSkewMin: int("crm_clockSkewMin", cur.clockSkewMin, 1, 600),
+    gpsTimeoutS: int("crm_gpsTimeoutS", cur.gpsTimeoutS, 5, 120),
+  };
+}
+
 export async function updateSettings(formData: FormData) {
   await requireAdmin();
   const cur = await getSettings();
@@ -84,6 +118,7 @@ export async function updateSettings(formData: FormData) {
       reviewDays: Math.max(1, Math.round(num(formData, "mp_reviewDays", cur.marketingPlan.reviewDays))),
       maxDecisions: Math.max(1, Math.round(num(formData, "mp_maxDecisions", cur.marketingPlan.maxDecisions))),
     },
+    crm: parseCrm(formData, cur.crm),
   };
   if (!next.regulatoryAlertDays.length) next.regulatoryAlertDays = cur.regulatoryAlertDays;
   await saveSettings(next);
@@ -99,10 +134,10 @@ export async function saveObjectives(formData: FormData) {
     await db.execute(sql`
       insert into objectives (brand_id, product_id, year, month, amount)
       values (${brandId}::uuid, null, ${year}, ${month}, ${amount.toFixed(2)}::numeric)
-      on conflict (coalesce(brand_id, '00000000-0000-0000-0000-000000000000'::uuid), coalesce(product_id, '00000000-0000-0000-0000-000000000000'::uuid), year, coalesce(month, 0))
+      on conflict (coalesce(brand_id, '00000000-0000-0000-0000-000000000000'::uuid), coalesce(product_id, '00000000-0000-0000-0000-000000000000'::uuid), coalesce(client_id, '00000000-0000-0000-0000-000000000000'::uuid), year, coalesce(month, 0))
       do update set amount = excluded.amount`);
   };
-  const del = async (brandId: string, month: number) => { await db.execute(sql`delete from objectives where brand_id = ${brandId}::uuid and product_id is null and year = ${year} and month = ${month}`); };
+  const del = async (brandId: string, month: number) => { await db.execute(sql`delete from objectives where brand_id = ${brandId}::uuid and product_id is null and client_id is null and year = ${year} and month = ${month}`); };
   let total = 0;
   for (const b of brandIds) {
     const annualRaw = String(formData.get(`annual_${b}`) ?? "").replace(/\s/g, "");

@@ -87,10 +87,22 @@ export type MarketingPlanToolDeps = {
   decisions(scope: DecisionScope): Promise<UnifiedDecisionSet>;
 };
 
+/** Lectures du CRM commercial (portefeuilles, visites, chronologie), sans aucune position GPS. */
+export type CrmToolDeps = {
+  viewer(userId: string, userName: string, perms: PermissionSet): Promise<import("@/lib/crm/access-shared").CrmViewer>;
+  findCommercial(query: string): Promise<Ref | null>;
+  portfolio(userId: string, month: string): Promise<import("@/lib/crm/portfolio").Portfolio>;
+  suggestions(p: import("@/lib/crm/portfolio").Portfolio): Promise<{ clientId: string; name: string; city: string | null; reasons: string[] }[]>;
+  team(viewer: import("@/lib/crm/access-shared").CrmViewer, month: string, city: string | null): Promise<import("@/lib/crm/portfolio").TeamOverview>;
+  timeline(clientId: string, limit: number): Promise<import("@/lib/crm/timeline").TimelineItem[]>;
+  brief(clientId: string): Promise<import("@/lib/crm/intelligence").VisitBrief | null>;
+};
+
 export type ToolDeps = MarketingIntelDeps & {
   /** Facultatif : les doublures de test des autres domaines n'ont pas à le fournir. */
   medical?: MedicalToolDeps;
   marketingPlan?: MarketingPlanToolDeps;
+  crm?: CrmToolDeps;
   // Référentiels (résolution d'un nom saisi par le modèle vers un identifiant)
   findBrand(query: string): Promise<Ref | null>;
   findClient(query: string): Promise<Ref | null>;

@@ -316,6 +316,13 @@
       "when": 1789975000000,
       "tag": "0044_marketing_os",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1790000000000,
+      "tag": "0045_crm_commercial",
+      "breakpoints": true
     }
   ]
 }

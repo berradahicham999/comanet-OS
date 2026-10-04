@@ -27,7 +27,21 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
  * l'ordre de la journée) et de fin (cerclés), cabinets (carrés), trajet reliant les visites, couleur selon
  * le statut de contrôle. Un cabinet « à valider » se déplace à la souris puis se valide d'un clic.
  */
-export function FieldMap({ visits, cabinets, editable }: { visits: MapVisit[]; cabinets: MapCabinet[]; editable: boolean }) {
+/**
+ * `kind="crm"` : même carte pour les visites commerciales (points de vente au lieu des cabinets) ; la
+ * validation passe alors par `validatePlace` (server action du CRM) et les liens vont vers les visites clients.
+ */
+export function FieldMap({ visits, cabinets, editable, kind = "medical", validatePlace }: {
+  visits: MapVisit[];
+  cabinets: MapCabinet[];
+  editable: boolean;
+  kind?: "medical" | "crm";
+  validatePlace?: (input: { id: string; lat: number; lng: number }) => Promise<{ ok: boolean; message?: string }>;
+}) {
+  const crm = kind === "crm";
+  const person = crm ? "" : "Dr ";
+  const placeTitle = crm ? "Point de vente — " : "Cabinet — Dr ";
+  const visitBase = crm ? "/clients/visites/" : "/medical/visites/";
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LMap | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -70,9 +84,9 @@ export function FieldMap({ visits, cabinets, editable }: { visits: MapVisit[]; c
           const ll: [number, number] = [e.lat, e.lng];
           bounds.push(ll);
           if (e.type === "START" || e.type === "NON_EFFECTUEE") path.push(ll);
-          const kind = e.type === "START" ? "Démarrage" : e.type === "STOP" ? "Fin" : "Non effectuée";
+          const kindLabel = e.type === "START" ? "Démarrage" : e.type === "STOP" ? "Fin" : "Non effectuée";
           L.marker(ll, { icon: pin(e.type === "STOP" ? `${v.seq}'` : e.type === "NON_EFFECTUEE" ? `${v.seq}×` : String(v.seq), color, e.type === "STOP") })
-            .bindPopup(`<b>${v.seq}. Dr ${esc(v.doctorName)}</b><br>${kind} à ${esc(e.atLabel)}${e.accuracyM !== null ? ` · ± ${e.accuracyM} m` : ""}<br>${esc(v.label)}<br><a href="/medical/visites/${v.id}">Fiche visite</a> · <a target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${e.lat},${e.lng}">Google Maps</a>`)
+            .bindPopup(`<b>${v.seq}. ${person}${esc(v.doctorName)}</b><br>${kindLabel} à ${esc(e.atLabel)}${e.accuracyM !== null ? ` · ± ${e.accuracyM} m` : ""}<br>${esc(v.label)}<br><a href="${visitBase}${v.id}">Fiche visite</a> · <a target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${e.lat},${e.lng}">Google Maps</a>`)
             .addTo(map);
           if (e.accuracyM !== null && e.accuracyM > 0) L.circle(ll, { radius: e.accuracyM, color, weight: 1, opacity: 0.4, fillOpacity: 0.06 }).addTo(map);
         }
@@ -86,7 +100,7 @@ export function FieldMap({ visits, cabinets, editable }: { visits: MapVisit[]; c
         const ll: [number, number] = [c.lat, c.lng];
         bounds.push(ll);
         const marker = L.marker(ll, { icon: square(c.validated ? "#111827" : "#ea580c", !c.validated), draggable: editable && !c.validated });
-        const html = `<b>Cabinet — Dr ${esc(c.name)}</b><br>${c.validated ? "Position validée" : "Position proposée au premier démarrage, <b>à valider</b>"}${editable && !c.validated ? `<br><button data-validate="${c.doctorId}" style="margin-top:6px;padding:4px 10px;border-radius:8px;background:#111827;color:#fff">Valider cette position</button><br><span style="font-size:11px;color:#6b7280">Déplacez le carré si le cabinet est ailleurs.</span>` : ""}`;
+        const html = `<b>${placeTitle}${esc(c.name)}</b><br>${c.validated ? "Position validée" : "Position proposée au premier démarrage, <b>à valider</b>"}${editable && !c.validated ? `<br><button data-validate="${c.doctorId}" style="margin-top:6px;padding:4px 10px;border-radius:8px;background:#111827;color:#fff">Valider cette position</button><br><span style="font-size:11px;color:#6b7280">Déplacez le carré si le cabinet est ailleurs.</span>` : ""}`;
         marker.bindPopup(html);
         marker.on("popupopen", (ev) => {
           const btn = (ev.popup.getElement() as HTMLElement | undefined)?.querySelector<HTMLButtonElement>(`[data-validate="${c.doctorId}"]`);
@@ -94,8 +108,10 @@ export function FieldMap({ visits, cabinets, editable }: { visits: MapVisit[]; c
           btn.onclick = async () => {
             btn.disabled = true;
             const p = marker.getLatLng();
-            const res = await validateCabinetAction({ doctorId: c.doctorId, lat: p.lat, lng: p.lng });
-            setMsg(res.ok ? `Position du cabinet de Dr ${c.name} validée : les contrôles de ses visites sont recalculés.` : res.message ?? "Validation refusée.");
+            const res = crm && validatePlace
+              ? await validatePlace({ id: c.doctorId, lat: p.lat, lng: p.lng })
+              : await validateCabinetAction({ doctorId: c.doctorId, lat: p.lat, lng: p.lng });
+            setMsg(res.ok ? `Position ${crm ? `du point de vente ${c.name}` : `du cabinet de Dr ${c.name}`} validée : les contrôles de ses visites sont recalculés.` : res.message ?? "Validation refusée.");
             if (res.ok) {
               marker.setIcon(square("#111827", false));
               marker.dragging?.disable();
@@ -114,7 +130,7 @@ export function FieldMap({ visits, cabinets, editable }: { visits: MapVisit[]; c
       mapRef.current?.remove();
       mapRef.current = null;
     };
-  }, [visits, cabinets, editable]);
+  }, [visits, cabinets, editable, crm, person, placeTitle, visitBase, validatePlace]);
 
   return (
     <div>
@@ -124,7 +140,7 @@ export function FieldMap({ visits, cabinets, editable }: { visits: MapVisit[]; c
         <span><span className="inline-block w-2.5 h-2.5 rounded-full mr-1" style={{ background: COLORS.VERIFIEE }} />Vérifiée</span>
         <span><span className="inline-block w-2.5 h-2.5 rounded-full mr-1" style={{ background: COLORS.A_VERIFIER }} />À vérifier</span>
         <span><span className="inline-block w-2.5 h-2.5 rounded-full mr-1" style={{ background: COLORS.NON_VERIFIEE }} />Non vérifiée</span>
-        <span>● démarrage · ○ fin (n′) · × non effectuée · ■ cabinet validé · ▢ cabinet à valider · - - trajet</span>
+        <span>● démarrage · ○ fin (n′) · × non effectuée · ■ {crm ? "point de vente validé" : "cabinet validé"} · ▢ {crm ? "point de vente à valider" : "cabinet à valider"} · - - trajet</span>
       </div>
     </div>
   );
