@@ -20,6 +20,7 @@ const SECTIONS: { key: keyof SearchResult; module: ModuleKey | ModuleKey[]; labe
   { key: "contents", module: "marketing", label: "contenus" },
   { key: "regulatory", module: "reglementaire", label: "dossiers réglementaires" },
   { key: "tasks", module: "taches", label: "tâches" },
+  { key: "orders", module: "commandes", label: "commandes clients" },
   { key: "deliveries", module: "livraisons", label: "bons de livraison" },
   { key: "invoices", module: "facturation", label: "factures et avoirs" },
   { key: "purchases", module: "achats", label: "pièces d'achat" },
@@ -43,7 +44,8 @@ export const searchEntities: AiTool<typeof schema> = {
       let hits = res[s.key] ?? [];
       if (s.key === "brands" && ctx.access.brandIds) hits = hits.filter((h) => ctx.access.brandIds!.includes(h.id));
       if (s.key === "clients" && ctx.access.clientIds) hits = hits.filter((h) => ctx.access.clientIds!.includes(h.id));
-      if ((s.key === "deliveries" || s.key === "invoices") && ctx.access.clientIds) hits = hits.filter((h) => !!h.clientId && ctx.access.clientIds!.includes(h.clientId));
+      if ((s.key === "orders" || s.key === "deliveries" || s.key === "invoices") && ctx.access.clientIds) hits = hits.filter((h) => !!h.clientId && ctx.access.clientIds!.includes(h.clientId));
+      if (s.key === "orders" && ctx.access.scope === "OWN") hits = hits.filter((h) => h.ownerIds?.includes(ctx.access.userId));
       if (!hits.length) continue;
       data[s.label] = hits.slice(0, limit).map((h) => ({ label: h.label, sub: h.sub, href: h.href }));
       count += Math.min(hits.length, limit);

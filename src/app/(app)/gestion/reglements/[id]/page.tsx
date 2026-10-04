@@ -16,14 +16,14 @@ const LABEL: Record<PaymentStatus, string> = { PORTEFEUILLE: "", REMIS: "Remis e
 
 export default async function PaymentPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; done?: string }> }) {
   const a = await requireAccessContext();
-  if (!can(a.perms, "facturation", "view")) redirect(a.home);
+  if (!can(a.perms, "reglements", "view")) redirect(a.home);
   const { id } = await props.params;
   const sp = await props.searchParams;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const p = await getPayment(id);
   if (!p || !(await clientInScope(p.clientId))) notFound();
   const status = p.status as PaymentStatus;
-  const canEdit = can(a.perms, "facturation", "edit"), canValidate = can(a.perms, "facturation", "validate");
+  const canEdit = can(a.perms, "reglements", "edit"), canValidate = can(a.perms, "reglements", "validate");
   const [history, open] = await Promise.all([auditTrail("payment", id), Number(p.unallocated) > 0 && status !== "IMPAYE" && status !== "ANNULE" ? openInvoices({ clientId: p.clientId, simulation: p.isSimulation }) : Promise.resolve([])]);
   const t = iso(today());
   const back = `/gestion/reglements/${id}`;

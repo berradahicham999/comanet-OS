@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(_req: Request, ctx: { params: Promise<{ clientId: string }> }) {
   const access = await getAccess();
-  if (!access || !can(access.perms, "livraisons", "view")) return Response.json({ error: "Accès refusé" }, { status: 403 });
+  if (!access || !(can(access.perms, "commandes", "view") || can(access.perms, "livraisons", "view"))) return Response.json({ error: "Accès refusé" }, { status: 403 });
   const { clientId } = await ctx.params;
   if (!/^[0-9a-f-]{36}$/i.test(clientId)) return Response.json([], { status: 400 });
   if (!(await clientInScope(clientId))) return Response.json({ error: "Accès refusé" }, { status: 403 });

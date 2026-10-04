@@ -7,12 +7,12 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { normKey } from "@/lib/import/normalize";
 
-export type SearchHit = { id: string; label: string; sub: string | null; href: string; clientId?: string };
+export type SearchHit = { id: string; label: string; sub: string | null; href: string; clientId?: string; ownerIds?: string[] };
 export type SearchResult = {
   products: SearchHit[]; clients: SearchHit[]; brands: SearchHit[]; tasks: SearchHit[];
   regulatory: SearchHit[]; campaigns: SearchHit[]; contents: SearchHit[]; users: SearchHit[];
-  /** Pièces de vente par numéro : bons de livraison (module livraisons), factures et avoirs (module facturation). */
-  deliveries?: SearchHit[]; invoices?: SearchHit[];
+  /** Pièces de vente par numéro : commandes (module commandes), bons de livraison (livraisons), factures et avoirs (facturation). */
+  orders?: SearchHit[]; deliveries?: SearchHit[]; invoices?: SearchHit[];
   /** Achats (module achats) : pièces par numéro ou référence du fournisseur, et fournisseurs. */
   purchases?: SearchHit[]; suppliers?: SearchHit[];
 };
@@ -35,7 +35,7 @@ export async function searchEntities(q: string, limit = 10): Promise<SearchResul
     rows(sql`select c.id, c.name, c.status::text as status, b.name as brand from campaigns c join brands b on b.id = c.brand_id where upper(c.name) like ${like} limit ${limit}`),
     rows(sql`select c.id, c.title, c.date::text as date, b.name as brand from content_items c join brands b on b.id = c.brand_id where upper(c.title) like ${like} order by c.date desc limit ${limit}`),
     rows(sql`select u.id, u.name, u.role::text as role from users u where u.active and upper(u.name) like ${like} order by u.name limit ${limit}`),
-    rows(sql`select d.id, d.type, d.number, d.date::text as date, d.ttc::text as ttc, d.client_id, c.name as client from sales_documents d join clients c on c.id = d.client_id
+    rows(sql`select d.id, d.type, d.number, d.date::text as date, d.ttc::text as ttc, d.client_id, d.created_by_id, d.sales_rep_id, c.name as client from sales_documents d join clients c on c.id = d.client_id
       where d.number is not null and upper(d.number) like ${`%${q.trim().toUpperCase()}%`} order by d.date desc limit ${limit * 2}`),
     rows(sql`select d.id, d.type, d.number, d.supplier_ref, d.date::text as date, d.net_ht_mad::text as net, s.legal_name as supplier from purchase_documents d join suppliers s on s.id = d.supplier_id
       where d.number is not null and (upper(d.number) like ${up} or upper(coalesce(d.supplier_ref, '')) like ${up}) order by d.date desc limit ${limit}`),
@@ -51,7 +51,8 @@ export async function searchEntities(q: string, limit = 10): Promise<SearchResul
     campaigns: campaigns.map((r) => ({ id: String(r.id), label: String(r.name), sub: [s(r.brand), s(r.status)].filter(Boolean).join(" · ") || null, href: `/marketing/campagnes/${r.id}` })),
     contents: contents.map((r) => ({ id: String(r.id), label: String(r.title), sub: [s(r.brand), s(r.date)].filter(Boolean).join(" · ") || null, href: `/marketing/planning?month=${String(r.date).slice(0, 7)}` })),
     users: users.map((r) => ({ id: String(r.id), label: String(r.name), sub: s(r.role), href: `/parametres/utilisateurs` })),
-    deliveries: pieces.filter((r) => r.type === "BL" || r.type === "COMMANDE").map(pieceHit),
+    orders: pieces.filter((r) => r.type === "COMMANDE").map((r) => ({ ...pieceHit(r), ownerIds: [s(r.created_by_id), s(r.sales_rep_id)].filter((x): x is string => !!x) })),
+    deliveries: pieces.filter((r) => r.type === "BL").map(pieceHit),
     invoices: pieces.filter((r) => r.type === "FACTURE" || r.type === "AVOIR").map(pieceHit),
     purchases: purchases.map((r) => ({ id: String(r.id), label: String(r.number), sub: [s(r.supplier), r.supplier_ref ? `réf. ${r.supplier_ref}` : null, s(r.date), `${r.net} MAD HT`].filter(Boolean).join(" · "), href: `/gestion/achats/${r.id}` })),
     suppliers: suppliers.map((r) => ({ id: String(r.id), label: String(r.legal_name), sub: [s(r.city), s(r.currency)].filter(Boolean).join(" · ") || null, href: `/gestion/fournisseurs/${r.id}` })),

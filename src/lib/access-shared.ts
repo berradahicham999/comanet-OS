@@ -19,8 +19,10 @@ export const MODULE_KEYS = [
   "reglementaire",
   "ventes",
   "clients",
+  "commandes",
   "livraisons",
   "facturation",
+  "reglements",
   "achats",
   "marketing",
   "influence",
@@ -41,8 +43,10 @@ export const MODULE_LABELS: Record<ModuleKey, string> = {
   reglementaire: "Réglementaire",
   ventes: "Suivi commercial et ventes",
   clients: "Clients et trade marketing",
+  commandes: "Commandes clients",
   livraisons: "Bons de livraison",
-  facturation: "Facturation et encaissements",
+  facturation: "Factures et avoirs",
+  reglements: "Règlements et relances",
   achats: "Achats et fournisseurs",
   marketing: "Marketing digital",
   influence: "Influence et UGC",
@@ -62,8 +66,10 @@ export const MODULE_SHORT: Record<ModuleKey, string> = {
   reglementaire: "Réglementaire",
   ventes: "Ventes",
   clients: "Clients",
+  commandes: "Commandes",
   livraisons: "Livraisons",
   facturation: "Facturation",
+  reglements: "Règlements",
   achats: "Achats",
   marketing: "Marketing",
   influence: "Influence",
@@ -83,8 +89,10 @@ export const MODULE_HINTS: Record<ModuleKey, string> = {
   reglementaire: "Dossiers, autorisations, alertes d'expiration, dépôts.",
   ventes: "Import des ventes, objectifs, analyses, classements clients.",
   clients: "Fiches clients (identité légale, conditions, adresses), plans d'animation, calendrier trade.",
-  livraisons: "Bons de livraison : saisie, validation (sortie de stock), annulation.",
-  facturation: "Factures, avoirs, encours et règlements clients.",
+  commandes: "Bons de commande saisis chez le client (numéro BC, PDF), sans stock ni vente. En portée « ses données », la personne ne voit que ses commandes.",
+  livraisons: "Bons de livraison : préparation depuis une commande, saisie, validation (sortie de stock), annulation.",
+  facturation: "Factures, avoirs, facturation des BL, envoi au comptable.",
+  reglements: "Encaissements, imputations, remises en banque, balance âgée, relances.",
   achats: "Fournisseurs, commandes, réceptions, factures fournisseurs.",
   marketing: "Planning éditorial, campagnes, rapports publicitaires (Meta Ads).",
   influence: "Créatrices, collaborations, performances, bibliothèque UGC.",
@@ -104,8 +112,10 @@ export const VALIDATE_HINTS: Record<ModuleKey, string> = {
   reglementaire: "Déposer un dossier à l'autorité, valider une étape ; supprimer un dossier.",
   ventes: "Valider un objectif ; annuler un import de ventes.",
   clients: "Valider un plan d'animation ; archiver, bloquer ou supprimer un client.",
+  commandes: "Corriger le nom du client imprimé sur une commande confirmée.",
   livraisons: "Valider un BL (sortie de stock) ou l'annuler.",
   facturation: "Valider une facture (numérotée, verrouillée) ou émettre un avoir.",
+  reglements: "Déclarer un règlement impayé ou l'annuler.",
   achats: "Valider une réception (entrée en stock) ; archiver ou supprimer un fournisseur.",
   marketing: "Publier ou clôturer une campagne.",
   influence: "Clôturer une collaboration (le cachet passe par « Valider une dépense »).",
@@ -118,11 +128,23 @@ export const VALIDATE_HINTS: Record<ModuleKey, string> = {
   administration: "Gérer utilisateurs et droits, modèles, seuils, connexions ; suppressions définitives.",
 };
 
+/**
+ * Ce que « Créer » et « Modifier » veulent dire, là où ce n'est pas évident (gestion commerciale).
+ * Affiché sous le module dans la matrice et en infobulle sur la case.
+ */
+export const ACTION_HINTS: Partial<Record<ModuleKey, { create?: string; edit?: string }>> = {
+  commandes: { create: "saisir et confirmer une commande", edit: "modifier un brouillon, annuler une commande" },
+  livraisons: { create: "préparer un BL depuis une commande, saisir un BL", edit: "modifier un brouillon, marquer livré" },
+  facturation: { create: "facturer des BL, faire un avoir", edit: "modifier un brouillon" },
+  reglements: { create: "encaisser un règlement", edit: "imputer, remettre en banque, relancer un client" },
+  achats: { create: "saisir commandes, réceptions et factures fournisseurs", edit: "modifier un brouillon, une fiche fournisseur" },
+};
+
 /** Regroupement des modules pour présenter la matrice. */
 export const MODULE_GROUPS: { title: string; modules: ModuleKey[] }[] = [
   { title: "Référentiels", modules: ["produits", "stock", "reglementaire"] },
   { title: "Commercial", modules: ["ventes", "clients"] },
-  { title: "Gestion commerciale", modules: ["livraisons", "facturation", "achats"] },
+  { title: "Gestion commerciale", modules: ["commandes", "livraisons", "facturation", "reglements", "achats"] },
   { title: "Marketing", modules: ["marketing", "influence", "budgets", "assets"] },
   { title: "Terrain et médical", modules: ["terrain", "medical"] },
   { title: "Exécution", modules: ["taches", "rapports"] },

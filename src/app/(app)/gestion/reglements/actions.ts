@@ -18,7 +18,7 @@ export async function createPaymentAction(fd: FormData) {
   const clientId = str(fd, "clientId");
   let id: string;
   try {
-    const user = await requirePermission("facturation", "create");
+    const user = await requirePermission("reglements", "create");
     if (!isUuid(clientId) || !(await clientInScope(clientId))) throw new Error("Client introuvable ou hors de votre périmètre.");
     const allocations = [...fd.entries()].filter(([k, v]) => k.startsWith("alloc_") && String(v).trim()).map(([k, v]) => ({ invoiceId: k.slice(6), amount: String(v).replace(",", ".") })).filter((a) => isUuid(a.invoiceId));
     id = await createPayment({
@@ -35,7 +35,7 @@ export async function createPaymentAction(fd: FormData) {
 export async function allocateAction(fd: FormData) {
   const id = str(fd, "paymentId");
   try {
-    const user = await requirePermission("facturation", "edit");
+    const user = await requirePermission("reglements", "edit");
     if (!isUuid(id)) throw new Error("Règlement introuvable.");
     await allocatePayment(id, str(fd, "invoiceId") ?? "", (str(fd, "amount") ?? "").replace(",", "."), actorOf(user));
   } catch (e) {
@@ -48,7 +48,7 @@ export async function allocateAction(fd: FormData) {
 export async function unallocateAction(fd: FormData) {
   const back = str(fd, "back") ?? "/gestion/reglements";
   try {
-    const user = await requirePermission("facturation", "edit");
+    const user = await requirePermission("reglements", "edit");
     const allocationId = str(fd, "allocationId");
     if (!isUuid(allocationId)) throw new Error("Imputation introuvable.");
     await unallocate(allocationId, actorOf(user));
@@ -64,7 +64,7 @@ export async function setPaymentStatusAction(fd: FormData) {
   const to = str(fd, "to") as PaymentStatus;
   try {
     if (!isUuid(id) || !PAYMENT_STATUSES.includes(to)) throw new Error("Demande invalide.");
-    const user = await requirePermission("facturation", to === "IMPAYE" || to === "ANNULE" ? "validate" : "edit");
+    const user = await requirePermission("reglements", to === "IMPAYE" || to === "ANNULE" ? "validate" : "edit");
     const p = await getPayment(id);
     if (!p || !(await clientInScope(p.clientId))) throw new Error("Règlement introuvable.");
     await setPaymentStatus(id, to, { date: str(fd, "date") ?? "", reason: str(fd, "reason") }, actorOf(user));
@@ -79,7 +79,7 @@ export async function allocateCreditAction(fd: FormData) {
   const creditId = str(fd, "creditId");
   const back = `/gestion/pieces/${creditId}`;
   try {
-    const user = await requirePermission("facturation", "edit");
+    const user = await requirePermission("reglements", "edit");
     if (!isUuid(creditId)) throw new Error("Avoir introuvable.");
     await allocateCredit(creditId, str(fd, "invoiceId") ?? "", (str(fd, "amount") ?? "").replace(",", "."), actorOf(user));
   } catch (e) {
@@ -92,7 +92,7 @@ export async function allocateCreditAction(fd: FormData) {
 /** Enregistre une relance (appelée juste avant d'ouvrir WhatsApp ou l'e-mail pré-rempli). */
 export async function recordReminderAction(clientId: string, level: number, channel: "WHATSAPP" | "EMAIL" | "TELEPHONE" | "COURRIER", invoices: { id: string; number: string; dueDate: string | null; balance: string }[]): Promise<{ ok: boolean; error?: string }> {
   try {
-    const user = await requirePermission("facturation", "edit");
+    const user = await requirePermission("reglements", "edit");
     if (!isUuid(clientId) || !(await clientInScope(clientId))) throw new Error("Client hors de votre périmètre.");
     await recordReminder(clientId, level, channel, invoices, actorOf(user));
     revalidatePath("/gestion/relances");

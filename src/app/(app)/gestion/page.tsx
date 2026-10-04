@@ -5,7 +5,8 @@ import { buildReadiness } from "@/lib/gestion/readiness";
 import { iso, today, fmtMAD, fmtDate, fmtNum } from "@/lib/format";
 import { PageHeader, Card, Badge, Section } from "@/components/ui";
 import { DataTable } from "@/components/data-table";
-import { GestionTabs, requireGestionView } from "@/components/gestion/gestion-nav";
+import { GestionTabs, canSeePreparation, requireGestionView } from "@/components/gestion/gestion-nav";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Gestion commerciale" };
@@ -14,6 +15,7 @@ const MODE_LABEL = { OFF: "Sage fait foi", PARALLELE: "Période parallèle (simu
 
 export default async function GestionPage() {
   const access = await requireGestionView();
+  if (!canSeePreparation(access.perms)) redirect("/gestion/pieces?type=COMMANDE");
   const settings = await getSettings();
   const g = settings.gestion;
   const r = await buildReadiness(g, iso(today()));

@@ -1,6 +1,12 @@
 import { type FlagKey, type ModuleKey } from "@/lib/access-shared";
 import { can, hasAnyModule, isAdmin, type FlagSet, type PermissionAction, type PermissionSet } from "@/lib/permissions-shared";
 
+/**
+ * Page « Préparation » de la gestion commerciale (état des fiches, chiffre d'affaires de tous les clients) :
+ * pour qui prépare, facture ou administre — pas pour qui ne fait que prendre des commandes.
+ */
+export const PREPARATION_MODULES: ModuleKey[] = ["livraisons", "facturation", "reglements", "achats", "stock", "administration"];
+
 export type NavItem = {
   href: string;
   label: string;
@@ -38,10 +44,10 @@ export const NAV: NavGroup[] = [
   {
     title: "Gestion commerciale",
     items: [
-      { href: "/gestion", label: "Préparation", icon: "ClipboardCheck", module: ["livraisons", "facturation", "achats", "stock", "administration"], exact: true },
-      { href: "/gestion/pieces?type=COMMANDE", label: "Commandes clients", icon: "ShoppingCart", module: "livraisons" },
+      { href: "/gestion", label: "Préparation", icon: "ClipboardCheck", module: PREPARATION_MODULES, exact: true },
+      { href: "/gestion/pieces?type=COMMANDE", label: "Commandes clients", icon: "ShoppingCart", module: "commandes" },
       { href: "/gestion/pieces", label: "Pièces de vente", icon: "FileText", module: ["livraisons", "facturation"] },
-      { href: "/gestion/reglements", label: "Règlements", icon: "Wallet", module: "facturation" },
+      { href: "/gestion/reglements", label: "Règlements", icon: "Wallet", module: "reglements" },
       { href: "/gestion/achats", label: "Achats", icon: "PackagePlus", module: ["achats", "stock"] },
       { href: "/gestion/stock", label: "Stock réel", icon: "Warehouse", module: "stock" },
       { href: "/gestion/inventaires", label: "Inventaires", icon: "ClipboardList", module: "stock" },

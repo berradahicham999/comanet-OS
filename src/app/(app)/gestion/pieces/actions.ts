@@ -2,9 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { clientInScope, hasFlag, requirePermission } from "@/lib/access";
+import { clientInScope, hasFlag, isOwnOnly, requireAccessContext, requirePermission } from "@/lib/access";
 import { errorParam, isUuid, str } from "@/lib/gestion/form";
-import { DOC_TYPES, moduleOfType as moduleOf, type DocType } from "@/lib/gestion/documents-shared";
+import { DOC_TYPES, isOwnOrder, moduleOfType as moduleOf, type DocType } from "@/lib/gestion/documents-shared";
 import {
   CommercialBlockError, cancelBL, cancelOrder, createBLFromOrder, renameDocumentClient, createCreditNote, createInvoiceFromBLs, deleteDraft, getDocument, markDelivered,
   requestApproval, saveDraft, validateDocument, type DraftInput,
@@ -21,7 +21,13 @@ async function docOrThrow(id: string | null) {
   const d = await getDocument(id);
   if (!d) throw new Error("Pièce introuvable.");
   if (!(await clientInScope(d.clientId))) throw new Error("Accès refusé : ce client n'est pas dans votre périmètre.");
+  if (d.type === "COMMANDE") await assertOwnOrder(d, (await requireAccessContext()).user.id);
   return d;
+}
+
+/** Portée « ses données » : un commercial n'agit que sur les commandes qu'il a saisies ou qui lui sont attribuées. */
+async function assertOwnOrder(d: { createdById: string | null; salesRepId: string | null } | null, userId: string) {
+  if (d && (await isOwnOnly()) && !isOwnOrder(d, userId)) throw new Error("Accès refusé : cette commande n'est pas la vôtre.");
 }
 
 /**
@@ -168,7 +174,7 @@ export async function cancelOrderAction(fd: FormData) {
   const id = str(fd, "id");
   try {
     const d = await docOrThrow(id);
-    const user = await requirePermission("livraisons", "edit");
+    const user = await requirePermission("commandes", "edit");
     await cancelOrder(d.id, str(fd, "reason") ?? "", { id: user.id, name: user.name });
   } catch (e) {
     redirect(`/gestion/pieces/${id}?error=${errorParam(e)}`);

@@ -7,7 +7,8 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
-import { MODULE_KEYS, FLAG_KEYS } from "@/lib/access-shared";
+import { MODULE_KEYS, FLAG_KEYS, MODULE_GROUPS, MODULE_HINTS, MODULE_LABELS, VALIDATE_HINTS } from "@/lib/access-shared";
+import { isOwnOrder, moduleOfType } from "@/lib/gestion/documents-shared";
 import {
   ACTIONS, can, describeMatrix, hasAnyModule, isAdmin, legacyRoleFor, matrixFromRows, mergeFlags, mergeMatrix,
   noFlags, noPermissions, normalizeMatrix, rowsFromMatrix, sameMatrix, widestScope, type PermissionSet,
@@ -160,5 +161,40 @@ describe("plus aucune décision d'accès sur l'ancien enum de rôle", () => {
   });
   test("chaque interrupteur transverse a un libellé", () => {
     for (const f of FLAG_KEYS) assert.ok(f.length > 0);
+  });
+});
+
+describe("gestion commerciale : commandes, livraisons, facturation et règlements séparés", () => {
+  test("6. Commercial qui ne prend que des commandes : ni BL, ni facture, ni règlement", () => {
+    const n = normalizeMatrix(grant(grant(grant(noPermissions(), "commandes", "create", "edit"), "clients", "view"), "produits", "view"));
+    assert.equal(moduleOfType("COMMANDE"), "commandes");
+    assert.ok(can(n, moduleOfType("COMMANDE"), "create"), "il saisit et confirme ses commandes");
+    assert.equal(can(n, moduleOfType("BL"), "view"), false, "aucun BL, pas même en lecture");
+    assert.equal(can(n, "livraisons", "create"), false, "« Préparer le BL » reste au magasin");
+    assert.equal(can(n, moduleOfType("FACTURE"), "view"), false);
+    assert.equal(can(n, "reglements", "view"), false);
+  });
+  test("7. Commercial qui encaisse les chèques sans facturer", () => {
+    const n = normalizeMatrix(grant(grant(noPermissions(), "commandes", "create"), "reglements", "create"));
+    assert.ok(can(n, "reglements", "create") && !can(n, "facturation", "view"));
+  });
+  test("portée « ses données » : une commande est à soi si on l'a saisie ou si elle nous est attribuée", () => {
+    assert.equal(isOwnOrder({ createdById: "a", salesRepId: null }, "a"), true);
+    assert.equal(isOwnOrder({ createdById: "b", salesRepId: "a" }, "a"), true);
+    assert.equal(isOwnOrder({ createdById: "b", salesRepId: "c" }, "a"), false);
+  });
+  test("la migration recopie Livraisons → Commandes et Facturation → Règlements : personne ne perd de droit", () => {
+    const sqlText = readFileSync("drizzle/0043_droits_commandes_reglements.sql", "utf8");
+    assert.match(sqlText, /\('livraisons', 'commandes'\), \('facturation', 'reglements'\)/);
+    assert.match(sqlText, /INSERT INTO "user_permissions"/);
+    assert.match(sqlText, /INSERT INTO "role_template_permissions"/);
+    const journal = JSON.parse(readFileSync("drizzle/meta/_journal.json", "utf8")) as { entries: { tag: string }[] };
+    assert.ok(journal.entries.some((e) => e.tag === "0043_droits_commandes_reglements"), "migration inscrite au journal");
+  });
+  test("chaque module a un libellé, une description et un sens de « Valider », et apparaît dans la matrice", () => {
+    for (const m of MODULE_KEYS) {
+      assert.ok(MODULE_LABELS[m] && MODULE_HINTS[m] && VALIDATE_HINTS[m], m);
+      assert.ok(MODULE_GROUPS.some((g) => g.modules.includes(m)), `${m} absent de la matrice`);
+    }
   });
 });
