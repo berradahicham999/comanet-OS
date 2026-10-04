@@ -146,6 +146,7 @@ export async function saveBrief(formData: FormData) {
     constraints: str(formData, "constraints"), mandatoryMentions: str(formData, "mandatoryMentions"), forbiddenClaims: str(formData, "forbiddenClaims"),
     references, deliverables: str(formData, "deliverables"),
     campaignId: isUuid(str(formData, "campaignId")) ? str(formData, "campaignId") : null,
+    ...(formData.has("axisId") ? { axisId: isUuid(str(formData, "axisId")) ? str(formData, "axisId") : null } : {}),
     updatedAt: new Date(),
   }).where(eq(contentItems.id, id));
   await setProducts(id, formData.getAll("productIds").map(String));

@@ -14,7 +14,7 @@ export const metadata = { title: "Tâches" };
 
 function TaskCard({ t, me }: { t: TaskRow; me: string }) {
   const overdue = t.dueDate && t.dueDate < iso(today()) && t.status !== "DONE" && t.status !== "CANCELLED";
-  const next = t.status === "TODO" ? "IN_PROGRESS" : t.status === "IN_PROGRESS" ? "DONE" : null;
+  const next = t.status === "TODO" ? "IN_PROGRESS" : t.status === "IN_PROGRESS" ? "DONE" : t.status === "BLOCKED" ? "IN_PROGRESS" : null;
   return (
     <div className={clsx("card p-3", t.status === "DONE" && "opacity-70")}>
       <div className="flex items-start gap-2">
@@ -24,6 +24,7 @@ function TaskCard({ t, me }: { t: TaskRow; me: string }) {
       <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-muted">
         {t.brand && <span className="flex items-center gap-1"><BrandDot color={t.brandColor ?? "#999"} />{t.brand}</span>}
         <Badge tone="gray">{SOURCE_LABEL[t.source] ?? t.source}</Badge>
+        {t.status === "BLOCKED" && <Badge tone="orange">Bloquée</Badge>}
         {t.dueDate && <span className={clsx(overdue && "text-red font-medium")}>{overdue ? "Retard · " : ""}{fmtDateShort(t.dueDate)}</span>}
         {t.comments > 0 && <span className="flex items-center gap-0.5"><MessageSquare size={12} />{t.comments}</span>}
         <span className="ml-auto flex items-center gap-1">
@@ -34,7 +35,7 @@ function TaskCard({ t, me }: { t: TaskRow; me: string }) {
         <form action={setTaskStatus} className="mt-2 flex gap-1">
           {/* Pas de redirection : la page se rafraîchit en place et garde l'onglet et les filtres en cours. */}
           <input type="hidden" name="id" value={t.id} /><input type="hidden" name="status" value={next} />
-          <button className="btn-ghost btn-sm text-[12px]" type="submit">{next === "IN_PROGRESS" ? <><Play size={12} /> Démarrer</> : <><Check size={12} /> Terminer</>}</button>
+          <button className="btn-ghost btn-sm text-[12px]" type="submit">{next === "IN_PROGRESS" ? <><Play size={12} /> {t.status === "BLOCKED" ? "Débloquer" : "Démarrer"}</> : <><Check size={12} /> Terminer</>}</button>
           {t.status === "IN_PROGRESS" && <button className="btn-ghost btn-sm text-[12px]" type="submit" name="status" value="TODO"><RotateCcw size={12} /></button>}
         </form>
       )}
@@ -77,7 +78,7 @@ export default async function TachesPage(props: { searchParams: Promise<{ assign
     ownOnly ? Promise.resolve([] as TaskRow[]) : listTasks({ brandIds: scopeBrands, proposed: true }),
   ]);
   const cols: { key: TaskRow["status"]; label: string }[] = [{ key: "TODO", label: "À faire" }, { key: "IN_PROGRESS", label: "En cours" }, { key: "DONE", label: "Terminées (14 j)" }];
-  const overdueCount = tasks.filter((t) => t.dueDate && t.dueDate < iso(today()) && (t.status === "TODO" || t.status === "IN_PROGRESS")).length;
+  const overdueCount = tasks.filter((t) => t.dueDate && t.dueDate < iso(today()) && (t.status === "TODO" || t.status === "IN_PROGRESS" || t.status === "BLOCKED")).length;
   const qs = (extra: Record<string, string | undefined>) => { const p = new URLSearchParams(); for (const [k, v] of Object.entries({ ...sp, ...extra })) if (v) p.set(k, v); const s = p.toString(); return `/taches${s ? "?" + s : ""}`; };
 
   return (
@@ -107,7 +108,8 @@ export default async function TachesPage(props: { searchParams: Promise<{ assign
       ) : (
       <div className="grid md:grid-cols-3 gap-3 items-start">
         {cols.map((c) => {
-          const list = tasks.filter((t) => t.status === c.key || (c.key === "DONE" && t.status === "CANCELLED"));
+          // Une tâche bloquée reste visible dans « En cours » (elle est commencée, pas terminée).
+          const list = tasks.filter((t) => t.status === c.key || (c.key === "DONE" && t.status === "CANCELLED") || (c.key === "IN_PROGRESS" && t.status === "BLOCKED"));
           return (
             <div key={c.key} className="rounded-2xl bg-black/[0.03] p-2 min-h-[200px]">
               <div className="flex items-center justify-between px-2 py-1.5 mb-1"><span className="label">{c.label}</span><span className="text-[11px] text-muted">{list.length}</span></div>

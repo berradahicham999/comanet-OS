@@ -131,13 +131,14 @@ type Ko = { available: false; reason: string; howToFix: string };
 /* ------------------------------ Registre ------------------------------ */
 
 describe("registre des outils", () => {
-  test("les douze outils du plan, get_ads_intelligence, les dix outils de l'Agent marketing, les deux outils médicaux et les deux outils CRM sont présents, triés par nom", () => {
+  test("les douze outils du plan, get_ads_intelligence, les dix outils de l'Agent marketing, les deux outils médicaux, les trois outils Marketing OS et les deux outils CRM sont présents, triés par nom", () => {
     assert.deepEqual(TOOL_NAMES, [...TOOL_NAMES].sort());
     for (const n of ["get_sales_summary", "get_client_intelligence", "get_terrain_summary", "get_stock_coverage", "get_marketing_budget", "get_ads_performance", "get_regulatory_alerts", "get_action_center", "get_tasks", "search_entities", "propose_task", "propose_report"]) assert.ok(TOOL_NAMES.includes(n), n);
     for (const n of ["get_brand_overview", "get_sales_performance", "get_sales_breakdown", "get_sales_targets", "get_inventory_status", "get_stock_risk", "get_top_skus", "get_product_performance", "get_marketing_context", "get_marketing_recommendations"]) assert.ok(TOOL_NAMES.includes(n), n);
     for (const n of ["get_doctor_profile", "get_field_control"]) assert.ok(TOOL_NAMES.includes(n), n);
+    for (const n of ["get_marketing_plan", "get_marketing_actions", "get_unified_decisions"]) assert.ok(TOOL_NAMES.includes(n), n);
     for (const n of ["get_client_portfolio", "get_client_visits"]) assert.ok(TOOL_NAMES.includes(n), n);
-    assert.equal(TOOLS.length, 27);
+    assert.equal(TOOLS.length, 30);
   });
   test("chaque schéma JSON est un objet fermé sans $schema, avec descriptions", () => {
     for (const d of toolDefinitions(TOOLS)) {

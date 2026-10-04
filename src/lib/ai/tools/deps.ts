@@ -15,6 +15,9 @@ import { animationObjectives, animationTotals, animationsByDim, objectiveForRang
 import { budgetByCategory } from "@/lib/budget";
 import { ADS_AGENT_API } from "@/lib/ads-intel/agent";
 import { realIntelDeps } from "@/lib/marketing-intel/server";
+import { getPlan, listPlans } from "@/lib/marketing-plan/plan";
+import { listActions } from "@/lib/marketing-plan/actions";
+import { buildUnifiedDecisions } from "@/lib/decisions/build";
 import { getRecommendations } from "@/lib/rules";
 import { listTasks } from "@/lib/tasks";
 import { searchEntities } from "@/lib/search";
@@ -179,6 +182,8 @@ const crmDeps: CrmToolDeps = {
 
 export const realDeps: ToolDeps = {
   medical: medicalDeps,
+  // Marketing OS : plan, actions et décisions unifiées (lecture seule ; `src/lib/marketing-plan/`, `src/lib/decisions/`).
+  marketingPlan: { listPlans: (ids) => listPlans(ids), getPlan: (id) => getPlan(id), listActions: (f) => listActions(f), decisions: (scope) => buildUnifiedDecisions(scope) },
   crm: crmDeps,
   // Ventes, objectifs, stock, catalogue, budget consommé, publicité, activité marketing : câblage de la couche Marketing Intelligence.
   ...realIntelDeps,

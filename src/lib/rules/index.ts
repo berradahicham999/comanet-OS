@@ -22,6 +22,7 @@ import { activationRules } from "./activation-rules";
 import { analyticsRules } from "./analytics-rules";
 import { clientStockRules } from "./client-stock-rules";
 import { gestionRules } from "./gestion-rules";
+import { planRules } from "./plan-rules";
 import { crmRules } from "./crm-rules";
 import { crmViewer, canSeePositions } from "@/lib/crm/access";
 import { dismissalsFor } from "./dismissals";
@@ -48,6 +49,7 @@ export const RULES: Rule[] = [
   ...analyticsRules,
   ...clientStockRules,
   ...gestionRules,
+  ...planRules,
   dataQualityRule,
   ...medicalRules,
   ...medicalFieldRules,
@@ -81,7 +83,7 @@ export const allRecommendations = cache(async (): Promise<RecommendationWithStat
     keys.length
       ? db.select({ source_key: tasks.sourceKey, id: tasks.id, status: tasks.status, assignee: users.name })
           .from(tasks).leftJoin(users, eq(users.id, tasks.assigneeId))
-          .where(and(inArray(tasks.sourceKey, keys), inArray(tasks.status, ["TODO", "IN_PROGRESS"])))
+          .where(and(inArray(tasks.sourceKey, keys), inArray(tasks.status, ["TODO", "IN_PROGRESS", "BLOCKED"])))
       : Promise.resolve([]),
     dismissalsFor(keys),
   ]);

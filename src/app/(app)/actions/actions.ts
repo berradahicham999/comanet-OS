@@ -30,7 +30,7 @@ export async function createTaskFromRecommendation(formData: FormData): Promise<
 
   // Une seule tâche ouverte par recommandation
   const existing = await db.query.tasks.findFirst({ where: eq(tasks.sourceKey, key) });
-  if (existing && (existing.status === "TODO" || existing.status === "IN_PROGRESS")) {
+  if (existing && (existing.status === "TODO" || existing.status === "IN_PROGRESS" || existing.status === "BLOCKED")) {
     revalidatePath("/actions");
     return;
   }

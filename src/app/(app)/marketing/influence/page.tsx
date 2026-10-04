@@ -64,7 +64,8 @@ export default async function InfluencePage(props: { searchParams: Promise<{ bra
   if (period.key !== "last90") returnParams.period = period.key;
   if (period.key === "custom") { if (sp.start) returnParams.start = sp.start; if (sp.end) returnParams.end = sp.end; }
   if (status) returnParams.status = status;
-  const formProps = { action: saveCollaboration, brands, influencers: influencerList, campaigns, products, seeCosts, returnParams };
+  const axes = (await db.execute(sql`select a.id, a.name || ' · ' || p.name as label, p.brand_id from marketing_axes a join marketing_plans p on p.id = a.plan_id where p.status <> 'CLOSED' order by p.year desc, a.sort, a.name`)).rows as { id: string; label: string; brand_id: string }[];
+  const formProps = { action: saveCollaboration, brands, influencers: influencerList, campaigns, products, axes, seeCosts, returnParams };
 
   return (
     <>

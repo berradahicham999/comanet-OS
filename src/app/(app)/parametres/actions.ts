@@ -109,6 +109,15 @@ export async function updateSettings(formData: FormData) {
       maxDecisions: Math.max(1, Math.round(num(formData, "mi_maxDecisions", cur.marketingIntel.maxDecisions))),
     },
     forecast: parseForecast(formData, cur.forecast),
+    marketingPlan: {
+      minHistoryMad: Math.max(0, num(formData, "mp_minHistoryMad", cur.marketingPlan.minHistoryMad)),
+      scaleAdjustPct: Math.max(0, num(formData, "mp_scaleAdjustPct", cur.marketingPlan.scaleAdjustPct)),
+      optimizeAdjustPct: Math.max(0, num(formData, "mp_optimizeAdjustPct", cur.marketingPlan.optimizeAdjustPct)),
+      stopAdjustPct: Math.max(0, num(formData, "mp_stopAdjustPct", cur.marketingPlan.stopAdjustPct)),
+      testingSharePct: Math.min(20, Math.max(0, num(formData, "mp_testingSharePct", cur.marketingPlan.testingSharePct))),
+      reviewDays: Math.max(1, Math.round(num(formData, "mp_reviewDays", cur.marketingPlan.reviewDays))),
+      maxDecisions: Math.max(1, Math.round(num(formData, "mp_maxDecisions", cur.marketingPlan.maxDecisions))),
+    },
     crm: parseCrm(formData, cur.crm),
   };
   if (!next.regulatoryAlertDays.length) next.regulatoryAlertDays = cur.regulatoryAlertDays;

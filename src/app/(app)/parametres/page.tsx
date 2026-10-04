@@ -139,6 +139,18 @@ export default async function ParametresPage(props: { searchParams: Promise<{ ta
               <Field name="mi_maxDecisions" label="Recommandations rendues (max)" value={s.marketingIntel.maxDecisions} />
             </div>
           </Card>
+          <Card title="Plan marketing (Marketing OS)">
+            <p className="text-[12px] text-muted mb-2">Allocation proposée du budget par canal : part réelle de l&apos;année précédente, ajustée par le verdict de chaque canal (Analytics marketing). Sans historique suffisant, « non mesurable ».</p>
+            <div className="grid grid-cols-2 gap-2">
+              <Field name="mp_minHistoryMad" label="Historique minimal N-1 (MAD)" value={s.marketingPlan.minHistoryMad} hint="En dessous : aucune proposition" />
+              <Field name="mp_testingSharePct" label="Réserve de tests (% du budget)" value={s.marketingPlan.testingSharePct} />
+              <Field name="mp_scaleAdjustPct" label="Canal SCALE : +(%)" value={s.marketingPlan.scaleAdjustPct} />
+              <Field name="mp_optimizeAdjustPct" label="Canal OPTIMIZE : −(%)" value={s.marketingPlan.optimizeAdjustPct} />
+              <Field name="mp_stopAdjustPct" label="Canal STOP : −(%)" value={s.marketingPlan.stopAdjustPct} />
+              <Field name="mp_reviewDays" label="Revue d'une décision approuvée (jours)" value={s.marketingPlan.reviewDays} hint="Au-delà sans exécution : expirée" />
+              <Field name="mp_maxDecisions" label="Décisions affichées (max)" value={s.marketingPlan.maxDecisions} />
+            </div>
+          </Card>
           <Card title="Prévision saisonnière" className="md:col-span-2">
             <div id="prevision" />
             <p className="text-[12px] text-muted mb-2">Prévision mensuelle <b>modélisée</b> (Stock & achats → Prévision & commandes) : base désaisonnalisée × indice des événements ci-dessous. Un coefficient de 0,85 = −15 % sur les jours couverts, 1,5 = +50 %. Mots-clés vides = toutes les références ; sinon seules celles dont le nom ou la catégorie contient un mot-clé. Le <b>ratio observé</b> (ventes journalières dedans ÷ dehors sur 36 mois) est une corrélation constatée dans l&apos;historique, affichée pour calibrer le coefficient, jamais appliquée d&apos;office.</p>

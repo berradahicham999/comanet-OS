@@ -272,6 +272,14 @@ export async function budgetConsumptionByMonth(year: number): Promise<MonthlyCon
 
 export { AD_SPEND_SOURCE_LABEL };
 
+/**
+ * Fragment SQL « dépense engagée » (COMMITTED + SPENT) sur `marketing_expenses`, pour les sommes par action,
+ * par axe ou par plan (Marketing OS) : la définition du statut engagé ne vit qu'ici.
+ */
+export function engagedSql(alias = "e") {
+  return sql`${sql.raw(alias)}.status in ('COMMITTED','SPENT')`;
+}
+
 /* --------------------------- Répartition par catégorie --------------------------- */
 
 export type BudgetCategoryRow = { category: string; planned: number; committed: number; spent: number };

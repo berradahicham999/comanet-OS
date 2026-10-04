@@ -13,7 +13,7 @@ import { CAMPAIGN_STATUS } from "@/lib/marketing-shared";
 import { saveBudget, saveBudgetLine, deleteBudgetLine, saveExpense, deleteExpense } from "../actions";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Budgets marketing" };
+export const metadata = { title: "Budget & dépenses" };
 
 const STATUS_LABEL = { PLANNED: "Prévu", COMMITTED: "Engagé", SPENT: "Dépensé" } as const;
 
@@ -27,17 +27,21 @@ export default async function MarketingBudgetsPage(props: { searchParams: Promis
   const activeBrands = brands.filter((b) => b.active && (scopeBrands === null || scopeBrands.includes(b.id)));
   const brandId = sp.brand && activeBrands.some((b) => b.id === sp.brand) ? sp.brand : null;
 
-  const [consumption, budgetRows, lineRows, expenseRows, campaignRows, marginRows] = await Promise.all([
+  const [consumption, budgetRows, lineRows, expenseRows, campaignRows, marginRows, actionRows] = await Promise.all([
     budgetConsumptionByBrand(year),
     db.execute(sql`select brand_id, amount::float8 as amount, reference_revenue::float8 as ref, pct_of_revenue::float8 as pct from budgets where year = ${year}`),
     db.execute(sql`select id, brand_id, label, category::text as category, amount::float8 as amount from budget_lines where year = ${year} order by amount desc`),
-    db.execute(sql`select e.id, e.brand_id, e.label, e.category::text as category, e.status::text as status, e.amount::float8 as amount, e.date::text as date, e.attributed_revenue::float8 as revenue, e.conversions, e.campaign_id, c.name as campaign from marketing_expenses e left join campaigns c on c.id = e.campaign_id where extract(year from e.date) = ${year} order by e.date desc`),
+    db.execute(sql`select e.id, e.brand_id, e.label, e.category::text as category, e.status::text as status, e.amount::float8 as amount, e.date::text as date, e.attributed_revenue::float8 as revenue, e.conversions, e.campaign_id, c.name as campaign, e.action_id, ma.title as action from marketing_expenses e left join campaigns c on c.id = e.campaign_id left join marketing_actions ma on ma.id = e.action_id where extract(year from e.date) = ${year} order by e.date desc`),
     db.execute(sql`select c.*, coalesce((select sum(amount) from marketing_expenses e where e.campaign_id = c.id and e.status <> 'PLANNED'),0)::float8 as spend, coalesce((select sum(attributed_revenue) from marketing_expenses e where e.campaign_id = c.id),0)::float8 as revenue, coalesce((select sum(conversions) from marketing_expenses e where e.campaign_id = c.id),0)::float8 as conversions from campaigns c order by c.status, c.start_date desc`),
     db.execute(sql`select p.brand_id, sum(s.amount)::float8 as revenue, sum(s.quantity * coalesce(p.cost_price,0))::float8 as cost, sum(case when p.cost_price is null then s.amount else 0 end)::float8 as unknown from sales s join products p on p.id = s.product_id where s.date >= ${iso(new Date(Date.UTC(year, 0, 1)))}::date group by p.brand_id`),
+    // Actions du plan marketing encore ouvertes : une dépense peut s'y rattacher (Marketing OS).
+    db.execute(sql`select a.id, a.brand_id, a.title from marketing_actions a join tasks t on t.id = a.task_id where t.status in ('TODO','IN_PROGRESS','BLOCKED') order by a.title`),
   ]);
+  const actionsByBrand = new Map<string, { id: string; title: string }[]>();
+  for (const r of actionRows.rows as { id: string; brand_id: string; title: string }[]) actionsByBrand.set(r.brand_id, [...(actionsByBrand.get(r.brand_id) ?? []), { id: r.id, title: r.title }]);
   type Budget = { brand_id: string; amount: number; ref: number | null; pct: number | null };
   type Line = { id: string; brand_id: string; label: string; category: string; amount: number };
-  type Expense = { id: string; brand_id: string; label: string; category: string; status: "PLANNED" | "COMMITTED" | "SPENT"; amount: number; date: string; revenue: number | null; conversions: number | null; campaign_id: string | null; campaign: string | null };
+  type Expense = { id: string; brand_id: string; label: string; category: string; status: "PLANNED" | "COMMITTED" | "SPENT"; amount: number; date: string; revenue: number | null; conversions: number | null; campaign_id: string | null; campaign: string | null; action_id: string | null; action: string | null };
   type Campaign = { id: string; brand_id: string; name: string; channel: string; objective: string | null; start_date: string | null; end_date: string | null; budget: number | null; status: string; spend: number; revenue: number; conversions: number };
   const budgetsBy = new Map((budgetRows.rows as Budget[]).map((b) => [b.brand_id, b]));
   const marginBy = new Map((marginRows.rows as { brand_id: string; revenue: number; cost: number; unknown: number }[]).map((m) => [m.brand_id, m.revenue > 0 && m.unknown / m.revenue < 0.5 ? ((m.revenue - m.unknown) - m.cost) / (m.revenue - m.unknown) * 100 : settings.defaultMarginPct]));
@@ -47,10 +51,11 @@ export default async function MarketingBudgetsPage(props: { searchParams: Promis
   // Consommation : définition officielle unique (`src/lib/budget.ts`), la même que le cockpit,
   // /marketing et la règle `budget-overrun`. « Engagé » inclut donc la dépense de régie.
   const consumed = (id: string) => consumption.get(id)?.consumed ?? 0;
-  const totals = { budget: 0, planned: 0, engaged: 0, spent: 0, revenue: 0 };
+  const totals = { budget: 0, allocated: 0, planned: 0, engaged: 0, spent: 0, revenue: 0 };
   for (const b of activeBrands) {
     const c = consumption.get(b.id);
     totals.budget += c?.annual ?? 0;
+    totals.allocated += lines.filter((l) => l.brand_id === b.id).reduce((a, l) => a + l.amount, 0);
     totals.engaged += c?.consumed ?? 0;
     totals.spent += c?.spent ?? 0;
     totals.planned += c?.planned ?? 0;
@@ -59,11 +64,11 @@ export default async function MarketingBudgetsPage(props: { searchParams: Promis
 
   return (
     <>
-      <PageHeader eyebrow="Marketing Operating System" title="Budgets & campagnes" subtitle={`Année ${year} · budget prévu / engagé / dépensé / restant par marque, croisé avec le CA attribué et la marge.`}
-        actions={<><Link href="/marketing" className="btn-secondary btn-sm">Vue d&apos;ensemble</Link><Link href="/imports?type=BUDGETS" className="btn-ghost btn-sm">Importer budgets</Link></>}>
+      <PageHeader eyebrow="Marketing" title="Budget & dépenses" subtitle={`Année ${year} · planifié → alloué par canal → engagé → dépensé → reste, par marque. Le budget et l'allocation sont ceux du plan marketing ; une dépense se rattache à une action du plan.`}
+        actions={<><Link href="/marketing" className="btn-secondary btn-sm">Command Center</Link><Link href="/marketing/plan" className="btn-secondary btn-sm">Plan marketing</Link><Link href="/imports?type=BUDGETS" className="btn-ghost btn-sm">Importer budgets</Link></>}>
         {(seeGlobal || brandId) && <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-3">
           <Card><div className="label">Budget annuel</div><div className="kpi mt-2">{fmtMAD(totals.budget, { compact: true })}</div></Card>
-          <Card><div className="label">Prévu (actions)</div><div className="kpi mt-2">{fmtMAD(totals.planned, { compact: true })}</div><div className="text-[12px] text-muted mt-1">{fmtPct(totals.budget ? (totals.planned / totals.budget) * 100 : 0)} du budget</div></Card>
+          <Card><div className="label">Alloué par canal</div><div className="kpi mt-2">{fmtMAD(totals.allocated, { compact: true })}</div><div className="text-[12px] text-muted mt-1">{fmtPct(totals.budget ? (totals.allocated / totals.budget) * 100 : 0)} du budget · prévu non engagé {fmtMAD(totals.planned, { compact: true })}</div></Card>
           <Card><div className="label">Engagé</div><div className="kpi mt-2">{fmtMAD(totals.engaged, { compact: true })}</div><Progress value={totals.budget ? (totals.engaged / totals.budget) * 100 : 0} className="mt-2" /></Card>
           <Card><div className="label">Dépensé</div><div className="kpi mt-2">{fmtMAD(totals.spent, { compact: true })}</div></Card>
           <Card><div className="label">Disponible</div><div className={`kpi mt-2 ${totals.budget - totals.engaged < 0 ? "text-red" : "text-green"}`}>{fmtMAD(totals.budget - totals.engaged, { compact: true })}</div><div className="text-[12px] text-muted mt-1">CA attribué {fmtMAD(totals.revenue, { compact: true })}</div></Card>
@@ -115,7 +120,7 @@ export default async function MarketingBudgetsPage(props: { searchParams: Promis
                 <div className="lg:col-span-2">
                   <div className="flex items-center justify-between mb-2"><div className="label">Actions & dépenses ({ex.length})</div><div className="text-[12px] text-muted">CA attribué <b>{fmtMAD(revenue, { compact: true })}</b>{seeMargins && <> · marge {Math.round(margin)} % → <b>{fmtMAD(grossMargin, { compact: true })}</b></>} · ROI réel <b className={roi !== null && roi < 0 ? "text-red" : "text-green"}>{roi === null ? "—" : fmtPct(roi, 0, true)}</b></div></div>
                   <div className="overflow-x-auto"><table className="tbl text-[12.5px]"><thead><tr><th>Date</th><th>Action</th><th>Catégorie</th><th>Statut</th><th className="num">Montant</th><th className="num">CA attribué</th><th className="num">ROAS</th><th></th></tr></thead><tbody>
-                    {ex.slice(0, 12).map((e) => <tr key={e.id}><td className="whitespace-nowrap">{fmtDateShort(e.date)}</td><td>{e.label}{e.campaign && <span className="text-faint"> · {e.campaign}</span>}</td><td className="text-muted">{BUDGET_CATEGORY_LABELS[e.category as keyof typeof BUDGET_CATEGORY_LABELS]}</td><td><Badge tone={e.status === "SPENT" ? "green" : e.status === "COMMITTED" ? "blue" : "gray"}>{STATUS_LABEL[e.status]}</Badge></td><td className="num font-medium">{fmtMAD(e.amount, { suffix: false })}</td><td className="num">{e.revenue ? fmtMAD(e.revenue, { suffix: false }) : "—"}</td><td className="num">{e.revenue && e.amount ? (e.revenue / e.amount).toFixed(1) + "×" : "—"}</td><td><form action={deleteExpense}><input type="hidden" name="id" value={e.id} /><button className="text-faint hover:text-red" type="submit" title="Supprimer">×</button></form></td></tr>)}
+                    {ex.slice(0, 12).map((e) => <tr key={e.id}><td className="whitespace-nowrap">{fmtDateShort(e.date)}</td><td>{e.label}{e.campaign && <span className="text-faint"> · {e.campaign}</span>}{e.action_id && <div className="text-[10.5px] text-muted">action : <Link href={`/marketing/priorites/${e.action_id}`} className="hover:underline">{e.action}</Link></div>}</td><td className="text-muted">{BUDGET_CATEGORY_LABELS[e.category as keyof typeof BUDGET_CATEGORY_LABELS]}</td><td><Badge tone={e.status === "SPENT" ? "green" : e.status === "COMMITTED" ? "blue" : "gray"}>{STATUS_LABEL[e.status]}</Badge></td><td className="num font-medium">{fmtMAD(e.amount, { suffix: false })}</td><td className="num">{e.revenue ? fmtMAD(e.revenue, { suffix: false }) : "—"}</td><td className="num">{e.revenue && e.amount ? (e.revenue / e.amount).toFixed(1) + "×" : "—"}</td><td><form action={deleteExpense}><input type="hidden" name="id" value={e.id} /><button className="text-faint hover:text-red" type="submit" title="Supprimer">×</button></form></td></tr>)}
                     {ex.length === 0 && <tr><td colSpan={8} className="text-muted text-center py-3">Aucune action saisie pour {year}.</td></tr>}
                   </tbody></table></div>
                   <details className="mt-2"><summary className="cursor-pointer text-[12px] text-accent font-medium">+ Ajouter une action / dépense</summary>
@@ -127,6 +132,7 @@ export default async function MarketingBudgetsPage(props: { searchParams: Promis
                       <select name="category" className="select h-8"><option value="">Catégorie auto</option>{BUDGET_CATEGORIES.map((c) => <option key={c} value={c}>{BUDGET_CATEGORY_LABELS[c]}</option>)}</select>
                       <select name="status" className="select h-8"><option value="PLANNED">Prévu</option><option value="COMMITTED">Engagé</option><option value="SPENT">Dépensé</option></select>
                       <select name="campaignId" className="select h-8"><option value="">Campagne (facultatif)</option>{camps.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+                      <select name="actionId" className="select h-8"><option value="">Action du plan (facultatif)</option>{(actionsByBrand.get(b.id) ?? []).map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}</select>
                       <input name="attributedRevenue" placeholder="CA attribué" className="input h-8" />
                       <input name="conversions" placeholder="Conversions" className="input h-8" />
                       <button className="btn-secondary btn-sm col-span-2 md:col-span-3" type="submit">Enregistrer</button>

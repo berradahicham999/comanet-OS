@@ -27,6 +27,7 @@ import { getInventoryStatus, getProductPerformance, getStockRisk, getTopSkus } f
 import { getSalesBreakdown, getSalesPerformance } from "./marketing-sales";
 import { getMarketingContext } from "./marketing-context";
 import { getDoctorProfile, getFieldControl } from "./medical";
+import { getMarketingActions, getMarketingPlan, getUnifiedDecisions } from "./marketing-plan";
 import { getClientPortfolio, getClientVisits } from "./crm";
 
 export type { AiTool, ToolAccess, ToolContext, ToolDeps, ToolResult, ToolCallLog } from "./types";
@@ -40,12 +41,14 @@ export const TOOLS: AiTool<any>[] = [
   getSalesPerformance, getSalesBreakdown, getMarketingContext,
   // Médical v2 (ordonnances, contrôle terrain)
   getDoctorProfile, getFieldControl,
+  // Marketing OS (plan, actions, décisions unifiées)
+  getMarketingPlan, getMarketingActions, getUnifiedDecisions,
   // CRM commercial (portefeuilles, visites, chronologie client)
   getClientPortfolio, getClientVisits,
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 /** Outils de l'Agent marketing, dans l'ordre d'appel conseillé pour « que pousser cette semaine ». */
-export const MARKETING_AGENT_TOOLS = ["get_brand_overview", "get_sales_performance", "get_inventory_status", "get_top_skus", "get_product_performance", "get_marketing_context", "get_stock_risk", "get_sales_targets", "get_sales_breakdown", "get_marketing_recommendations"] as const;
+export const MARKETING_AGENT_TOOLS = ["get_brand_overview", "get_sales_performance", "get_inventory_status", "get_top_skus", "get_product_performance", "get_marketing_context", "get_stock_risk", "get_sales_targets", "get_sales_breakdown", "get_marketing_recommendations", "get_marketing_plan", "get_marketing_actions", "get_unified_decisions"] as const;
 
 export const TOOL_NAMES = TOOLS.map((t) => t.name);
 

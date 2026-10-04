@@ -64,6 +64,8 @@ export async function saveExpense(formData: FormData) {
     category: (str(formData, "category") as BudgetCategory | null) ?? categoryFromLabel(label),
     status: (str(formData, "status") as "PLANNED" | "COMMITTED" | "SPENT" | null) ?? "PLANNED",
     campaignId: str(formData, "campaignId"),
+    // Action du plan marketing réalisée par cette dépense (Marketing OS) ; seulement si le formulaire le porte.
+    ...(formData.has("actionId") ? { actionId: str(formData, "actionId") } : {}),
     attributedRevenue: num(formData, "attributedRevenue") !== null ? num(formData, "attributedRevenue")!.toFixed(2) : null,
     conversions: num(formData, "conversions") !== null ? Math.round(num(formData, "conversions")!) : null,
     notes: str(formData, "notes"),
@@ -99,6 +101,8 @@ export async function saveCampaign(formData: FormData) {
     responsibleId: str(formData, "responsibleId"),
     notes: str(formData, "notes"),
     updatedAt: new Date(),
+    // Axe du plan marketing : seulement si le formulaire le porte (les autres formulaires ne l'effacent pas).
+    ...(formData.has("axisId") ? { axisId: str(formData, "axisId") } : {}),
   };
   let campaignId = id;
   if (id) await db.update(campaigns).set(values).where(eq(campaigns.id, id));
@@ -209,6 +213,7 @@ export async function saveCollaboration(formData: FormData) {
   const int = (k: string) => { const v = amount(formData, k, formData); return v === null ? null : Math.round(v); };
   const values: Partial<typeof collaborations.$inferInsert> = {
     influencerId, brandId, date, productId, campaignId,
+    ...(formData.has("axisId") ? { axisId: str(formData, "axisId") } : {}),
     contentType: str(formData, "contentType"),
     stories: int("stories") ?? 0, reels: int("reels") ?? 0, posts: int("posts") ?? 0,
     productValue: (amount(formData, "productValue", formData) ?? 0).toFixed(2),

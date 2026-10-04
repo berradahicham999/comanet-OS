@@ -20,6 +20,9 @@ import type { TaskPriority } from "@/db/schema";
 import type { SearchResult } from "@/lib/search";
 import type { ADS_AGENT_API } from "@/lib/ads-intel/agent";
 import type { MarketingIntelDeps } from "@/lib/marketing-intel/types";
+import type { PlanSummary, PlanDetail } from "@/lib/marketing-plan/plan";
+import type { ActionFilter, ActionRow } from "@/lib/marketing-plan/actions";
+import type { DecisionScope, DecisionSet as UnifiedDecisionSet } from "@/lib/decisions/build";
 
 /** Droits de la personne connectée, tels que résolus par `permissions.ts`. `brandIds`/`clientIds` à `null` = tout. */
 export type ToolAccess = {
@@ -76,6 +79,14 @@ export type MedicalToolDeps = {
   } | null>;
 };
 
+/** Marketing OS : plan, actions et décisions unifiées (lecture seule). Facultatif pour les doublures de test. */
+export type MarketingPlanToolDeps = {
+  listPlans(brandIds: string[] | null): Promise<PlanSummary[]>;
+  getPlan(id: string): Promise<PlanDetail | null>;
+  listActions(f: ActionFilter): Promise<ActionRow[]>;
+  decisions(scope: DecisionScope): Promise<UnifiedDecisionSet>;
+};
+
 /** Lectures du CRM commercial (portefeuilles, visites, chronologie), sans aucune position GPS. */
 export type CrmToolDeps = {
   viewer(userId: string, userName: string, perms: PermissionSet): Promise<import("@/lib/crm/access-shared").CrmViewer>;
@@ -90,6 +101,7 @@ export type CrmToolDeps = {
 export type ToolDeps = MarketingIntelDeps & {
   /** Facultatif : les doublures de test des autres domaines n'ont pas à le fournir. */
   medical?: MedicalToolDeps;
+  marketingPlan?: MarketingPlanToolDeps;
   crm?: CrmToolDeps;
   // Référentiels (résolution d'un nom saisi par le modèle vers un identifiant)
   findBrand(query: string): Promise<Ref | null>;

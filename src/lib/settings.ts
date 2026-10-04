@@ -95,6 +95,41 @@ export type ComanetSettings = {
   pnl: PnlSettings;
   /** Prévision saisonnière (`src/lib/forecast-shared.ts`) : base désaisonnalisée, horizon, événements (Ramadan, solaire, rentrée). */
   forecast: ForecastSettings;
+  /** Marketing OS : allocation proposée du budget par canal, revue des décisions, retard des actions. */
+  marketingPlan: MarketingPlanSettings;
+};
+
+/**
+ * Seuils du plan marketing (`src/lib/marketing-plan/allocation.ts`, `src/lib/decisions/`).
+ * L'allocation proposée part de la répartition réelle de l'année précédente (dépenses engagées + régie,
+ * CONFIRMED) et l'ajuste selon le verdict de chaque canal ; sans historique suffisant, elle est
+ * « non mesurable » et aucune part n'est inventée.
+ */
+export type MarketingPlanSettings = {
+  /** Historique minimal (MAD, dépense réelle N-1 toutes catégories) pour proposer une allocation. */
+  minHistoryMad: number;
+  /** Ajustement (+ %) d'un canal au verdict SCALE. */
+  scaleAdjustPct: number;
+  /** Ajustement (− %) d'un canal au verdict OPTIMIZE. */
+  optimizeAdjustPct: number;
+  /** Ajustement (− %) d'un canal au verdict STOP. */
+  stopAdjustPct: number;
+  /** Part réservée aux tests (% du budget) quand l'historique le permet ; 0 = aucune. */
+  testingSharePct: number;
+  /** Délai (jours) après lequel une décision approuvée sans action terminée est à revoir. */
+  reviewDays: number;
+  /** Nombre maximal de décisions rendues par le Command Center. */
+  maxDecisions: number;
+};
+
+export const DEFAULT_MARKETING_PLAN: MarketingPlanSettings = {
+  minHistoryMad: 20000,
+  scaleAdjustPct: 20,
+  optimizeAdjustPct: 10,
+  stopAdjustPct: 30,
+  testingSharePct: 2,
+  reviewDays: 30,
+  maxDecisions: 8,
 };
 
 /**
@@ -745,6 +780,7 @@ export const DEFAULT_SETTINGS: ComanetSettings = {
   gestion: DEFAULT_GESTION,
   pnl: DEFAULT_PNL,
   forecast: DEFAULT_FORECAST,
+  marketingPlan: DEFAULT_MARKETING_PLAN,
 };
 
 export const SETTINGS_KEY = "comanet.rules";
@@ -774,6 +810,7 @@ export function mergeSettings(stored: Partial<ComanetSettings> | null | undefine
     gestion: mergeGestion(stored.gestion),
     pnl: { ...DEFAULT_PNL, ...(stored.pnl ?? {}) },
     forecast: mergeForecast(stored.forecast),
+    marketingPlan: { ...DEFAULT_MARKETING_PLAN, ...(stored.marketingPlan ?? {}) },
   };
 }
 

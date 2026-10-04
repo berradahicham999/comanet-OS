@@ -20,7 +20,7 @@ export type ActivationCard = {
   id: string; name: string; type: string; status: string; date: string; endDate: string | null; prepDate: string | null;
   city: string | null; place: string | null; brandId: string | null; brand: string | null; color: string | null; brandCount: number;
   objectiveKey: string | null; targetKey: string | null; responsibleId: string | null; responsible: string | null; validatorId: string | null;
-  campaignId: string | null; campaign: string | null; clientId: string | null; client: string | null; clientCount: number; productCount: number;
+  campaignId: string | null; campaign: string | null; axisId: string | null; clientId: string | null; client: string | null; clientCount: number; productCount: number;
   planned: number; committed: number; spent: number; materials: number;
   checklistTotal: number; checklistDone: number; hasResults: boolean; hasPhoto: boolean;
   participants: number | null; leads: number | null; samples: number | null; pharmaciesReached: number | null; attributedRevenue: number | null;
@@ -45,7 +45,7 @@ export async function listActivations(f: ActivationFilters, scope: ActivationSco
     select a.id, a.name, a.type, a.status, a.date::text as date, a.end_date::text as "endDate", a.prep_date::text as "prepDate",
       a.city, a.place, a.brand_id as "brandId", b.name as brand, b.color, (select count(*) from activation_brands x where x.activation_id = a.id)::int as "brandCount",
       a.objective_key as "objectiveKey", a.target_key as "targetKey", a.responsible_id as "responsibleId", u.name as responsible, a.validator_id as "validatorId",
-      a.campaign_id as "campaignId", k.name as campaign, a.client_id as "clientId", c.name as client,
+      a.campaign_id as "campaignId", k.name as campaign, a.axis_id as "axisId", a.client_id as "clientId", c.name as client,
       (select count(*) from activation_clients x where x.activation_id = a.id)::int as "clientCount",
       (select count(*) from activation_products x where x.activation_id = a.id)::int as "productCount",
       ${BUDGET_AGG},
@@ -96,7 +96,7 @@ export async function getActivation(id: string, scope: ActivationScope, refs: Ac
     select a.id, a.name, a.type, a.status, a.date::text as date, a.end_date::text as "endDate", a.prep_date::text as "prepDate",
       a.city, a.place, a.brand_id as "brandId", b.name as brand, b.color, (select count(*) from activation_brands x where x.activation_id = a.id)::int as "brandCount",
       a.objective_key as "objectiveKey", a.target_key as "targetKey", a.responsible_id as "responsibleId", u.name as responsible, a.validator_id as "validatorId", vu.name as validator,
-      a.campaign_id as "campaignId", k.name as campaign, a.client_id as "clientId", c.name as client,
+      a.campaign_id as "campaignId", k.name as campaign, a.axis_id as "axisId", a.client_id as "clientId", c.name as client,
       (select count(*) from activation_clients x where x.activation_id = a.id)::int as "clientCount",
       (select count(*) from activation_products x where x.activation_id = a.id)::int as "productCount",
       ${BUDGET_AGG},

@@ -90,6 +90,7 @@ export const importStatusEnum = pgEnum("import_status", [
 export const taskStatusEnum = pgEnum("task_status", [
   "TODO",
   "IN_PROGRESS",
+  "BLOCKED",
   "DONE",
   "CANCELLED",
   /** Proposée par le copilote IA : n'entre ni dans les compteurs ni dans les retards tant qu'elle n'est pas acceptée. */
@@ -2166,11 +2167,13 @@ export const campaigns = pgTable(
     kpiTarget: text("kpi_target"),
     kpiActual: text("kpi_actual"),
     responsibleId: uuid("responsible_id").references(() => users.id, { onDelete: "set null" }),
+    /** Axe du plan marketing (Marketing OS) ; NULL pour les campagnes antérieures au plan, jamais fabriqué. */
+    axisId: uuid("axis_id").references((): AnyPgColumn => marketingAxes.id, { onDelete: "set null" }),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("campaigns_brand_idx").on(t.brandId, t.startDate), index("campaigns_responsible_idx").on(t.responsibleId)],
+  (t) => [index("campaigns_brand_idx").on(t.brandId, t.startDate), index("campaigns_responsible_idx").on(t.responsibleId), index("campaigns_axis_idx").on(t.axisId)],
 );
 
 /** Produits poussés par une campagne (référentiel produits existant, pas de duplication). */
@@ -2433,6 +2436,8 @@ export const collaborations = pgTable(
     brandId: uuid("brand_id").notNull().references(() => brands.id, { onDelete: "cascade" }),
     productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
     campaignId: uuid("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
+    /** Axe du plan marketing (facultatif). */
+    axisId: uuid("axis_id").references((): AnyPgColumn => marketingAxes.id, { onDelete: "set null" }),
     date: date("date").notNull(),
     contentType: text("content_type"),
     stories: integer("stories").notNull().default(0),
@@ -2463,6 +2468,7 @@ export const collaborations = pgTable(
     index("collaborations_brand_idx").on(t.brandId),
     index("collaborations_campaign_idx").on(t.campaignId),
     index("collaborations_product_idx").on(t.productId),
+    index("collaborations_axis_idx").on(t.axisId),
   ],
 );
 
@@ -2586,6 +2592,8 @@ export const activations = pgTable(
     brandId: uuid("brand_id").references(() => brands.id, { onDelete: "set null" }),
     productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
     campaignId: uuid("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
+    /** Axe du plan marketing (facultatif). */
+    axisId: uuid("axis_id").references((): AnyPgColumn => marketingAxes.id, { onDelete: "set null" }),
     clientId: uuid("client_id").references(() => clients.id, { onDelete: "set null" }),
     /** Début (date de l'activation). */
     date: date("date").notNull(),
@@ -2636,6 +2644,7 @@ export const activations = pgTable(
     index("activations_brand_idx").on(t.brandId),
     index("activations_product_idx").on(t.productId),
     index("activations_campaign_idx").on(t.campaignId),
+    index("activations_axis_idx").on(t.axisId),
     index("activations_client_idx").on(t.clientId),
     index("activations_responsible_idx").on(t.responsibleId),
     index("activations_validator_idx").on(t.validatorId),
@@ -2853,6 +2862,8 @@ export const marketingExpenses = pgTable(
     /** Origine dans l'activation (`LINE:<id>` ou `MATERIAL:<catégorie>`) : synchronisation idempotente. */
     activationRef: text("activation_ref"),
     collaborationId: uuid("collaboration_id").references(() => collaborations.id, { onDelete: "set null" }),
+    /** Action du plan marketing que cette dépense réalise (Marketing OS) ; NULL pour les dépenses antérieures. */
+    actionId: uuid("action_id").references((): AnyPgColumn => marketingActions.id, { onDelete: "set null" }),
     productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
     category: budgetCategoryEnum("category").notNull(),
     label: text("label").notNull(),
@@ -2871,6 +2882,7 @@ export const marketingExpenses = pgTable(
     uniqueIndex("marketing_expenses_activation_ref_uq").on(t.activationId, t.activationRef).where(sql`${t.activationRef} is not null`),
     index("marketing_expenses_collaboration_idx").on(t.collaborationId),
     index("marketing_expenses_product_idx").on(t.productId),
+    index("marketing_expenses_action_idx").on(t.actionId),
   ],
 );
 
@@ -2922,6 +2934,8 @@ export const contentItems = pgTable(
     campaignId: uuid("campaign_id").references((): any => campaigns.id, { onDelete: "set null" }),
     activationId: uuid("activation_id").references((): any => activations.id, { onDelete: "set null" }),
     influencerId: uuid("influencer_id").references((): any => influencers.id, { onDelete: "set null" }),
+    /** Axe du plan marketing (facultatif) ; un contenu peut servir plusieurs campagnes, l'axe reste unique. */
+    axisId: uuid("axis_id").references((): AnyPgColumn => marketingAxes.id, { onDelete: "set null" }),
     budget: numeric("budget", { precision: 12, scale: 2 }),
     /** Lien du post publié. */
     link: text("link"),
@@ -2949,6 +2963,7 @@ export const contentItems = pgTable(
     index("content_items_campaign_idx").on(t.campaignId),
     index("content_items_activation_idx").on(t.activationId),
     index("content_items_influencer_idx").on(t.influencerId),
+    index("content_items_axis_idx").on(t.axisId),
   ],
 );
 
@@ -3725,6 +3740,7 @@ export const taskCommentsRelations = relations(taskComments, ({ one }) => ({
 export const expensesRelations = relations(marketingExpenses, ({ one }) => ({
   brand: one(brands, { fields: [marketingExpenses.brandId], references: [brands.id] }),
   campaign: one(campaigns, { fields: [marketingExpenses.campaignId], references: [campaigns.id] }),
+  action: one(marketingActions, { fields: [marketingExpenses.actionId], references: [marketingActions.id] }),
 }));
 
 export const contentRelations = relations(contentItems, ({ one }) => ({
@@ -4040,3 +4056,214 @@ export const pnlBulkSales = pgTable(
   },
   (t) => [index("pnl_bulk_sales_date_idx").on(t.date)],
 );
+
+/* ------------------------------------------------------------------------------------------------
+ * Marketing Operating System (migration 0044). Un plan marketing ne duplique rien : son budget est la ligne
+ * `budgets` (marque × année), son CA objectif la ligne `objectives` annuelle, son allocation par canal les
+ * `budget_lines`. Il n'ajoute que ce qui n'existe nulle part : les objectifs qualitatifs, les axes
+ * stratégiques, le plan mensuel, les actions budgétées (1:1 avec une tâche) et le statut humain d'une décision.
+ * Logique : `src/lib/marketing-plan/` (plan, allocation, actions) et `src/lib/decisions/` (couche unifiée).
+ * ---------------------------------------------------------------------------------------------- */
+
+export const marketingPlanStatusEnum = pgEnum("marketing_plan_status", ["DRAFT", "ACTIVE", "CLOSED"]);
+export const marketingActionSourceEnum = pgEnum("marketing_action_source", ["PLAN", "DECISION", "MANUAL"]);
+export const marketingDecisionStatusEnum = pgEnum("marketing_decision_status", ["PROPOSED", "APPROVED", "REJECTED", "EXECUTED", "MEASURED", "EXPIRED"]);
+
+export const marketingPlans = pgTable(
+  "marketing_plans",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    brandId: uuid("brand_id").notNull().references(() => brands.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    periodStart: date("period_start").notNull(),
+    periodEnd: date("period_end").notNull(),
+    /** Année de rattachement : `budgets`, `budget_lines` et `objectives` (mois NULL) de cette année portent le budget et le CA objectif. */
+    year: integer("year").notNull(),
+    status: marketingPlanStatusEnum("status").notNull().default("DRAFT"),
+    notes: text("notes"),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("marketing_plans_brand_year_idx").on(t.brandId, t.year), index("marketing_plans_created_by_idx").on(t.createdById)],
+);
+
+/** Objectifs du plan (CA, sell-out, volume, acquisition, notoriété, lancement, gamme, canal). Clés dans `marketing-plan/shared.ts`. */
+export const marketingPlanObjectives = pgTable(
+  "marketing_plan_objectives",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    planId: uuid("plan_id").notNull().references(() => marketingPlans.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    label: text("label").notNull(),
+    /** Cible chiffrée (facultative) dans l'unité `unit` ; NULL = objectif qualitatif. */
+    target: numeric("target", { precision: 14, scale: 2 }),
+    /** MAD | UNITS | PCT | COUNT */
+    unit: text("unit").notNull().default("MAD"),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
+    notes: text("notes"),
+    sort: integer("sort").notNull().default(0),
+  },
+  (t) => [index("marketing_plan_objectives_plan_idx").on(t.planId), index("marketing_plan_objectives_product_idx").on(t.productId)],
+);
+
+/** Axe stratégique budgété (« Développer Sebo Control 200k », « Digital acquisition 200k »). */
+export const marketingAxes = pgTable(
+  "marketing_axes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    planId: uuid("plan_id").notNull().references(() => marketingPlans.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
+    /** Gamme (texte libre : `products.category`) quand l'axe vise plusieurs références. */
+    productRange: text("product_range"),
+    objectiveId: uuid("objective_id").references(() => marketingPlanObjectives.id, { onDelete: "set null" }),
+    budget: numeric("budget", { precision: 14, scale: 2 }).notNull().default("0"),
+    periodStart: date("period_start"),
+    periodEnd: date("period_end"),
+    notes: text("notes"),
+    sort: integer("sort").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("marketing_axes_plan_idx").on(t.planId), index("marketing_axes_product_idx").on(t.productId), index("marketing_axes_objective_idx").on(t.objectiveId)],
+);
+
+/** Déclinaison mensuelle du plan : produit prioritaire, objectif et budget du mois. */
+export const marketingPlanMonths = pgTable(
+  "marketing_plan_months",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    planId: uuid("plan_id").notNull().references(() => marketingPlans.id, { onDelete: "cascade" }),
+    /** Premier jour du mois. */
+    month: date("month").notNull(),
+    focusProductId: uuid("focus_product_id").references(() => products.id, { onDelete: "set null" }),
+    objective: text("objective"),
+    budget: numeric("budget", { precision: 14, scale: 2 }).notNull().default("0"),
+    notes: text("notes"),
+  },
+  (t) => [uniqueIndex("marketing_plan_months_uq").on(t.planId, t.month), index("marketing_plan_months_product_idx").on(t.focusProductId)],
+);
+
+/**
+ * Action marketing budgétée. Le « qui / quand / statut » est porté par sa tâche (`task_id`, 1:1,
+ * `tasks.entity_type = 'marketing_action'`) : aucun second statut. Le budget prévu vit ici ; la dépense
+ * réelle est la (les) ligne(s) `marketing_expenses.action_id`.
+ */
+export const marketingActions = pgTable(
+  "marketing_actions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    planId: uuid("plan_id").references(() => marketingPlans.id, { onDelete: "set null" }),
+    axisId: uuid("axis_id").references(() => marketingAxes.id, { onDelete: "set null" }),
+    /** Mois du plan (premier jour) ; NULL hors plan mensuel. */
+    month: date("month"),
+    brandId: uuid("brand_id").notNull().references(() => brands.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
+    campaignId: uuid("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
+    /** Canal / poste budgétaire (même enum que `budget_lines` et `marketing_expenses`). */
+    category: budgetCategoryEnum("category"),
+    title: text("title").notNull(),
+    objective: text("objective"),
+    /** Justification (pourquoi) : raisons et données à l'origine de l'action. */
+    why: text("why"),
+    expectedResult: text("expected_result"),
+    budgetPlanned: numeric("budget_planned", { precision: 14, scale: 2 }).notNull().default("0"),
+    source: marketingActionSourceEnum("source").notNull().default("MANUAL"),
+    /** Clé de la décision unifiée à l'origine (source DECISION). */
+    decisionKey: text("decision_key"),
+    taskId: uuid("task_id").notNull().references(() => tasks.id, { onDelete: "cascade" }),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("marketing_actions_task_uq").on(t.taskId),
+    index("marketing_actions_plan_idx").on(t.planId),
+    index("marketing_actions_axis_idx").on(t.axisId),
+    index("marketing_actions_brand_month_idx").on(t.brandId, t.month),
+    index("marketing_actions_product_idx").on(t.productId),
+    index("marketing_actions_campaign_idx").on(t.campaignId),
+    index("marketing_actions_decision_idx").on(t.decisionKey),
+    index("marketing_actions_created_by_idx").on(t.createdById),
+  ],
+);
+
+/**
+ * Statut humain d'une décision de la couche unifiée (`src/lib/decisions/`). Les moteurs recalculent leurs
+ * recommandations à chaque lecture ; seule la décision prise (approuvée, refusée, exécutée, mesurée) est
+ * persistée, avec l'instantané de la recommandation au moment du choix. Clé = clé stable du moteur.
+ */
+export const marketingDecisions = pgTable(
+  "marketing_decisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    key: text("key").notNull().unique(),
+    /** RULES | ADS_INTEL | MARKETING_INTEL | ANALYTICS */
+    domain: text("domain").notNull(),
+    brandId: uuid("brand_id").references(() => brands.id, { onDelete: "set null" }),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    /** Instantané `UnifiedDecision` au moment de la décision. */
+    snapshot: jsonb("snapshot").$type<Record<string, unknown>>().notNull().default({}),
+    status: marketingDecisionStatusEnum("status").notNull().default("PROPOSED"),
+    reason: text("reason"),
+    decidedById: uuid("decided_by_id").references(() => users.id, { onDelete: "set null" }),
+    decidedByName: text("decided_by_name"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    actionId: uuid("action_id").references(() => marketingActions.id, { onDelete: "set null" }),
+    expectedReviewDate: date("expected_review_date"),
+    measuredNote: text("measured_note"),
+    measuredAt: timestamp("measured_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("marketing_decisions_status_idx").on(t.status), index("marketing_decisions_brand_idx").on(t.brandId), index("marketing_decisions_product_idx").on(t.productId), index("marketing_decisions_action_idx").on(t.actionId), index("marketing_decisions_decided_by_idx").on(t.decidedById)],
+);
+
+export type MarketingPlanStatus = (typeof marketingPlanStatusEnum.enumValues)[number];
+export type MarketingActionSource = (typeof marketingActionSourceEnum.enumValues)[number];
+export type MarketingDecisionStatus = (typeof marketingDecisionStatusEnum.enumValues)[number];
+
+export const marketingPlansRelations = relations(marketingPlans, ({ one, many }) => ({
+  brand: one(brands, { fields: [marketingPlans.brandId], references: [brands.id] }),
+  createdBy: one(users, { fields: [marketingPlans.createdById], references: [users.id] }),
+  objectives: many(marketingPlanObjectives),
+  axes: many(marketingAxes),
+  months: many(marketingPlanMonths),
+  actions: many(marketingActions),
+}));
+
+export const marketingPlanObjectivesRelations = relations(marketingPlanObjectives, ({ one }) => ({
+  plan: one(marketingPlans, { fields: [marketingPlanObjectives.planId], references: [marketingPlans.id] }),
+  product: one(products, { fields: [marketingPlanObjectives.productId], references: [products.id] }),
+}));
+
+export const marketingAxesRelations = relations(marketingAxes, ({ one, many }) => ({
+  plan: one(marketingPlans, { fields: [marketingAxes.planId], references: [marketingPlans.id] }),
+  product: one(products, { fields: [marketingAxes.productId], references: [products.id] }),
+  objective: one(marketingPlanObjectives, { fields: [marketingAxes.objectiveId], references: [marketingPlanObjectives.id] }),
+  actions: many(marketingActions),
+}));
+
+export const marketingPlanMonthsRelations = relations(marketingPlanMonths, ({ one }) => ({
+  plan: one(marketingPlans, { fields: [marketingPlanMonths.planId], references: [marketingPlans.id] }),
+  focusProduct: one(products, { fields: [marketingPlanMonths.focusProductId], references: [products.id] }),
+}));
+
+export const marketingActionsRelations = relations(marketingActions, ({ one, many }) => ({
+  plan: one(marketingPlans, { fields: [marketingActions.planId], references: [marketingPlans.id] }),
+  axis: one(marketingAxes, { fields: [marketingActions.axisId], references: [marketingAxes.id] }),
+  brand: one(brands, { fields: [marketingActions.brandId], references: [brands.id] }),
+  product: one(products, { fields: [marketingActions.productId], references: [products.id] }),
+  campaign: one(campaigns, { fields: [marketingActions.campaignId], references: [campaigns.id] }),
+  task: one(tasks, { fields: [marketingActions.taskId], references: [tasks.id] }),
+  createdBy: one(users, { fields: [marketingActions.createdById], references: [users.id] }),
+  expenses: many(marketingExpenses),
+}));
+
+export const marketingDecisionsRelations = relations(marketingDecisions, ({ one }) => ({
+  brand: one(brands, { fields: [marketingDecisions.brandId], references: [brands.id] }),
+  product: one(products, { fields: [marketingDecisions.productId], references: [products.id] }),
+  decidedBy: one(users, { fields: [marketingDecisions.decidedById], references: [users.id] }),
+  action: one(marketingActions, { fields: [marketingDecisions.actionId], references: [marketingActions.id] }),
+}));

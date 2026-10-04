@@ -334,6 +334,28 @@ describe("Médical v2 — chrono, GPS, ordonnances", () => {
   });
 });
 
+describe("Marketing OS — une seule création d'action, une seule écriture des décisions, un seul « engagé »", () => {
+  test("seul `src/lib/marketing-plan/actions.ts` insère dans `marketing_actions`", () => {
+    const found = codeHits(/insert\(marketingActions\)|insert into marketing_actions/i, ["lib/marketing-plan/actions.ts"]);
+    assert.deepEqual(found, [], `Création d'action concurrente dans : ${found.join(", ")}`);
+  });
+  test("seul `src/lib/decisions/store.ts` écrit dans `marketing_decisions`", () => {
+    const found = codeHits(/(insert|update|delete)\(marketingDecisions\)|(insert into|update|delete from) marketing_decisions\b/i, ["lib/decisions/store.ts"]);
+    assert.deepEqual(found, [], `Écriture concurrente des décisions dans : ${found.join(", ")}`);
+  });
+  test("le statut « engagé » (COMMITTED + SPENT) n'est écrit qu'une fois : `engagedSql()` dans budget.ts", () => {
+    const found = hits(/export function engagedSql/);
+    assert.deepEqual(found, ["src/lib/budget.ts"]);
+    const raw = codeHits(/in \('COMMITTED','SPENT'\)/, ["lib/budget.ts"]);
+    assert.deepEqual(raw, [], `Statut engagé recopié dans : ${raw.join(", ")}`);
+  });
+  test("le statut d'une action est celui de sa tâche : aucune colonne de statut sur marketing_actions", () => {
+    const schema = FILES.find((f) => f.path === "src/db/schema.ts")!.code;
+    const block = schema.slice(schema.indexOf('"marketing_actions"'), schema.indexOf('"marketing_decisions"'));
+    assert.doesNotMatch(block, /\bstatus:/);
+  });
+});
+
 describe("CRM commercial — visites, portefeuilles, objectifs client", () => {
   test("seul `crm/visits.ts` écrit les heures, le statut de visite et le contrôle de présence", () => {
     const found = codeHits(/update\(clientVisits\)\s*\.set\(\{[^}]*\b(startedAt|endedAt|verificationStatus|autoClosed)\b|update\s+client_visits\s+set[^`]*\b(started_at|ended_at|verification_status|auto_closed)\s*=/i, ["lib/crm/visits.ts"]);
@@ -353,6 +375,9 @@ describe("CRM commercial — visites, portefeuilles, objectifs client", () => {
     const readers = codeHits(/from\s+objectives\b/i, ["lib/crm/", "lib/import/run.ts", "lib/import/rollback.ts", "lib/import/workbook.ts", "produits/", "lib/gestion/clients.ts"]);
     const missing = readers.filter((path) => !/client_id\s+is\s+null/i.test(FILES.find((f) => f.path === path)!.code));
     assert.deepEqual(missing, [], `Lecture d'objectifs qui additionnerait les objectifs client : ${missing.join(", ")}`);
+    // Même règle pour le constructeur de requêtes : un objectif de marque se cherche avec `isNull(objectives.clientId)`.
+    const builder = codeHits(/isNull\(objectives\.productId\)/, ["lib/crm/"]).filter((path) => !/isNull\(objectives\.clientId\)/.test(FILES.find((f) => f.path === path)!.code));
+    assert.deepEqual(builder, [], `Recherche d'objectif de marque qui pourrait attraper un objectif client : ${builder.join(", ")}`);
   });
   test("seul `crm/portfolio.ts` affecte un portefeuille en masse", () => {
     const found = codeHits(/update\s+clients\s+set\s+account_manager_id/i, ["lib/crm/portfolio.ts"]);
