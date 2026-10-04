@@ -35,7 +35,7 @@ export default async function ReglementairePage(props: { searchParams: Promise<{
       rf.certificate_status, rf.document_type, rf.blocked, rf.blocked_reason, rf.expiry_date::text as expiry_date,
       rf.filing_date::text as filing_date, rf.authorization_number, rf.missing_documents, rf.physical_product,
       p.name as product_name, b.name as brand_name, b.color as brand_color, b.id as brand_id, u.name as responsible,
-      (select count(*) from tasks tk where tk.entity_id = rf.id and tk.status in ('TODO','IN_PROGRESS'))::int as open_tasks,
+      (select count(*) from tasks tk where tk.entity_id = rf.id and tk.status in ('TODO','IN_PROGRESS','BLOCKED'))::int as open_tasks,
       (select count(*) from regulatory_events e where e.file_id = rf.id)::int as events
     from regulatory_files rf
     left join products p on p.id = rf.product_id

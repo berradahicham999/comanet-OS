@@ -12,7 +12,7 @@ export const SOURCE_LABEL: Record<string, string> = { MANUAL: "Manuelle", ACTION
 
 export function entityHref(type: string | null, id: string | null) {
   if (!type || !id) return null;
-  const map: Record<string, string> = { product: "/produits/", client: "/clients/", brand: "/marques/", regulatory: "/reglementaire/", campaign: "/marketing/campagnes/", animation: "/terrain/", content: "/marketing/planning/" };
+  const map: Record<string, string> = { product: "/produits/", client: "/clients/", brand: "/marques/", regulatory: "/reglementaire/", campaign: "/marketing/campagnes/", animation: "/terrain/", content: "/marketing/planning/", activation: "/marketing/activations/", marketing_action: "/marketing/priorites/" };
   return map[type] ? map[type] + id : null;
 }
 
@@ -27,9 +27,9 @@ export async function listTasks(opts: { assigneeId?: string; brandId?: string; b
       ${opts.brandId ? sql`and t.brand_id = ${opts.brandId}::uuid` : sql``}
       ${opts.brandIds ? sql`and (t.brand_id is null or t.brand_id = any(${pgArray(opts.brandIds)}) or t.assignee_id = ${opts.assigneeId ?? "00000000-0000-0000-0000-000000000000"}::uuid)` : sql``}
       ${opts.source ? sql`and t.source = ${opts.source}::task_source` : sql``}
-      ${opts.overdue ? sql`and t.due_date < current_date and t.status in ('TODO','IN_PROGRESS')` : sql``}
-      ${opts.proposed ? sql`and t.status = 'PROPOSED'` : opts.includeDone ? sql`and t.status <> 'PROPOSED'` : sql`and (t.status in ('TODO','IN_PROGRESS') or t.completed_at > now() - interval '14 days')`}
-    order by case t.status when 'IN_PROGRESS' then 0 when 'TODO' then 1 else 2 end, case t.priority when 'CRITICAL' then 0 when 'HIGH' then 1 when 'MEDIUM' then 2 else 3 end, t.due_date nulls last`);
+      ${opts.overdue ? sql`and t.due_date < current_date and t.status in ('TODO','IN_PROGRESS','BLOCKED')` : sql``}
+      ${opts.proposed ? sql`and t.status = 'PROPOSED'` : opts.includeDone ? sql`and t.status <> 'PROPOSED'` : sql`and (t.status in ('TODO','IN_PROGRESS','BLOCKED') or t.completed_at > now() - interval '14 days')`}
+    order by case t.status when 'BLOCKED' then 0 when 'IN_PROGRESS' then 1 when 'TODO' then 2 else 3 end, case t.priority when 'CRITICAL' then 0 when 'HIGH' then 1 when 'MEDIUM' then 2 else 3 end, t.due_date nulls last`);
   return (r.rows as Record<string, unknown>[]).map((x) => ({
     id: String(x.id), title: String(x.title), status: x.status as TaskStatus, priority: x.priority as TaskPriority, dueDate: x.due_date ? String(x.due_date) : null, source: String(x.source),
     assigneeId: x.assignee_id ? String(x.assignee_id) : null, assignee: x.assignee ? String(x.assignee) : null, brand: x.brand ? String(x.brand) : null, brandColor: x.brand_color ? String(x.brand_color) : null,

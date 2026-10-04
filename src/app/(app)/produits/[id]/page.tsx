@@ -39,7 +39,7 @@ export default async function ProductPage(props: { params: Promise<{ id: string 
     listBrands(),
     db.select().from(regulatoryFiles).where(eq(regulatoryFiles.productId, id)),
     db.select().from(contentItems).where(eq(contentItems.productId, id)).orderBy(desc(contentItems.date)).limit(10),
-    db.select().from(tasksTable).where(sql`${tasksTable.entityId} = ${id}::uuid and ${tasksTable.status} in ('TODO','IN_PROGRESS')`).orderBy(desc(tasksTable.createdAt)),
+    db.select().from(tasksTable).where(sql`${tasksTable.entityId} = ${id}::uuid and ${tasksTable.status} in ('TODO','IN_PROGRESS','BLOCKED')`).orderBy(desc(tasksTable.createdAt)),
     db.execute(sql`
       select coalesce(sum(case when date >= ${iso(addDays(ref, -365))}::date then amount end),0)::float8 as revenue12,
              coalesce(sum(case when date >= ${iso(addDays(ref, -365))}::date then quantity end),0)::float8 as qty12,

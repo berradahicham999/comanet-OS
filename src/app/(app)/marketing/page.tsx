@@ -1,273 +1,142 @@
 import Link from "next/link";
-import { sql } from "drizzle-orm";
-import { db } from "@/db";
-import { requireAccess, brandFilter } from "@/lib/access";
+import clsx from "clsx";
+import { requireAccess, canDo } from "@/lib/access";
+import { listUsers } from "@/lib/users";
 import { getRefDate } from "@/lib/ref-date";
-import { listBrands } from "@/lib/users";
-import { resolvePeriod, PERIOD_OPTIONS, type PeriodParam } from "@/lib/periods";
-import { PageHeader, Card, Kpi, Badge, BrandDot, Progress, Section, Empty, Tabs } from "@/components/ui";
-import { MonthlyRevenueChart } from "@/components/charts";
-import { fmtMAD, fmtNum, fmtPct, fmtDate, fmtDateShort, delta } from "@/lib/format";
+import { decisionScopeFor } from "@/lib/decisions/server";
+import { buildMarketingCommandCenter, type BrandCockpit } from "@/lib/marketing-plan/command-center";
+import type { MarketingPeriodKey } from "@/lib/marketing-intel/build";
+import { AD_SPEND_SOURCE_LABEL } from "@/lib/budget";
+import { STOCK_RISK_LABELS } from "@/lib/marketing-intel/inventory";
+import { PLAN_STATUS } from "@/lib/marketing-plan/shared";
 import { BUDGET_CATEGORY_LABELS } from "@/lib/budget-categories";
-import {
-  budgetSummary, spendBreakdown, marketingTimeline, correlation, correlationLabel,
-  salesTotal, marketingCounters, attribution, brandScorecard, marketingCalendar,
-} from "@/lib/marketing";
-import { CAMPAIGN_STATUS, campaignTypeLabel } from "@/lib/marketing-shared";
+import { PageHeader, Card, Kpi, Badge, BrandDot, Section, Empty, Tabs, Progress, StatusBadge, PriorityBadge } from "@/components/ui";
+import { DecisionCard } from "@/components/decision-card";
+import { fmtMAD, fmtPct, fmtNum, fmtDate, fmtDateShort, fmtTime } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Marketing" };
+export const metadata = { title: "Command Center marketing" };
 
-const FAMILY_LABELS: Record<string, string> = { ads: "Publicité digitale", influence: "Influence & UGC", content: "Création de contenu", trade: "Trade & terrain", events: "Événementiel", other: "Autres" };
-const KIND_TONE: Record<string, "purple" | "accent" | "blue" | "green"> = { CAMPAGNE: "purple", INFLUENCE: "accent", ACTIVATION: "blue", CONTENU: "green" };
+const PERIODS: { key: MarketingPeriodKey; label: string }[] = [{ key: "7d", label: "7 jours" }, { key: "30d", label: "30 jours" }, { key: "90d", label: "90 jours" }];
+const money = (v: number | null) => (v === null ? "—" : fmtMAD(v, { compact: true }));
 
-export default async function MarketingOverviewPage(props: { searchParams: Promise<{ brand?: string; period?: string; start?: string; end?: string }> }) {
+function BrandTile({ c, href }: { c: BrandCockpit; href: string }) {
+  const t = c.overview.targets;
+  const f = c.focus;
+  return (
+    <div className="card p-4 flex flex-col gap-2 min-w-0">
+      <div className="flex items-center gap-2"><BrandDot color={c.color} className="h-3 w-3" /><Link href={href} className="font-semibold text-[15px] hover:underline flex-1 truncate">{c.name}</Link>{c.plan ? <Badge tone={PLAN_STATUS[c.plan.status as keyof typeof PLAN_STATUS]?.tone ?? "gray"}>{c.plan.name}</Badge> : <Link href="/marketing/plan" className="text-[11px] text-accent hover:underline">créer le plan</Link>}</div>
+      <div className="grid grid-cols-3 gap-2 text-[12px]">
+        <div><div className="text-[10.5px] text-muted uppercase tracking-wide">Budget</div><div className="font-medium">{c.budget.hasBudget ? `${Math.round(c.budget.consumedPct ?? 0)} %` : "—"}</div><div className="text-[10.5px] text-muted">{c.budget.hasBudget ? `reste ${money(c.budget.remaining)}` : "non défini"}</div></div>
+        <div><div className="text-[10.5px] text-muted uppercase tracking-wide">Objectif mois</div><div className={clsx("font-medium", t.monthly.forecastPct !== null && (t.monthly.forecastPct >= 100 ? "text-green" : "text-orange"))}>{t.monthly.pct === null ? "—" : fmtPct(t.monthly.pct, 0)}</div><div className="text-[10.5px] text-muted">{t.monthly.forecastPct === null ? "non renseigné" : `projeté ${fmtPct(t.monthly.forecastPct, 0)}`}</div></div>
+        <div><div className="text-[10.5px] text-muted uppercase tracking-wide">Actions</div><div className={clsx("font-medium", c.actions.late > 0 && "text-red")}>{c.actions.open}{c.actions.late > 0 ? ` · ${c.actions.late} en retard` : ""}</div><div className="text-[10.5px] text-muted">{c.stockAlerts.length} alerte(s) stock</div></div>
+      </div>
+      {f ? (
+        <div className="rounded-xl bg-surface-2 p-3 text-[12.5px]">
+          <div className="flex items-center gap-2"><Badge tone="accent">{f.recommendationLabel}</Badge><span className="font-medium truncate">{f.entity.name}</span><PriorityBadge priority={f.priority} /></div>
+          <p className="text-ink-2 mt-1 line-clamp-2">{f.why[0]}</p>
+        </div>
+      ) : <div className="rounded-xl bg-surface-2 p-3 text-[12.5px] text-muted">Rien à pousser en priorité : ventes stables et stock sain, ou données insuffisantes.</div>}
+      {c.doNotPush.length > 0 && <div className="text-[11.5px] text-muted">Ne pas pousser : {c.doNotPush.slice(0, 3).map((d) => d.entity.name).join(", ")}</div>}
+      <Link href={href} className="btn-secondary btn-sm mt-auto">Ouvrir le cockpit {c.name}</Link>
+    </div>
+  );
+}
+
+export default async function MarketingCommandCenterPage(props: { searchParams: Promise<{ brand?: string; period?: string }> }) {
   await requireAccess("marketing");
   const sp = await props.searchParams;
-  const { ref, staleDays } = await getRefDate();
-  const period = resolvePeriod((sp.period as PeriodParam) || "ytd", ref, { start: sp.start, end: sp.end });
-  const scopeBrands = await brandFilter();
-  const brands = (await listBrands()).filter((b) => b.active && (scopeBrands === null || scopeBrands.includes(b.id)));
-  // Portée « assignés » sans marque choisie : on affiche la première marque assignée plutôt que le total toutes marques.
-  const brandId = sp.brand && brands.some((b) => b.id === sp.brand) ? sp.brand : scopeBrands ? (brands[0]?.id ?? null) : null;
-  const year = ref.getUTCFullYear();
-
-  const [budget, spend, prevSpend, timeline, sales, prevSales, counters, attr, scores, calendar, campaignRows] = await Promise.all([
-    budgetSummary(year, brandId),
-    spendBreakdown(period, brandId),
-    spendBreakdown(period.prev, brandId),
-    marketingTimeline(period.end, 13, brandId),
-    salesTotal(period, brandId),
-    salesTotal(period.prev, brandId),
-    marketingCounters(period, brandId),
-    attribution(period, brandId),
-    brandScorecard(period, period.prev),
-    marketingCalendar({ start: period.start, end: period.end }, brandId),
-    db.execute(sql`
-      select c.id, c.name, c.type, c.status::text as status, c.channel::text as channel, c.start_date::text as start_date, c.end_date::text as end_date,
-             c.budget::float8 as budget, b.name as brand, b.color as brand_color,
-             coalesce((select sum(amount) from marketing_expenses e where e.campaign_id = c.id and e.status <> 'PLANNED'), 0)::float8 as spent,
-             coalesce((select sum(spend) from ad_metrics m where m.campaign_id = c.id), 0)::float8 as ad_spend,
-             coalesce((select sum(revenue) from ad_metrics m where m.campaign_id = c.id), 0)::float8 as ad_revenue
-      from campaigns c join brands b on b.id = c.brand_id
-      where c.status in ('ACTIVE','PLANNED') ${brandId ? sql`and c.brand_id = ${brandId}::uuid` : sql``}
-      order by (c.status = 'ACTIVE') desc, c.start_date desc nulls last
-      limit 8`),
-  ]);
-
-  // Corrélation dépense marketing / CA sur les 13 derniers mois (jamais présentée comme une causalité)
-  const closed = timeline.slice(0, -1); // le mois en cours est partiel
-  const r = correlation(closed.map((p) => p.marketing + p.adSpend), closed.map((p) => p.revenue));
-  const rLag = correlation(closed.slice(0, -1).map((p) => p.marketing + p.adSpend), closed.slice(1).map((p) => p.revenue));
-
-  const totalSpend = spend.total + attr.adSpend;
-  const prevTotalSpend = prevSpend.total;
-  const investmentRate = sales.revenue > 0 ? (totalSpend / sales.revenue) * 100 : null;
-  const measuredRevenue = attr.adRevenue + attr.influenceRevenue + attr.activationRevenue + attr.expenseRevenue;
-  const measuredCost = attr.adSpend + attr.influenceCost + attr.activationCost;
-  const measuredRoas = measuredCost > 0 ? measuredRevenue / measuredCost : null;
-
-  const families = (["ads", "influence", "content", "trade", "events", "other"] as const)
-    .map((k) => ({ key: k, label: FAMILY_LABELS[k], amount: k === "ads" ? spend.ads + attr.adSpend : spend[k] }))
-    .filter((f) => f.amount > 0)
-    .sort((a, b) => b.amount - a.amount);
-  const familyTotal = families.reduce((a, f) => a + f.amount, 0);
-
-  const campaigns = campaignRows.rows as {
-    id: string; name: string; type: string; status: string; channel: string; start_date: string | null; end_date: string | null;
-    budget: number | null; brand: string; brand_color: string; spent: number; ad_spend: number; ad_revenue: number;
-  }[];
-
-  const chart = timeline.map((p) => ({ month: p.month, amount: p.revenue, prev: p.marketing + p.adSpend }));
-  const upcoming = calendar.filter((e) => e.date >= new Date().toISOString().slice(0, 10)).slice(0, 8);
-
-  // Signaux : ce qui demande un arbitrage cette semaine
-  const signals: { tone: "red" | "orange" | "green" | "blue"; title: string; detail: string; href: string }[] = [];
-  if (budget.consumedPct !== null && budget.consumedPct >= 90) signals.push({ tone: budget.consumedPct >= 100 ? "red" : "orange", title: `Budget ${year} consommé à ${Math.round(budget.consumedPct)} %`, detail: `Reste ${budget.remaining === null ? "—" : fmtMAD(budget.remaining, { compact: true })} sur ${fmtMAD(budget.annual, { compact: true })}. Toute nouvelle action demande un arbitrage.`, href: "/marketing/budgets" });
-  if (budget.consumedPct !== null && budget.consumedPct < 40 && ref.getUTCMonth() >= 7) signals.push({ tone: "blue", title: `Budget ${year} sous-consommé (${Math.round(budget.consumedPct)} %)`, detail: `${budget.remaining === null ? "—" : fmtMAD(budget.remaining, { compact: true })} encore disponibles à ${11 - ref.getUTCMonth()} mois de la fin d'année.`, href: "/marketing/budgets" });
-  if (attr.adSpend > 0 && attr.adRevenue === 0) signals.push({ tone: "orange", title: "Régie sans CA remonté", detail: `${fmtMAD(attr.adSpend, { compact: true })} de dépense publicitaire importée sans valeur de conversion : activez le suivi des achats ou saisissez le CA attribué.`, href: "/marketing/ads" });
-  if (counters.pendingContent > 0) signals.push({ tone: "blue", title: `${counters.pendingContent} contenu(s) non publié(s) sur la période`, detail: "Planning éditorial en retard sur la période sélectionnée.", href: "/marketing/planning" });
-  if (measuredCost > 0 && measuredRoas !== null && measuredRoas < 1) signals.push({ tone: "red", title: `ROAS mesuré ${measuredRoas.toFixed(2)}×`, detail: `Sur la part mesurable (${fmtMAD(measuredCost, { compact: true })}), le CA attribué est inférieur à la dépense.`, href: "/marketing/ads" });
-  if (totalSpend > 0 && measuredCost / totalSpend < 0.4) signals.push({ tone: "orange", title: `${Math.round((1 - measuredCost / Math.max(totalSpend, 1)) * 100)} % de la dépense n'est pas mesurable`, detail: "Sans code promo, lien tracké ni CA saisi, le retour de ces actions reste une hypothèse.", href: "/marketing/budgets" });
+  const period = (PERIODS.some((p) => p.key === sp.period) ? sp.period : "30d") as MarketingPeriodKey;
+  const [scope, users, canCreate, canEdit, refDate] = await Promise.all([decisionScopeFor(sp.brand ?? null, period), listUsers(), canDo("marketing", "create"), canDo("marketing", "edit"), getRefDate()]);
+  if (scope.allBrands.length === 0) return <><PageHeader eyebrow="Marketing" title="Command Center" /><Empty title="Aucune marque dans votre périmètre" hint="Demander l'assignation d'une marque à un administrateur (Paramètres → Utilisateurs)." /></>;
+  const data = await buildMarketingCommandCenter({ ctx: scope.ctx, perms: scope.perms, brands: scope.allBrands, selectedBrandId: scope.selectedBrandId, period });
+  const sel = data.selected;
+  const href = (b: string | null, p: string) => `/marketing?${new URLSearchParams({ ...(b ? { brand: b } : {}), period: p }).toString()}`;
+  const back = href(scope.selectedBrandId, period);
+  const budget = sel ? sel.budget : data.totals.budget;
+  const targets = sel?.overview.targets ?? null;
+  const annualTarget = sel ? targets!.annual : null;
+  const perfAlerts = data.decisions.proposed.filter((d) => d.domain === "ADS_INTEL" && (d.priority === "HIGH" || d.priority === "CRITICAL" || d.doNotPush));
+  const budgetAlerts = data.brands.filter((b) => b.budget.hasBudget && (b.budget.consumedPct ?? 0) >= scope.ctx.settings.budgetAlertPct);
+  const stockAlerts = data.brands.flatMap((b) => b.stockAlerts.map((p) => ({ brand: b.name, p })));
+  const maxDecisions = scope.ctx.settings.marketingPlan.maxDecisions;
 
   return (
     <>
-      <PageHeader
-        eyebrow="Marketing Command Center"
-        title="Vue d'ensemble"
-        subtitle={`${period.label}${brandId ? " · " + brands.find((b) => b.id === brandId)?.name : " · toutes marques"} · dernière donnée de vente ${fmtDate(ref)}${staleDays > 3 ? ` (retard de ${staleDays} j)` : ""}`}
-        actions={
-          <>
-            <Link href="/marketing/campagnes" className="btn-secondary btn-sm">Campagnes</Link>
-            <Link href="/marketing/budgets" className="btn-secondary btn-sm">Budgets</Link>
-            <Link href="/imports?type=ADS" className="btn-ghost btn-sm">Importer Ads</Link>
-          </>
-        }
-      >
-        <form className="flex flex-wrap items-end gap-2 mb-3">
-          {brandId && <input type="hidden" name="brand" value={brandId} />}
-          <label className="block"><span className="label block mb-1">Période</span>
-            <select name="period" defaultValue={period.key} className="select h-9 w-48">{PERIOD_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}</select>
-          </label>
-          {period.key === "custom" && (<><label className="block"><span className="label block mb-1">Du</span><input type="date" name="start" defaultValue={period.start} className="input h-9" /></label><label className="block"><span className="label block mb-1">Au</span><input type="date" name="end" defaultValue={sp.end ?? ""} className="input h-9" /></label></>)}
-          <button className="btn-secondary btn-sm h-9" type="submit">Appliquer</button>
-        </form>
-
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-3">
-          <Kpi label="Investissement marketing" value={fmtMAD(totalSpend, { compact: true })} delta={delta(totalSpend, prevTotalSpend)} deltaLabel={period.prev.label} sub={`dont ${fmtMAD(attr.adSpend, { compact: true })} de régie`} />
-          <Kpi label="CA facturé (Sage)" value={fmtMAD(sales.revenue, { compact: true })} delta={delta(sales.revenue, prevSales.revenue)} deltaLabel={period.prev.label} sub="périmètre marque sélectionnée" />
-          <Kpi label="Taux d'investissement" value={investmentRate === null ? "—" : fmtPct(investmentRate, 1)} sub="dépense marketing / CA facturé" />
-          <Kpi label="CA attribué (mesuré)" value={fmtMAD(measuredRevenue, { compact: true })} sub={`${fmtPct(sales.revenue > 0 ? (measuredRevenue / sales.revenue) * 100 : 0, 1)} du CA — part réellement traçable`} />
-          <Kpi label="ROAS mesuré" value={measuredRoas === null ? "—" : measuredRoas.toFixed(2) + "×"} sub={measuredCost > 0 ? `sur ${fmtMAD(measuredCost, { compact: true })} traçables` : "aucune dépense traçable"} tone={measuredRoas !== null && measuredRoas < 1 ? "red" : measuredRoas !== null && measuredRoas >= 3 ? "green" : undefined} />
+      <PageHeader eyebrow="Marketing" title="Command Center" subtitle={<>Quoi pousser maintenant, pourquoi, avec quel budget, par qui et pour quand. Ventes au {fmtDate(refDate.ref)}{refDate.staleDays > 3 ? ` (retard ${refDate.staleDays} j)` : ""} · calculé à {fmtTime(data.decisions.computedAt)} · période {data.period.label}.</>}
+        actions={<><Link href="/marketing/plan" className="btn-secondary btn-sm">Plan marketing</Link><Link href="/marketing/priorites" className="btn-primary btn-sm">Priorités & actions</Link></>}>
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <Tabs current={href(scope.selectedBrandId, period)} tabs={[{ href: href(null, period), label: "Toutes les marques" }, ...scope.allBrands.map((b) => ({ href: href(b.id, period), label: b.name }))]} />
+          <div className="flex gap-1 ml-auto">{PERIODS.map((p) => <Link key={p.key} href={href(scope.selectedBrandId, p.key)} className={clsx("text-[12px] px-2 py-1 rounded-md border", p.key === period ? "bg-black/5 border-line-2" : "border-line hover:border-line-2")}>{p.label}</Link>)}</div>
         </div>
-        <Tabs current={brandId ? `/marketing?brand=${brandId}` : "/marketing"} tabs={[{ href: "/marketing", label: "Toutes les marques" }, ...brands.map((b) => ({ href: `/marketing?brand=${b.id}`, label: b.name }))]} />
+        <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-3">
+          <Kpi label={`Budget ${data.year}`} value={budget && budget.hasBudget ? fmtMAD(budget.annual, { compact: true }) : "—"} sub={budget && budget.hasBudget ? "enveloppe annuelle" : "non défini"} />
+          <Kpi label="Consommé" value={budget ? fmtMAD(budget.consumed, { compact: true }) : "—"} sub={budget ? (budget.consumedPct === null ? "sans budget" : `${Math.round(budget.consumedPct)} % · régie ${AD_SPEND_SOURCE_LABEL[budget.adSource]}`) : ""} tone={budget && budget.consumedPct !== null && budget.consumedPct >= 100 ? "red" : undefined} />
+          <Kpi label="Restant" value={budget ? money(budget.remaining) : "—"} tone={budget && budget.remaining !== null && budget.remaining < 0 ? "red" : "green"} sub={budget ? `dépensé ${fmtMAD(budget.spent, { compact: true })}` : ""} />
+          <Kpi label={`CA objectif ${data.year}`} value={sel ? money(annualTarget?.objective ?? null) : "par marque"} sub={sel ? (annualTarget?.objective ? `réalisé ${fmtMAD(annualTarget.realized, { compact: true })} (${fmtPct(annualTarget.pct ?? 0, 0)})` : "non renseigné") : "choisir une marque"} />
+          <Kpi label="Objectif du mois" value={sel ? (targets!.monthly.pct === null ? "—" : fmtPct(targets!.monthly.pct, 0)) : `${data.brands.filter((b) => b.overview.targets.monthly.forecastPct !== null && b.overview.targets.monthly.forecastPct < 100).length} en retard`} sub={sel ? (targets!.monthly.forecastPct === null ? "non renseigné" : `projection ${fmtPct(targets!.monthly.forecastPct, 0)} au rythme actuel`) : "marques sous leur objectif projeté"} tone={sel && targets!.monthly.forecastPct !== null ? (targets!.monthly.forecastPct >= 100 ? "green" : "orange") : undefined} />
+          <Kpi label="Campagnes actives" value={fmtNum(data.totals.activeCampaigns)} sub={`${data.totals.plannedCampaigns} planifiée(s) · ${data.totals.pendingContent} contenu(s) à publier`} />
+          <Kpi label="Actions ouvertes" value={fmtNum(data.actions.counters.open)} sub={`${fmtMAD(data.actions.counters.budgetOpen, { compact: true })} prévus · ${data.actions.counters.blocked} bloquée(s)`} href="/marketing/priorites" />
+          <Kpi label="En retard" value={fmtNum(data.actions.counters.late)} tone={data.actions.counters.late > 0 ? "red" : "green"} sub="actions dont l'échéance est passée" href="/marketing/priorites" />
+        </div>
       </PageHeader>
 
-      {signals.length > 0 && (
-        <Section title="À arbitrer" description="Ce que la période fait remonter, du plus urgent au moins urgent.">
-          <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
-            {signals.map((s, i) => (
-              <Link key={i} href={s.href} className="card p-4 hover:border-accent transition-colors">
-                <Badge tone={s.tone}>{s.tone === "red" ? "Critique" : s.tone === "orange" ? "À traiter" : s.tone === "green" ? "Opportunité" : "À suivre"}</Badge>
-                <div className="font-semibold text-[14px] mt-2">{s.title}</div>
-                <p className="text-[12.5px] text-ink-2 mt-1">{s.detail}</p>
-              </Link>
-            ))}
+      {sel ? (
+        <>
+          <Section title={`Quoi pousser maintenant — ${sel.name}`} description="Moteur de décision : ventes × stock × marge × Ads, règles de l'Action Center et intelligence Ads, structure commune. Approuver crée l'action et sa tâche ; rien n'est exécuté sans ce clic.">
+            {data.decisions.notes.length > 0 && <ul className="text-[12px] text-amber-800 mb-2 space-y-0.5">{data.decisions.notes.map((n, i) => <li key={i}>{n}</li>)}</ul>}
+            {sel.proposed.length === 0 ? <Card><p className="text-[13px] text-ink-2">Aucune action à recommander sur {data.period.label} : ventes stables et stock sain, ou données insuffisantes. Les actions planifiées restent dans Priorités & actions.</p></Card> : (
+              <div className="space-y-3">{sel.proposed.slice(0, maxDecisions).map((d, i) => <DecisionCard key={d.id} d={d} rank={i + 1} users={users} canDecide={canCreate} back={back} />)}</div>
+            )}
+            {sel.doNotPush.length > 0 && (
+              <div className="mt-4"><div className="label mb-2">À ne pas pousser</div><div className="space-y-3">{sel.doNotPush.slice(0, 5).map((d) => <DecisionCard key={d.id} d={d} rank={null} users={users} canDecide={canEdit} back={back} compact />)}</div></div>
+            )}
+          </Section>
+          <div className="grid lg:grid-cols-3 gap-4 mb-6">
+            <Card title="Plan et budget" action={sel.plan ? <Link href={`/marketing/plan/${sel.plan.id}`} className="text-[12px] text-accent">Ouvrir le plan</Link> : <Link href="/marketing/plan" className="text-[12px] text-accent">Créer un plan</Link>}>
+              {sel.plan ? <p className="text-[13px]"><b>{sel.plan.name}</b> · <Badge tone={PLAN_STATUS[sel.plan.status as keyof typeof PLAN_STATUS]?.tone ?? "gray"}>{PLAN_STATUS[sel.plan.status as keyof typeof PLAN_STATUS]?.label ?? sel.plan.status}</Badge> · {fmtDateShort(sel.plan.periodStart)} → {fmtDateShort(sel.plan.periodEnd)}</p> : <p className="text-[13px] text-muted">Aucun plan pour {data.year}. Le budget et l&apos;objectif existants seront repris par le plan.</p>}
+              {sel.budget.hasBudget && <><Progress value={Math.min(100, sel.budget.consumedPct ?? 0)} tone={(sel.budget.consumedPct ?? 0) > 90 ? "orange" : "accent"} className="mt-3" /><div className="text-[12px] text-muted mt-1">Engagé {fmtMAD(sel.budget.consumed, { compact: true })} sur {fmtMAD(sel.budget.annual, { compact: true })} · prévu non engagé {fmtMAD(sel.budget.planned, { compact: true })}</div></>}
+              <div className="mt-3 text-[12px] text-muted">{sel.overview.marketing ? `${sel.overview.marketing.activeCampaigns} campagne(s) active(s) · ${sel.overview.marketing.upcomingContents} contenu(s) à venir · ${sel.overview.marketing.runningActivations} activation(s) en cours` : "activité marketing non accessible"}</div>
+            </Card>
+            <Card title="Alertes stock" action={<Link href={`/marketing/agent?brand=${sel.id}`} className="text-[12px] text-accent">Agent marketing</Link>}>
+              {sel.stockAlerts.length === 0 ? <p className="text-[13px] text-muted">Aucun produit en risque de rupture.</p> : (
+                <ul className="space-y-1 text-[12.5px]">{sel.stockAlerts.slice(0, 6).map((p) => <li key={p.productId} className="flex items-center gap-2"><Badge tone="red">{p.stock ? STOCK_RISK_LABELS[p.stock.risk] : "stock"}</Badge><Link href={`/produits/${p.productId}`} className="hover:underline flex-1 truncate">{p.name}</Link><span className="text-muted">{p.stock?.daysOfStock !== null && p.stock?.daysOfStock !== undefined ? `${p.stock.daysOfStock} j` : "—"}</span></li>)}</ul>
+              )}
+            </Card>
+            <Card title="Actions en retard" action={<Link href={`/marketing/priorites?brand=${sel.id}`} className="text-[12px] text-accent">Toutes les actions</Link>}>
+              {data.actions.late.length === 0 ? <p className="text-[13px] text-muted">Aucune action en retard.</p> : (
+                <ul className="space-y-1 text-[12.5px]">{data.actions.late.slice(0, 6).map((a) => <li key={a.id} className="flex items-center gap-2"><StatusBadge status={a.status} /><Link href={`/marketing/priorites/${a.id}`} className="hover:underline flex-1 truncate">{a.title}</Link><span className="text-red">{a.dueDate ? fmtDateShort(a.dueDate) : ""}</span><span className="text-muted">{a.assigneeName ?? "non assignée"}</span></li>)}</ul>
+              )}
+            </Card>
           </div>
+        </>
+      ) : (
+        <Section title="Quoi pousser maintenant, par marque" description="La décision n°1 de chaque marque, son budget, son objectif du mois et ses actions. Ouvrir une marque pour approuver ou refuser.">
+          <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">{data.brands.map((c) => <BrandTile key={c.id} c={c} href={href(c.id, period)} />)}</div>
         </Section>
       )}
 
-      <div className="grid lg:grid-cols-3 gap-4 mt-6">
-        <Card className="lg:col-span-2 min-w-0" title="Marketing et ventes, 13 derniers mois" action={<span className="text-[11.5px] text-faint">barres : CA facturé · ligne : dépense marketing</span>}>
-          <MonthlyRevenueChart data={chart} height={240} />
-          <div className="mt-3 rounded-xl bg-surface-2 px-3 py-2 text-[12.5px] text-ink-2">
-            <b>Corrélation observée</b> entre la dépense marketing du mois et le CA du même mois : {correlationLabel(r)}.
-            {rLag !== null && <> Avec un décalage d&apos;un mois (dépense M → CA M+1) : {correlationLabel(rLag)}.</>}
-            <span className="text-faint"> Une corrélation n&apos;établit pas de causalité : saisonnalité, référencement et actions commerciales jouent aussi.</span>
-          </div>
-        </Card>
-
-        <Card className="min-w-0" title="Répartition de la dépense" action={<Link href="/marketing/budgets" className="text-[12px] text-accent">Détail</Link>}>
-          {families.length === 0 ? <Empty title="Aucune dépense sur la période" hint="Saisissez vos actions dans Budgets, ou importez un export de régie." /> : (
-            <ul className="space-y-2.5">
-              {families.map((f) => (
-                <li key={f.key}>
-                  <div className="flex items-baseline justify-between text-[12.5px]"><span>{f.label}</span><span className="font-medium">{fmtMAD(f.amount, { compact: true })} <span className="text-faint">{fmtPct((f.amount / familyTotal) * 100)}</span></span></div>
-                  <Progress value={(f.amount / familyTotal) * 100} className="mt-1" tone={f.key === "ads" ? "accent" : f.key === "influence" ? "purple" : f.key === "trade" ? "blue" : "gray"} />
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className="mt-4 pt-3 border-t border-line grid grid-cols-2 gap-y-2 text-[12.5px]">
-            <div><div className="text-muted">Budget {year}</div><div className="font-medium">{fmtMAD(budget.annual, { compact: true })}</div></div>
-            <div><div className="text-muted">Consommé</div><div className="font-medium">{fmtMAD(budget.consumed, { compact: true })} <span className="text-faint">{budget.consumedPct === null ? "budget non défini" : fmtPct(budget.consumedPct)}</span></div></div>
-            <div><div className="text-muted">Disponible</div><div className={`font-medium ${budget.remaining !== null && budget.remaining < 0 ? "text-red" : "text-green"}`}>{budget.remaining === null ? "—" : fmtMAD(budget.remaining, { compact: true })}</div></div>
-            <div><div className="text-muted">Prévu non engagé</div><div className="font-medium">{fmtMAD(budget.planned, { compact: true })}</div></div>
-            {budget.adSpend > 0 && <div className="col-span-2 text-[11.5px] text-faint">Dont {fmtMAD(budget.adSpend, { compact: true })} de dépense régie importée, en plus des {fmtMAD(budget.committed, { compact: true })} saisis en actions.</div>}
-          </div>
-        </Card>
-      </div>
-
-      <Section title="Campagnes en cours et à venir" description="Les 8 campagnes actives ou planifiées les plus récentes." action={<Link href="/marketing/campagnes" className="btn-secondary btn-sm">Toutes les campagnes</Link>}>
-        {campaigns.length === 0 ? (
-          <Empty title="Aucune campagne active" hint="Créez une campagne pour relier budget, contenus, influence et ventes." action={<Link href="/marketing/campagnes" className="btn-primary btn-sm">Créer une campagne</Link>} />
-        ) : (
-          <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-3">
-            {campaigns.map((c) => {
-              const meta = CAMPAIGN_STATUS[c.status] ?? { label: c.status, tone: "gray" as const };
-              const spent = c.spent + c.ad_spend;
-              const pct = c.budget ? (spent / c.budget) * 100 : null;
-              const roas = c.ad_spend > 0 ? c.ad_revenue / c.ad_spend : null;
-              return (
-                <Link key={c.id} href={`/marketing/campagnes/${c.id}`} className="card p-4 hover:border-accent transition-colors">
-                  <div className="flex items-center gap-2"><BrandDot color={c.brand_color} /><span className="text-[11.5px] text-muted truncate">{c.brand}</span><Badge tone={meta.tone} className="ml-auto">{meta.label}</Badge></div>
-                  <div className="font-semibold text-[14px] mt-1.5 line-clamp-2">{c.name}</div>
-                  <div className="text-[11.5px] text-muted mt-0.5">{campaignTypeLabel(c.type)}{c.start_date && ` · ${fmtDateShort(c.start_date)}${c.end_date ? ` → ${fmtDateShort(c.end_date)}` : ""}`}</div>
-                  <div className="mt-2.5 text-[12px]">
-                    <div className="flex justify-between"><span className="text-muted">Dépensé</span><span className="font-medium">{fmtMAD(spent, { compact: true })}{c.budget ? <span className="text-faint"> / {fmtMAD(c.budget, { compact: true })}</span> : null}</span></div>
-                    {pct !== null && <Progress value={pct} tone={pct > 100 ? "red" : pct > 85 ? "orange" : "accent"} className="mt-1" />}
-                    {roas !== null && <div className="flex justify-between mt-1.5"><span className="text-muted">ROAS régie</span><span className="font-medium">{roas.toFixed(2)}×</span></div>}
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        )}
+      <Section title="Alertes et opportunités" description="Budget, performance publicitaire, stock et exécution : ce qui demande un arbitrage cette semaine.">
+        <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-3">
+          <Card title="Budget">
+            {budgetAlerts.length === 0 ? <p className="text-[12.5px] text-muted">Aucune marque au-dessus du seuil d&apos;alerte ({scope.ctx.settings.budgetAlertPct} %).</p> : <ul className="space-y-1 text-[12.5px]">{budgetAlerts.map((b) => <li key={b.id} className="flex items-center gap-2"><Badge tone={(b.budget.consumedPct ?? 0) >= 100 ? "red" : "orange"}>{Math.round(b.budget.consumedPct ?? 0)} %</Badge><Link href={`/marketing/budgets?brand=${b.id}`} className="hover:underline">{b.name}</Link><span className="text-muted ml-auto">reste {money(b.budget.remaining)}</span></li>)}</ul>}
+          </Card>
+          <Card title="Performance Ads">
+            {perfAlerts.length === 0 ? <p className="text-[12.5px] text-muted">Aucune alerte de l&apos;intelligence Ads sur la période.</p> : <ul className="space-y-1 text-[12.5px]">{perfAlerts.slice(0, 6).map((d) => <li key={d.id} className="flex items-center gap-2"><Badge tone={d.doNotPush ? "red" : "orange"}>{d.recommendationLabel}</Badge><span className="truncate flex-1">{d.entity.name}</span></li>)}</ul>}
+            <Link href="/marketing/ads" className="btn-ghost btn-sm mt-2">Digital Ads</Link>
+          </Card>
+          <Card title="Stock">
+            {stockAlerts.length === 0 ? <p className="text-[12.5px] text-muted">Aucun produit en risque de rupture.</p> : <ul className="space-y-1 text-[12.5px]">{stockAlerts.slice(0, 6).map(({ brand, p }) => <li key={p.productId} className="flex items-center gap-2"><Badge tone="red">{p.stock?.daysOfStock !== null && p.stock?.daysOfStock !== undefined ? `${p.stock.daysOfStock} j` : "rupture"}</Badge><Link href={`/produits/${p.productId}`} className="hover:underline truncate flex-1">{p.name}</Link><span className="text-muted">{brand}</span></li>)}</ul>}
+          </Card>
+          <Card title="Opportunités">
+            {data.decisions.proposed.filter((d) => d.recommendation === "PUSH" || d.recommendation === "SCALE" || d.recommendation === "INCREASE_BUDGET" || d.recommendation === "BOOST_DIGITAL").length === 0 ? <p className="text-[12.5px] text-muted">Aucune opportunité d&apos;accélération détectée sur la période.</p> : (
+              <ul className="space-y-1 text-[12.5px]">{data.decisions.proposed.filter((d) => d.recommendation === "PUSH" || d.recommendation === "SCALE" || d.recommendation === "INCREASE_BUDGET" || d.recommendation === "BOOST_DIGITAL").slice(0, 6).map((d) => <li key={d.id} className="flex items-center gap-2"><Badge tone="green">{d.recommendationLabel}</Badge><span className="truncate flex-1">{d.entity.name}</span>{d.category && <span className="text-muted">{BUDGET_CATEGORY_LABELS[d.category]}</span>}</li>)}</ul>
+            )}
+          </Card>
+        </div>
       </Section>
 
-      <div className="grid lg:grid-cols-2 gap-4 mt-6">
-        <Card className="min-w-0" title="Scorecard par marque" action={<span className="text-[11.5px] text-faint">score relatif au meilleur de la période</span>}>
-          <div className="overflow-x-auto">
-            <table className="tbl text-[12.5px]">
-              <thead><tr><th>Marque</th><th className="num">CA</th><th className="num">Dépense</th><th className="num">Comm.</th><th className="num">Digital</th><th className="num">Influence</th><th className="num">Contenu</th><th className="num">Trade</th><th className="num">Global</th></tr></thead>
-              <tbody>
-                {scores.map((s) => (
-                  <tr key={s.brandId}>
-                    <td><Link href={`/marketing?brand=${s.brandId}`} className="flex items-center gap-1.5 hover:underline"><BrandDot color={s.color} />{s.name}</Link></td>
-                    <td className="num">{fmtMAD(s.revenue, { compact: true, suffix: false })}</td>
-                    <td className="num">{fmtMAD(s.spend, { compact: true, suffix: false })}</td>
-                    <td className="num">{Math.round(s.commercial)}</td>
-                    <td className="num">{Math.round(s.digital)}</td>
-                    <td className="num">{Math.round(s.influence)}</td>
-                    <td className="num">{Math.round(s.content)}</td>
-                    <td className="num">{Math.round(s.trade)}</td>
-                    <td className="num font-semibold"><Badge tone={s.global >= 70 ? "green" : s.global >= 40 ? "yellow" : "red"}>{Math.round(s.global)}</Badge></td>
-                  </tr>
-                ))}
-                {scores.length === 0 && <tr><td colSpan={9} className="text-muted text-center py-4">Aucune donnée sur la période.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-
-        <Card className="min-w-0" title="Calendrier 360" action={<Link href="/marketing/planning" className="text-[12px] text-accent">Planning éditorial</Link>}>
-          {upcoming.length === 0 ? <Empty title="Rien de planifié sur la période" hint="Campagnes, contenus, collaborations et activations apparaissent ici." /> : (
-            <ul className="divide-y divide-line">
-              {upcoming.map((e) => (
-                <li key={e.kind + e.id}>
-                  <Link href={e.href} className="flex items-center gap-2.5 py-2 hover:bg-surface-2 -mx-2 px-2 rounded-lg">
-                    <span className="text-[11.5px] text-muted w-14 shrink-0">{fmtDateShort(e.date)}</span>
-                    <Badge tone={KIND_TONE[e.kind] ?? "gray"}>{e.kind}</Badge>
-                    <span className="text-[12.5px] flex-1 truncate">{e.title}</span>
-                    {e.brand && <span className="text-[11.5px] text-faint shrink-0">{e.brand}</span>}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[12px] pt-3 border-t border-line">
-            <div><div className="kpi-sm">{fmtNum(counters.activeCampaigns)}</div><div className="text-muted">campagnes actives</div></div>
-            <div><div className="kpi-sm">{fmtNum(counters.collaborations)}</div><div className="text-muted">collaborations</div></div>
-            <div><div className="kpi-sm">{fmtNum(counters.published)}</div><div className="text-muted">contenus publiés</div></div>
-          </div>
-        </Card>
-      </div>
-
-      <Section title="Budget par catégorie" description={`Année ${year} — plan et réalisé, toutes marques confondues${brandId ? " (marque filtrée)" : ""}.`}>
-        <Card>
-          <div className="overflow-x-auto">
-            <table className="tbl text-[12.5px]">
-              <thead><tr><th>Catégorie</th><th className="num">Prévu</th><th className="num">Engagé + dépensé</th><th className="num">Dont payé</th><th className="num">Part</th></tr></thead>
-              <tbody>
-                {budget.byCategory.map((c) => {
-                  const total = budget.byCategory.reduce((a, x) => a + x.committed + x.spent, 0);
-                  const eng = c.committed + c.spent;
-                  return (
-                    <tr key={c.category}>
-                      <td>{BUDGET_CATEGORY_LABELS[c.category as keyof typeof BUDGET_CATEGORY_LABELS] ?? c.category}</td>
-                      <td className="num">{c.planned ? fmtMAD(c.planned, { compact: true, suffix: false }) : "—"}</td>
-                      <td className="num font-medium">{eng ? fmtMAD(eng, { compact: true, suffix: false }) : "—"}</td>
-                      <td className="num">{c.spent ? fmtMAD(c.spent, { compact: true, suffix: false }) : "—"}</td>
-                      <td className="num">{total ? fmtPct((eng / total) * 100) : "—"}</td>
-                    </tr>
-                  );
-                })}
-                {budget.byCategory.length === 0 && <tr><td colSpan={5} className="text-muted text-center py-4">Aucune dépense enregistrée en {year}.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      </Section>
+      <div className="text-[11.5px] text-faint">Corrélation ≠ attribution : un CA n&apos;est « attribué » que s&apos;il est mesuré (conversion régie, code promo, montant saisi). Les décisions sont des recommandations calculées ; la validation humaine reste la règle. Analyses détaillées : <Link href="/marketing/analytics" className="underline">Analytics</Link>.</div>
     </>
   );
 }

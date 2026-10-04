@@ -82,6 +82,8 @@ async function identityFrom(fd: FormData) {
     validatorId: isUuid(validatorId) ? validatorId : null,
     campaignId: isUuid(campaignId) ? campaignId : null,
     linkedAnimationId: isUuid(linkedAnimationId) ? linkedAnimationId : null,
+    // Axe du plan marketing : seulement si le formulaire le porte (duplication, création rapide : inchangé).
+    ...(fd.has("axisId") ? { axisId: isUuid(str(fd, "axisId")) ? str(fd, "axisId") : null } : {}),
   };
 }
 
