@@ -13,7 +13,7 @@ import { BUDGET_CATEGORIES, BUDGET_CATEGORY_LABELS } from "@/lib/budget-categori
 import { AD_SPEND_SOURCE_LABEL } from "@/lib/budget";
 import { PageHeader, Card, Kpi, Badge, BrandDot, Section, Progress, StatusBadge, PriorityBadge, Empty, type Tone } from "@/components/ui";
 import { fmtMAD, fmtPct, fmtDateShort, fmtMonth, fmtNum } from "@/lib/format";
-import { savePlanAction, setPlanStatusAction, saveAllocationAction, saveObjectiveAction, deleteObjectiveAction, saveAxisAction, deleteAxisAction, saveMonthAction, generateMonthActionsAction } from "../actions";
+import { savePlanAction, setPlanStatusAction, saveAllocationAction, saveObjectiveAction, deleteObjectiveAction, saveAxisAction, deleteAxisAction, saveMonthAction } from "../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -207,7 +207,7 @@ export default async function MarketingPlanPage(props: { params: Promise<{ id: s
       </Section>
 
       {/* ------------------------------ Plan mensuel ------------------------------ */}
-      <Section title="Plan mensuel" description="Produit prioritaire, objectif et budget de chaque mois. « Générer les actions » crée une action par canal, au prorata de l'allocation, chacune avec sa tâche (échéance : fin du mois) ; les montants restent modifiables action par action.">
+      <Section title="Plan mensuel" description="Produit prioritaire, objectif et budget de chaque mois. « Générer une action » ouvre le générateur pré-rempli (marque, mois, produit, budget restant du mois) : il propose des actions concrètes et chiffrées, à ajouter au plan en un clic.">
         <div className="space-y-2">
           {months.map((m) => {
             const open = m.actions.filter((a) => isOpenStatus(a.status));
@@ -239,10 +239,10 @@ export default async function MarketingPlanPage(props: { params: Promise<{ id: s
                     )}
                     <div>
                       <div className="flex items-center justify-between mb-2"><div className="label">Actions du mois ({m.actions.length})</div>
-                        {canEdit && m.budget > 0 && m.actions.length === 0 && <form action={generateMonthActionsAction}><input type="hidden" name="planId" value={plan.id} /><input type="hidden" name="month" value={m.month} /><button className="btn-primary btn-sm" type="submit">Générer les actions</button></form>}
+                        {canEdit && <Link href={`/marketing/priorites/generer?${new URLSearchParams({ brand: plan.brandId, mois: m.month.slice(0, 7), ...(m.focusProductId ? { produit: m.focusProductId } : {}), ...(m.budget - m.actionsBudget > 0 ? { budget: String(Math.round(m.budget - m.actionsBudget)) } : {}) }).toString()}`} className="btn-primary btn-sm">+ Générer une action</Link>}
                         <Link href={`/marketing/priorites?brand=${plan.brandId}&mois=${m.month}`} className="text-[12px] text-accent hover:underline">Ouvrir dans Priorités</Link>
                       </div>
-                      {m.actions.length === 0 ? <p className="text-[12.5px] text-muted">{m.budget > 0 ? "Aucune action : générer la répartition par canal ou créer une action depuis Priorités & actions." : "Renseigner le budget du mois pour générer les actions."}</p> : (
+                      {m.actions.length === 0 ? <p className="text-[12.5px] text-muted">{m.budget > 0 ? "Aucune action : générer une action concrète pour ce mois." : "Renseigner le budget du mois, puis générer une action."}</p> : (
                         <ul className="space-y-1.5">
                           {m.actions.map((a) => (
                             <li key={a.id} className="flex items-center gap-2 text-[12.5px]">

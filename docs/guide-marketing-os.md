@@ -44,22 +44,29 @@ Chaque page répond à une question précise :
    avant « Enregistrer l'allocation ».
 4. **Axes stratégiques** : « Développer Sebo Control », « Digital acquisition », « Sell-out / trade »… Chaque axe porte un
    budget ; campagnes, contenus, collaborations et activations s'y rattachent depuis leur fiche (champ « Axe du plan »).
-5. **Plan mensuel** : produit prioritaire, objectif et budget du mois. « Générer les actions » crée une action par canal au
-   prorata de l'allocation, chacune avec sa tâche (échéance fin du mois). Les montants restent modifiables.
+5. **Plan mensuel** : produit prioritaire, objectif et budget du mois. « Générer une action » ouvre le générateur
+   pré-rempli (marque, mois, produit, budget restant du mois).
 6. **Activer** le plan (droit Valider) : il devient la référence du Command Center et des règles de l'Action Center.
 
-## Priorités & actions
+## Opportunités & actions (Priorités & actions)
 
-Une action = un budget prévu, un canal, un produit, un objectif, une justification, un résultat attendu, **et une tâche**
-(responsable, échéance, priorité, statut : À faire / En cours / Bloquée / Terminée / Annulée). Le statut est le même dans
-Tâches, dans le plan et dans l'Action Center. Les dépenses saisies dans Budget & dépenses se rattachent à l'action
-(engagé de l'action = dépenses COMMITTED + SPENT rattachées).
+La page ne liste plus des tâches : elle propose des **actions prêtes à exécuter**.
 
-La page classe les actions ouvertes : retards d'abord, puis priorité, puis échéance. Dessous, les **décisions à prendre**
-(règles de l'Action Center, intelligence Ads, intelligence marketing) dans une structure commune : POURQUOI, DONNÉES
-étiquetées, IMPACT, CONFIANCE, ACTION. Approuver crée l'action ; refuser garde la raison (et écarte la recommandation de
-l'Action Center 30 jours) ; une décision approuvée dont la tâche est terminée devient « exécutée », puis « mesurée » quand
-on note le résultat observé ; passée sa date de revue sans exécution, elle expire.
+- **Opportunités du moment** : pour chaque marque, le produit que les données désignent (moteur de décision, sinon produit
+  prioritaire du plan, sinon premier contributeur sain) et la meilleure action que le budget disponible permet de
+  financer. Chaque carte : ACTION, OBJECTIF, BUDGET, IMPACT, POURQUOI MAINTENANT, STATUT · Voir le plan · Ajouter au plan.
+- **+ Générer une action** : marque, objectif, levier, budget (pré-rempli avec le disponible), période, cible, produit →
+  « Il vous reste X MAD » → 3 à 5 options classées (budget, impact, ROI potentiel, complexité, score) → fiche complète :
+  concept, cible, produits, canaux, budget poste par poste, rétroplanning J-30 → J+7 avec responsables, KPI, résultat
+  attendu (hypothèses affichées), score détaillé, données utilisées.
+- **Ajouter au plan** crée en une fois : l'action dans le plan de l'année (créé en brouillon s'il manque), l'activation
+  (événementiel, trade : budget par poste) ou la campagne (digital, influence, contenu : dépenses prévues), une tâche par
+  étape, les contenus au planning éditorial. Le budget disponible du levier baisse aussitôt (« 45 000 → 30 000 MAD »).
+- **Actions au plan** : objectif, budget prévu / engagé, impact attendu, avancement des tâches, échéance, statut.
+- La bibliothèque compte 30 modèles (Padel Challenge, Beauty Morning, Masterclass, Pop-up, Sell-out Challenge, Gift With
+  Purchase, UGC Wave, 30-Day Challenge, Seeding Box, Ambassadrice, Avant / après…). Une action au plan n'est plus
+  reproposée ; une action réalisée récemment est pénalisée ; un produit en rupture n'a aucune option.
+- Les signaux des moteurs (règles, Ads, intelligence marketing) restent accessibles, repliés, avec approuver / refuser.
 
 ## Command Center
 

@@ -323,6 +323,13 @@
       "when": 1790000000000,
       "tag": "0045_crm_commercial",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1790000100000,
+      "tag": "0046_action_generator",
+      "breakpoints": true
     }
   ]
 }

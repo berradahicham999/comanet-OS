@@ -356,6 +356,22 @@ describe("Marketing OS — une seule création d'action, une seule écriture des
   });
 });
 
+describe("Générateur d'actions — une seule bibliothèque, un seul moteur, aucune action générique par canal", () => {
+  test("la répartition mécanique d'un budget mensuel en actions par canal n'existe plus", () => {
+    const found = codeHits(/generateMonthActionsAction|splitMonthBudget/);
+    assert.deepEqual(found, [], `Génération générique encore présente dans : ${found.join(", ")}`);
+  });
+  test("le moteur de génération n'est défini qu'une fois", () => {
+    assert.deepEqual(hits(/export function generate\(/), ["src/lib/action-generator/engine.ts"]);
+    assert.deepEqual(hits(/export const TEMPLATES: ActionTemplate\[\]/), ["src/lib/action-generator/catalog.ts"]);
+  });
+  test("l'ajout au plan d'une action générée passe par createAction() (aucune insertion directe d'action)", () => {
+    const persist = FILES.find((f) => f.path === "src/lib/action-generator/persist.ts")!.code;
+    assert.match(persist, /createAction\(/);
+    assert.doesNotMatch(persist, /insert\(marketingActions\)/);
+  });
+});
+
 describe("CRM commercial — visites, portefeuilles, objectifs client", () => {
   test("seul `crm/visits.ts` écrit les heures, le statut de visite et le contrôle de présence", () => {
     const found = codeHits(/update\(clientVisits\)\s*\.set\(\{[^}]*\b(startedAt|endedAt|verificationStatus|autoClosed)\b|update\s+client_visits\s+set[^`]*\b(started_at|ended_at|verification_status|auto_closed)\s*=/i, ["lib/crm/visits.ts"]);

@@ -9,6 +9,7 @@
 import "server-only";
 import { eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { pgArray } from "@/lib/sql-array";
 import { marketingDecisions, type MarketingDecisionStatus } from "@/db/schema";
 import { audit, type AuditActor } from "@/lib/audit";
 import { createAction, type ActionInput } from "@/lib/marketing-plan/actions";
@@ -48,7 +49,7 @@ export async function decidedDecisions(brandIds: string[] | null, limit = 50) {
     select d.key, d.domain, d.title, d.status::text as status, d.reason, d.decided_by_name, d.decided_at::text as decided_at, d.expected_review_date::text as expected_review_date, d.measured_note, d.snapshot, d.action_id, b.name as brand_name,
       a.task_id, t.status::text as task_status
     from marketing_decisions d left join brands b on b.id = d.brand_id left join marketing_actions a on a.id = d.action_id left join tasks t on t.id = a.task_id
-    where d.status <> 'PROPOSED' ${brandIds ? sql`and (d.brand_id is null or d.brand_id = any(${sql.raw(`'{${brandIds.join(",")}}'::uuid[]`)}))` : sql``}
+    where d.status <> 'PROPOSED' ${brandIds ? sql`and (d.brand_id is null or d.brand_id = any(${pgArray(brandIds)}))` : sql``}
     order by d.decided_at desc nulls last limit ${limit}`);
   return (r.rows as Record<string, unknown>[]).map((x) => ({
     key: String(x.key), domain: String(x.domain), title: String(x.title), status: x.status as MarketingDecisionStatus, reason: x.reason ? String(x.reason) : null,
