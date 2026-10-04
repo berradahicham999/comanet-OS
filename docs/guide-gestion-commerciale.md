@@ -116,8 +116,12 @@ Règles :
   est réelle avant comme après la bascule : une commande n'est pas une pièce fiscale, elle sert dès aujourd'hui.
 - **Blocages commerciaux** à la confirmation comme sur un BL (client bloqué, remise, vente à perte, encours si
   contrôlé) : le commercial demande le déblocage, une personne habilitée le lève.
-- **Droits.** Module Livraisons : Créer = saisir et **confirmer** (le commercial confirme sa propre saisie, rien ne
-  sort du stock) ; Modifier = annuler une commande ; Valider reste réservé au BL. Portée client respectée.
+- **Droits.** Module **Commandes clients** (séparé des Livraisons depuis la migration 0043) : Créer = saisir et
+  **confirmer** (le commercial confirme sa propre saisie, rien ne sort du stock) ; Modifier = modifier un brouillon,
+  annuler une commande ; Valider = corriger le nom imprimé. « Préparer le BL » demande Créer sur **Livraisons** : un
+  commercial peut donc prendre des commandes sans jamais toucher aux BL. Portée client respectée ; en portée « ses
+  données », la personne ne voit et ne modifie que les commandes qu'elle a saisies ou qui lui sont attribuées
+  (champ Commercial). Modèle de rôle prêt à appliquer : « Commercial (prise de commande) ».
 - **Un seul BL brouillon à la fois par commande** ; une commande annulée ne se livre plus (le BL en cours est
   refusé à la validation) ; une commande ne s'annule pas tant qu'un BL brouillon en dépend.
 - `createBLFromOrder()` et `cancelOrder()` vivent dans `src/lib/gestion/documents.ts`, seule écriture des pièces.
@@ -135,7 +139,7 @@ Règles :
 | **Facturer des BL** (`/gestion/pieces/facturer`) | Clients ayant des BL à facturer (du plus ancien), puis choix des BL : une facture brouillon regroupe leur reste à facturer. |
 | **Paramètres → Gestion commerciale** | Mode de bascule (Sage fait foi / période parallèle), modèle de facture (PPH TTC + remise, ou prix net), tolérance de remise, « Livré » exigé avant facturation, contrôle d'encours, libellés du montant en lettres, durée des liens de partage, alerte BL non facturés ; motifs d'avoir (avec ou sans retour en stock). |
 | **Action Center** (catégorie « Gestion commerciale ») | BL non facturés au-delà du délai réglé, pièces dont le déblocage est demandé, lots périmés ou proches de la péremption encore en stock. |
-| **Recherche** et copilote | Un numéro de BL, de facture ou d'avoir se retrouve par la recherche universelle (droits Livraisons / Facturation et portée client respectés). |
+| **Recherche** et copilote | Un numéro de BL, de facture ou d'avoir se retrouve par la recherche universelle (droits Commandes / Livraisons / Facturation et portée client respectés). |
 
 ### Règles
 
@@ -311,8 +315,9 @@ sur le serveur Next : `/gestion/pieces/<id>/pdf`.
   les ventes importées). Idempotente.
 - **Rapport de contrôle** : un écart d'un centime par pièce au plus est affiché comme arrondi.
 - **Libellés** : les messages parlent de « vente (sell-in) » et non plus de « vente Sage » (C22).
-- **Droits** : règlements = Facturation (Créer = saisir, Modifier = imputer / remettre / encaisser / relancer,
-  Valider = impayé / annulation) ; envoi au comptable = Voir sur Facturation + interrupteur « Exporter des données » ;
+- **Droits** : règlements = module **Règlements et relances** (séparé de la Facturation depuis la migration 0043 :
+  un commercial peut encaisser un chèque sans pouvoir facturer). Créer = saisir, Modifier = imputer / remettre /
+  encaisser / relancer, Valider = impayé / annulation ; envoi au comptable = Voir sur Facturation + interrupteur « Exporter des données » ;
   bascule = Administration.
 
 ## Retours de tests (septembre 2026)

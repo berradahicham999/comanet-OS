@@ -222,3 +222,23 @@ couvrir **toute la base clients de sa ville** et **toutes les marques**.
   « Toutes les marques ». Liste des comptes → « Appliquer à toutes les animatrices » (`applyCityScopeToAnimatrices()`) :
   chaque animatrice active avec une ville reçoit sa ville et toutes les marques, en cumul, journalisé compte par compte.
 - Avant l'application de la migration, colonne et table absentes sont tolérées (portée vide) : la connexion ne casse pas.
+
+## 9. Gestion commerciale plus fine (4 octobre 2026, migration `0043_droits_commandes_reglements`)
+
+Demande d'Hicham : les commerciaux font des bons de commande, **pas** de bons de livraison.
+
+- Nouveau module **`commandes`** (Commandes clients), détaché de `livraisons` : Créer = saisir et confirmer,
+  Modifier = modifier un brouillon / annuler, Valider = corriger le nom imprimé. « Préparer le BL » reste
+  Créer sur `livraisons`. `moduleOfType("COMMANDE")` (`src/lib/gestion/documents-shared.ts`) est la seule correspondance.
+- Nouveau module **`reglements`** (Règlements et relances), détaché de `facturation` : un commercial peut encaisser
+  sans facturer ; la facturation garde factures, avoirs, facturation des BL et envoi au comptable.
+- **Aucun droit perdu** : la migration recopie, compte par compte et modèle par modèle, `livraisons` → `commandes`
+  et `facturation` → `reglements`. On retire ensuite à la main.
+- **Portée OWN sur les commandes** : liste, fiche, actions, recherche et copilote ne montrent que les commandes
+  saisies par la personne ou dont elle est le commercial (`isOwnOrder()`). BL et factures restent filtrés par
+  clients assignés. Page d'accueil d'un compte OWN qui prend des commandes : `/gestion/pieces?type=COMMANDE`.
+- La page « Préparation » (chiffre d'affaires de tous les clients) n'est plus ouverte à qui n'a que `commandes`
+  (`PREPARATION_MODULES`, `src/components/nav-config.ts`).
+- Modèle **« Commercial (prise de commande) »** : Commandes (Voir, Créer, Modifier), Clients et Produits en lecture,
+  Tâches, portée « ses données ». Cocher Règlements → Créer pour encaisser les chèques.
+- La matrice affiche, pour les modules de la gestion commerciale, ce que veulent dire Créer et Modifier (`ACTION_HINTS`).

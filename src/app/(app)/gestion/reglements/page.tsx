@@ -19,7 +19,7 @@ const TABS = [["reglements", "Règlements"], ["echeancier", "Échéancier"], ["b
 
 export default async function PaymentsPage(props: { searchParams: Promise<{ tab?: string; error?: string; done?: string }> }) {
   const a = await requireAccessContext();
-  if (!can(a.perms, "facturation", "view")) redirect(a.home);
+  if (!can(a.perms, "reglements", "view")) redirect(a.home);
   const sp = await props.searchParams;
   const tab = (TABS.map((t) => t[0]) as string[]).includes(sp.tab ?? "") ? sp.tab! : "reglements";
   const g = (await getSettings()).gestion;
@@ -32,8 +32,8 @@ export default async function PaymentsPage(props: { searchParams: Promise<{ tab?
   const sum = (xs: string[]) => xs.reduce((s, x) => s + Number(x), 0);
   const overdue = open.filter((i) => (i.daysLate ?? 0) > 0);
   const portfolio = payments.filter((p) => p.status === "PORTEFEUILLE" || p.status === "REMIS");
-  const canCreate = can(a.perms, "facturation", "create");
-  const canEdit = can(a.perms, "facturation", "edit");
+  const canCreate = can(a.perms, "reglements", "create");
+  const canEdit = can(a.perms, "reglements", "edit");
   const names = new Map(open.map((i) => [i.clientId, { name: i.client, city: i.city }]));
 
   return (

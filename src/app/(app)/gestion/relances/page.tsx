@@ -17,11 +17,11 @@ export const metadata = { title: "Relances" };
 
 export default async function RemindersPage() {
   const a = await requireAccessContext();
-  if (!can(a.perms, "facturation", "view")) redirect(a.home);
+  if (!can(a.perms, "reglements", "view")) redirect(a.home);
   const g = (await getSettings()).gestion;
   const simulation = !emitsReal(g.cutover, { date: iso(today()), site: g.cutover.sites[0] ?? "COMANET" });
   const list = await reminderCandidates({ clientIds: await clientFilter(), simulation });
-  const canEdit = can(a.perms, "facturation", "edit");
+  const canEdit = can(a.perms, "reglements", "edit");
   const company = g.company.legalName || "COMANET";
   const todo = list.filter((c) => c.due), recent = list.filter((c) => !c.due);
   const levels = g.receivables.reminderDays;

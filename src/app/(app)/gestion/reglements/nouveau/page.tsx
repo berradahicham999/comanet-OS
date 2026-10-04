@@ -19,7 +19,7 @@ export const metadata = { title: "Nouveau règlement" };
 
 export default async function NewPaymentPage(props: { searchParams: Promise<{ client?: string; q?: string; error?: string }> }) {
   const a = await requireAccessContext();
-  if (!can(a.perms, "facturation", "create")) redirect(a.home);
+  if (!can(a.perms, "reglements", "create")) redirect(a.home);
   const sp = await props.searchParams;
   const g = (await getSettings()).gestion;
   const t = iso(today());

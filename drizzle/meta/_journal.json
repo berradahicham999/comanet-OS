@@ -302,6 +302,13 @@
       "when": 1789802160000,
       "tag": "0042_commandes_clients",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1789888560000,
+      "tag": "0043_droits_commandes_reglements",
+      "breakpoints": true
     }
   ]
 }

@@ -45,11 +45,12 @@ export type Access = ResolvedAccess & {
   preview: { adminId: string; adminName: string } | null;
 };
 
-/** Page d'accueil : la saisie pour qui ne voit que ses données, le cockpit sinon. */
+/** Page d'accueil : la saisie pour qui ne voit que ses données (animation, visite, commande), le cockpit sinon. */
 export function homeFor(perms: PermissionSet, scope: ScopeKey): string {
   if (scope === "OWN") {
     if (can(perms, "terrain", "create")) return "/terrain/saisie";
     if (can(perms, "medical", "create")) return "/medical/journee";
+    if (can(perms, "commandes", "create")) return "/gestion/pieces?type=COMMANDE";
   }
   if (hasAnyModule(perms)) return "/";
   return "/taches";
