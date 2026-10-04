@@ -330,6 +330,13 @@
       "when": 1790000100000,
       "tag": "0046_action_generator",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1790000200000,
+      "tag": "0047_bibliotheque_actions",
+      "breakpoints": true
     }
   ]
 }

@@ -15,6 +15,7 @@ import { BUDGET_CATEGORIES, BUDGET_CATEGORY_LABELS } from "@/lib/budget-categori
 import { PageHeader, Card, Badge, BrandDot, Section, Kpi, PriorityBadge, StatusBadge, Facts } from "@/components/ui";
 import { fmtMAD, fmtDateShort, fmtMonth, iso, today } from "@/lib/format";
 import { updateActionAction, setActionStatusAction, attachExpenseAction } from "../actions";
+import { saveFromActionAction } from "../../bibliotheque/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,7 @@ export async function generateMetadata(props: { params: Promise<{ id: string }> 
 
 const STATUS_LABEL = { PLANNED: "Prévu", COMMITTED: "Engagé", SPENT: "Dépensé" } as const;
 
-export default async function MarketingActionPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ ajout?: string; avant?: string; apres?: string; plan?: string }> }) {
+export default async function MarketingActionPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ ajout?: string; avant?: string; apres?: string; plan?: string; erreur?: string }> }) {
   await requireAccess("marketing");
   const { id } = await props.params;
   const sp = await props.searchParams;
@@ -58,7 +59,7 @@ export default async function MarketingActionPage(props: { params: Promise<{ id:
     <>
       <PageHeader eyebrow={<Link href="/marketing/priorites" className="hover:underline">Priorités & actions</Link>} title={a.title}
         subtitle={<span className="inline-flex items-center gap-2"><BrandDot color={a.brandColor} />{a.brandName}{a.productName ? ` · ${a.productName}` : ""}{a.planName ? ` · plan ${a.planName}` : ""}{a.axisName ? ` · axe ${a.axisName}` : ""}{a.month ? ` · ${fmtMonth(a.month)}` : ""} · source {ACTION_SOURCE_LABELS[a.source]}</span>}
-        actions={<><StatusBadge status={a.status} /><PriorityBadge priority={a.priority} /><Link href={`/taches/${a.taskId}`} className="btn-secondary btn-sm">Ouvrir la tâche</Link></>}>
+        actions={<><StatusBadge status={a.status} /><PriorityBadge priority={a.priority} /><Link href={`/taches/${a.taskId}`} className="btn-secondary btn-sm">Ouvrir la tâche</Link>{spec && canEdit && <form action={saveFromActionAction}><input type="hidden" name="actionId" value={a.id} /><button className="btn-secondary btn-sm" title="Ajoute cette action, telle que réalisée, à la bibliothèque d'actions">Enregistrer comme modèle</button></form>}</>}>
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           <Kpi label="Budget prévu" value={fmtMAD(a.budgetPlanned, { compact: true })} sub={a.category ? BUDGET_CATEGORY_LABELS[a.category] : "canal non précisé"} />
           <Kpi label="Engagé + dépensé" value={fmtMAD(a.committed, { compact: true })} sub={`${a.expenses} dépense(s) rattachée(s)`} tone={a.budgetPlanned > 0 && a.committed > a.budgetPlanned ? "red" : undefined} />
@@ -67,6 +68,7 @@ export default async function MarketingActionPage(props: { params: Promise<{ id:
           <Kpi label="Décision d'origine" value={decision ? DECISION_STATUS[decision.status].label : a.decisionKey ? "liée" : "—"} sub={decision ? DOMAIN_LABELS[decision.domain as DecisionDomain] ?? decision.domain : "créée à la main ou par le plan"} />
         </div>
       </PageHeader>
+      {sp.erreur && <div className="mb-3 rounded-xl border border-red/30 bg-red-soft text-red px-3 py-2 text-[13px]">{sp.erreur}</div>}
 
       {sp.ajout && (
         <div className="rounded-xl border border-green/30 bg-green/5 px-4 py-3 mb-4 text-[13px]">

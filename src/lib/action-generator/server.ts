@@ -1,7 +1,7 @@
 /**
  * Points d'entrée serveur du générateur d'actions : génération pour une demande (assistant, fiche, ajout au plan,
  * outil de l'Agent) et opportunités du moment (page Priorités & actions). Une seule logique : `generate()` sur les
- * données de `loadGeneratorData()`, avec la bibliothèque `TEMPLATES`.
+ * données de `loadGeneratorData()`, avec la bibliothèque effective (`loadLibrary()` : modèles livrés + équipe).
  */
 import "server-only";
 import { buildProductPerformance, buildRecommendations } from "@/lib/marketing-intel/build";
@@ -9,14 +9,14 @@ import type { IntelContext, MarketingAction } from "@/lib/marketing-intel/types"
 import { currentPlanFor } from "@/lib/marketing-plan/plan";
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
-import { TEMPLATES } from "./catalog";
+import { loadLibrary } from "./library";
 import { generate } from "./engine";
 import { loadGeneratorData } from "./context";
 import type { ActionProposal, GeneratorData, GeneratorInput, GeneratorResult, ObjectiveKey } from "./types";
 
 export async function runGenerator(ctx: IntelContext, input: GeneratorInput, brandName: string, opts: { maxOptions?: number } = {}): Promise<{ result: GeneratorResult; data: GeneratorData }> {
   const data = await loadGeneratorData(ctx, { brandId: input.brandId, brandName, productId: input.productId, month: input.month });
-  return { result: generate(input, data, TEMPLATES, opts), data };
+  return { result: generate(input, data, await loadLibrary(), opts), data };
 }
 
 /** Mois de la période par défaut : le mois en cours, ou le suivant après le 20 (le temps de préparer). */
@@ -60,7 +60,7 @@ export async function brandOpportunities(ctx: IntelContext, brand: { id: string;
   if (!productId) return { opportunities: [], alert: null };
   const input: GeneratorInput = { brandId: brand.id, objective, axis: null, budget: null, month, target: "FEMMES_25_45", productId };
   const data = await loadGeneratorData(ctx, { brandId: brand.id, brandName: brand.name, productId, month, performance: perf });
-  const result = generate(input, data, TEMPLATES, { maxOptions: 5 });
+  const result = generate(input, data, await loadLibrary(), { maxOptions: 5 });
   if (result.blocked) return { opportunities: [], alert: { brandId: brand.id, brandName: brand.name, message: result.blocked } };
   const picked = result.options.slice(0, opts.max ?? 1);
   return {

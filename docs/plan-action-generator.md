@@ -59,8 +59,9 @@ budget. Ajouter une action de 15 000 MAD réserve 15 000 MAD : « 45 000 → 30 
 
 | Critère | Poids | Donnée |
 |---|---|---|
-| Cohérence avec l'objectif | 20 | affinité du modèle |
-| Budget | 15 | budget proposé vs budget idéal du modèle, dans le disponible |
+| Cohérence avec l'objectif | 15 | affinité du modèle |
+| Budget | 10 | budget proposé vs budget idéal du modèle, dans le disponible |
+| Ce qui marche pour la marque | 10 | conviction de la direction (favori 10, levier jusqu'à 7, non retenu 3, sans conviction 5) — INFERRED |
 | Potentiel commercial | 15 | profil du produit (STAR, croissance…) — CALCULATED |
 | Historique de performance | 10 | verdict du canal (analytics) — sinon « non mesurable », neutre |
 | Saisonnalité | 10 | événements de la période (Paramètres → Prévision) |
@@ -69,7 +70,7 @@ budget. Ajouter une action de 15 000 MAD réserve 15 000 MAD : « 45 000 → 30 
 | Faisabilité | 10 | délai de préparation vs date de la période, complexité |
 | Non-répétition | malus | même modèle au plan = exclu ; même modèle ou même type d'activation récent = malus, raison affichée |
 
-Classement : score, puis impact commercial estimé. Chaque option affiche impact, complexité, ROI potentiel, budget.
+Classement : score, puis favori de la marque, puis impact commercial estimé. Chaque option affiche impact, complexité, ROI potentiel, budget.
 
 ## 5. UX
 
@@ -90,3 +91,19 @@ Classement : score, puis impact commercial estimé. Chaque option affiche impact
 - Messages : étape de validation réglementaire sur les modèles à allégations (avant / après, expert, éducation).
 - Rien n'est créé sans clic « Ajouter au plan » ; tout est annulable (action annulée = tâches annulées, activation et
   campagne restent dans leurs modules).
+
+## 7. Bibliothèque éditable (phase 3, migration 0047)
+
+- **Plus riche** : 60 modèles livrés (30 de plus) sur 7 leviers. Nouveaux leviers Médical / prescripteurs (staff
+  hospitalier, congrès, échantillons, leader d'opinion, dépistage, webinaire) et Partenariats (salles de sport, spas,
+  maternités, entreprises). Familles propres à COMANET : formation comptoir, conseil du mois, ventes croisées, grossistes,
+  fidélité officine, WhatsApp pharmaciens, animatrice dédiée ; calendrier marocain (ftour, coffrets de l'Aïd, fête des
+  mères, 8 mars, Beach Tour, Black Friday, hiver) réservé à sa période ; grosse influenceuse, live shopping, vidéo
+  médicale, conseil du pharmacien, drive-to-pharmacie.
+- **Moins basique** : nom et concept sont des textes à variables nourris par la fiche marketing du produit (bénéfice,
+  actif, angle) ; les actions prescripteurs citent le nombre de médecins A et B de la base médicale liés à la marque.
+- **Éditable** : `action_templates` (modifier, désactiver, revenir à la version livrée, créer, dupliquer, importer /
+  exporter Excel, enregistrer une action ou une activation réalisée comme modèle). Seule écriture : `library.ts`.
+- **Ce qui marche par marque** : `brand_marketing_playbooks`, critère de score de 10 points, affiché comme hypothèse.
+- **Plus tard** : variantes d'un modèle (format court / long, budget bas / haut), apprentissage à partir des résultats
+  mesurés (activations mesurées, ventes avant / après), suggestions de nouveaux modèles par le copilote.

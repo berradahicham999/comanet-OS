@@ -113,6 +113,7 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Statut d'une activation, budget, retards, retour | `src/lib/activations/workflow.ts` + `shared.ts` + `budget.ts` + `roi.ts` | `transitionActivation()` (seule écriture du statut), `budgetTotals()`, `expenseRowsFor()`, `syncActivationExpenses()` (seul reflet dans `marketing_expenses`), `activationLateness()`, `compareSales()`, `roiVerdict()`, `canValidateActivation()` |
 | Stock d'un article d'inventaire | `src/lib/activations/inventory.ts` + `shared.ts` | `recordMovement()` (seule écriture du stock), `consumeMaterial()`, `inventoryStatus()` |
 | Pièce de vente (montants, blocages, cycle, PDF, projection dans les ventes, commande client → BL) | `src/lib/gestion/calc.ts` + `documents-shared.ts` + `documents.ts` + `pdf.tsx` + `projection.ts` | `computeDocument()`, `amountInWords()`, `commercialIssues()`, `validateDocument()` (seule validation), `createBLFromOrder()`, `orderStatusAfterDelivery()`, `storedPdf()`, `projectDocument()` (seule écriture des ventes COMANET_OS) |
+| Bibliothèque d'actions (modèles livrés + équipe, import / export Excel, modèle tiré d'une action ou d'une activation réalisée) et « ce qui marche par marque » | `src/lib/action-generator/library-shared.ts` + `library.ts` | `validateTemplate()`, `templateToFields()` / `fieldsToTemplate()` / `sheetRowToFields()` (formulaire = Excel), `templateFromProposal()`, `templateFromActivation()`, `listLibrary()`, `loadLibrary()` (ce que lit le générateur), `saveTemplate()`, `setTemplateActive()`, `resetOrDeleteTemplate()`, `importTemplates()`, `playbookFor()`, `savePlaybook()` (seules écritures de `action_templates` et `brand_marketing_playbooks`) |
 | Lecture marketing d'une marque (statut de stock par SKU, profil / catégorie produit, objectifs et écart, contexte marketing, décisions) | `src/lib/marketing-intel/` | `buildBrandOverview()`, `buildInventory()`, `buildProductPerformance()`, `buildSalesTargets()`, `buildMarketingContext()`, `buildRecommendations()`, `stockStatusOf()`, `stockRiskOf()`, `salesProfileOf()`, `decide()` |
 | Montants, quantités, coûts exacts (jamais de float), CMUP, valeur de stock | `src/lib/gestion/money.ts` | `parseDecimal()`, `roundDiv()`, `formatScaled()`, `nextCmup()`, `valueOf()`, `fmtQty()`, `fmtMoney()` |
 | Numéro d'une pièce (séries, reprise Sage, sans trou) | `src/lib/gestion/numbering.ts` + `numbering-shared.ts` | `allocateNumber()` (seule écriture, dans la transaction de validation), `setNextNumber()`, `formatNumber()`, `patternError()`, `nextNumberError()` |
@@ -133,7 +134,7 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Décision unifiée (règles + intelligence Ads + intelligence marketing → une structure ; statut humain) | `src/lib/decisions/types.ts` + `adapters.ts` + `store.ts` + `store-shared.ts` + `build.ts` | `fromRule()`, `fromAdsIntel()`, `fromMarketingIntel()`, `buildUnifiedDecisions()`, `effectiveStatus()`, `approveDecision()` (crée l'action), `rejectDecision()` (écarte aussi la règle), `measureDecision()` (seule écriture de `marketing_decisions`) |
 | Command Center marketing (quoi pousser, budget, objectif, retards, alertes) | `src/lib/marketing-plan/command-center.ts` | `buildMarketingCommandCenter()` |
 | Dépense engagée (COMMITTED + SPENT) en SQL | `src/lib/budget.ts` | `engagedSql()` |
-| Générateur d'actions marketing (bibliothèque de 30 modèles, budget disponible par levier, estimation, score, non-répétition, opportunités, ajout au plan) | `src/lib/action-generator/catalog.ts` + `engine.ts` + `context.ts` + `server.ts` + `persist.ts` | `TEMPLATES`, `generate()` (seul moteur, pur), `axisAvailable()`, `proposedBudget()`, `splitBudget()`, `estimate()`, `scoreTemplate()`, `loadGeneratorData()`, `runGenerator()`, `brandOpportunities()`, `addProposalToPlan()` (seule écriture : plan, activation ou campagne, action, tâches, contenus, dépenses prévues) |
+| Générateur d'actions marketing (60 modèles livrés sur 7 leviers, budget disponible par levier, estimation, score, non-répétition, opportunités, ajout au plan) | `src/lib/action-generator/catalog.ts` + `engine.ts` + `context.ts` + `server.ts` + `persist.ts` | `TEMPLATES` (modèles livrés), `renderPattern()` (textes à variables), `generate()` (seul moteur, pur), `axisAvailable()`, `proposedBudget()`, `splitBudget()`, `estimate()`, `scoreTemplate()`, `loadGeneratorData()`, `runGenerator()`, `brandOpportunities()`, `addProposalToPlan()` (seule écriture : plan, activation ou campagne, action, tâches, contenus, dépenses prévues) |
 | CRM commercial : mois de suivi, visites attendues / comptées (plafonnées à la fréquence), progression, rythme, objectif client, priorité de tournée, assortiment manquant | `src/lib/crm/portfolio-shared.ts` (pur) | `monthBounds()`, `monthElapsedPct()`, `expectedVisits()`, `countedVisits()`, `visitProgress()`, `paceVerdict()`, `monthlyTarget()`, `objectiveProgress()`, `headlineObjective()`, `tourPriority()`, `suggestTour()`, `rankMissingAssortment()` |
 | CRM commercial : portefeuilles (commercial attitré, fréquence, reprise depuis les droits), vue équipe / ville, visites du mois | `src/lib/crm/portfolio.ts` + `access.ts` / `access-shared.ts` | `portfolioOf()`, `teamOverview()`, `tourSuggestions()`, `visitsOfMonth()`, `assignAccountManager()` (seule affectation en masse), `setVisitFrequency()`, `applyDefaultFrequency()`, `managerProposals()`, `crmViewer()`, `canSeeUser()`, `canSeePositions()` |
 | Visite commerciale (Démarrer / Terminer / non effectuée, hors connexion, clôture auto, correction, position du point de vente, commande déduite) | `src/lib/crm/visits.ts` + `visits-shared.ts` | `recordClientVisitAction()` (seule écriture des heures, du statut et du contrôle de `client_visits`, et de `visit_events.client_visit_id`), `planClientVisit()`, `logClientContact()`, `saveClientVisitReport()`, `autoCloseStaleClientVisits()`, `correctClientVisit()`, `validatePointOfSale()`, `visitOutcomes()`, `countsInProgress()` |
@@ -344,7 +345,7 @@ migration 0046). `/marketing/priorites` n'est plus une liste de tâches : « Opp
 moteur de décision × meilleure action finançable, pourquoi maintenant), « Actions au plan » (objectif, budget, impact,
 avancement des tâches, échéance, statut), bouton « + Générer une action » (`/marketing/priorites/generer` : marque,
 objectif, levier, budget, période, cible, produit → 3 à 5 options ; fiche `/generer/[modèle]`). Une proposition sort de la
-bibliothèque `TEMPLATES` (5 leviers : événementiel, trade, digital, influence, contenu) adaptée par `generate()` : budget
+bibliothèque d'actions (`loadLibrary()`, 7 leviers) adaptée par `generate()` : budget
 proposé dans le disponible du levier (alloué − engagé − réservé par les actions ouvertes ; sinon enveloppe ; sinon non
 défini), détail poste par poste, rétroplanning daté avec responsable par rôle, contenus, KPI, résultat attendu
 (hypothèses du modèle, INFERRED ; prix public réel ; coût par résultat Meta mesuré pour le digital ; sans prix, CA « non
@@ -356,6 +357,22 @@ l'activation (budget par poste, reflet comptable laissé au module Activations) 
 une tâche par étape (`source_key` `marketing-action:<id>:etape:<n>`) et les contenus. Annuler l'action annule ses tâches.
 La répartition mécanique d'un budget mensuel en actions par canal a été supprimée (garde-fou dans
 `definitions-uniques`). Agent : `generate_marketing_actions` (lecture seule).
+
+**Bibliothèque d'actions** (`/marketing/bibliotheque`, migration 0047). Bibliothèque effective = `TEMPLATES` (60 modèles
+livrés, 7 leviers : événementiel, trade, médical / prescripteurs, partenariats, digital, influence, contenu ; familles
+comptoir, grossistes, calendrier marocain réservé à sa période par `onlyWhen`) + `action_templates` (même clé = modèle
+livré modifié ou désactivé, rien n'est supprimé ; autres clés = modèles de l'équipe, d'un import Excel, d'une action ou
+d'une activation réalisée). Nom et concept sont des textes à variables (`{heros}`, `{produit}`, `{marque}`, `{ville}`,
+`{cible}`, `{benefice}`, `{actif}`, `{angle}`, `{saison}`, `{var|repli}`) : bénéfice et actif viennent de la fiche
+marketing du produit. Formulaire et Excel partagent `TEMPLATE_COLUMNS` et une syntaxe texte (« J-30 ; libellé ; rôle »,
+« libellé ; catégorie ; part % ; poste ») ; un modèle invalide est écarté du générateur et signalé « à corriger ».
+« Enregistrer comme modèle » sur une action générée ou une activation : budget par poste, calendrier relatif à J,
+produit / marque / ville remplacés par des variables. **Ce qui marche par marque** (`brand_marketing_playbooks`) : poids
+des leviers, favoris, écartés, note ; critère de score de 10 points (favori 10, levier jusqu'à 7, écarté = exclu),
+étiqueté INFERRED et affiché comme hypothèse de la direction, jamais comme une mesure. Seed : Auracos = grosse
+influenceuse, Gamarde = conseil comptoir (vidéo médicale à tester), CygneLab = point de vente + digital, Alphascience =
+médecins + un peu de point de vente. Droits : Marketing Modifier (créer, modifier, dupliquer, importer, enregistrer comme
+modèle), Valider (désactiver, revenir à la version livrée, supprimer, ce qui marche par marque).
 
 **Prévision saisonnière** (`docs/guide-prevision-saisonniere.md`). Le stock cible et la commande conseillée ne reposent
 plus sur la moyenne plate de 3 mois mais sur une **prévision mensuelle modélisée** : base désaisonnalisée des

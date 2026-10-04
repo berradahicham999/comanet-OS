@@ -9,11 +9,11 @@ import type { BudgetCategory } from "@/db/schema";
 import type { DataTag } from "@/lib/marketing-intel/types";
 import type { AdVerdict } from "@/lib/marketing-shared";
 
-export type AxisKey = "EVENEMENTIEL" | "TRADE" | "DIGITAL" | "INFLUENCE" | "CONTENU";
+export type AxisKey = "EVENEMENTIEL" | "TRADE" | "MEDICAL" | "PARTENARIAT" | "DIGITAL" | "INFLUENCE" | "CONTENU";
 export type ObjectiveKey = "SELL_OUT" | "SELL_IN" | "LANCEMENT" | "NOTORIETE" | "ACQUISITION" | "FIDELISATION" | "ECOULEMENT";
 export type TargetKey = "FEMMES_25_45" | "FEMMES_45_PLUS" | "JEUNES_18_25" | "HOMMES" | "MAMANS" | "SPORTIFS" | "PHARMACIENS" | "PRESCRIPTEURS";
 export type ProductKind = "DERMO" | "COMPLEMENT" | "SOLAIRE";
-export type StepRole = "MARKETING" | "TRADE" | "REGLEMENTAIRE" | "ANIMATRICE" | "DIRECTION";
+export type StepRole = "MARKETING" | "TRADE" | "MEDICAL" | "REGLEMENTAIRE" | "ANIMATRICE" | "DIRECTION";
 export type Complexity = "LOW" | "MEDIUM" | "HIGH";
 export type Level = "TRES_ELEVE" | "ELEVE" | "MOYEN" | "FAIBLE" | "NON_MESURABLE";
 
@@ -51,15 +51,20 @@ export type ReachModel = {
   usesAdsCost?: boolean;
 };
 
-export type ExtraKpi = { label: string; value: (b: number) => number | string; unit?: string };
+/** KPI propre au modèle : valeur fixe (`value`) ou calculée sur le budget (`budget × factor ÷ per`, arrondi). */
+export type ExtraKpi = { label: string; value?: number | string; per?: number; factor?: number };
 
 export type ActionTemplate = {
   key: string;
   axis: AxisKey;
   /** Famille affichée (« Padel Challenge », « Sell-out Challenge »…). */
   family: string;
-  name: (c: AdaptCtx) => string;
-  concept: (c: AdaptCtx) => string;
+  /**
+   * Nom et concept : texte à variables `{heros}`, `{produit}`, `{marque}`, `{ville}`, `{cible}`, `{benefice}`, `{actif}`,
+   * `{angle}`, `{saison}` ; `{variable|texte de repli}` quand la donnée peut manquer (rendu par `renderPattern()`).
+   */
+  name: string;
+  concept: string;
   /** Affinité objectif (0 à 1) ; absent = incompatible. */
   objectives: Partial<Record<ObjectiveKey, number>>;
   targets: TargetKey[];
@@ -90,6 +95,8 @@ export type ActionTemplate = {
   influencerBased: boolean;
   /** Point de conformité à respecter (allégations). */
   compliance?: string;
+  /** Modèle réservé à une période : événements saisonniers (clés `settings.forecast.events`) ou mois (1 à 12). */
+  onlyWhen?: { seasons?: string[]; months?: number[]; label: string };
 };
 
 /** Ce que le moteur sait pour adapter un modèle (rempli par `engine.ts`). */
@@ -101,6 +108,10 @@ export type AdaptCtx = {
   city: string | null;
   season: string | null;
   month: string;
+  /** Fiche marketing du produit (`products.benefits`, `actives`, `marketing_angle`) : premier élément, ou `null`. */
+  benefit: string | null;
+  active: string | null;
+  angle: string | null;
 };
 
 /* ------------------------------ Entrée et données ------------------------------ */
@@ -120,7 +131,7 @@ export type GeneratorInput = {
 
 export type ProductData = {
   id: string; name: string; shortName: string | null; category: string | null; priceRetail: number | null;
-  actives: string | null; marketingAngle: string | null;
+  actives: string | null; marketingAngle: string | null; benefits: string | null; claims: string | null;
   /** Profil commercial (`salesProfileOf`) ; `null` = non lu. */
   profile: string | null; growthPct: number | null; revenue90: number | null; contributionPct: number | null;
   /** Risque de stock (`stockRiskOf`) ; `null` = non lu. */
@@ -160,7 +171,14 @@ export type GeneratorData = {
   influencers: { name: string; followers: number | null; usualRate: number | null; collabs: number; lastReach: number | null }[];
   /** Équipe par rôle (proposition de responsable). */
   team: Partial<Record<StepRole, { id: string; name: string }>>;
+  /** Médecins de la base médicale liés à la marque, par potentiel (ciblage des actions prescripteurs). */
+  prescribers: { a: number; b: number; total: number } | null;
+  /** Ce qui marche pour la marque selon la direction (Bibliothèque d'actions → Ce qui marche par marque). */
+  playbook: BrandPlaybook | null;
 };
+
+/** Conviction de la direction sur une marque : poids par levier (0 à 1), modèles favoris, note. Hypothèse, pas une mesure. */
+export type BrandPlaybook = { levers: Partial<Record<AxisKey, number>>; favorites: string[]; avoid: string[]; note: string | null };
 
 /* ------------------------------ Sortie ------------------------------ */
 

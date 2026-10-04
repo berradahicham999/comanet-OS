@@ -21,6 +21,8 @@ import { salesImpact } from "@/lib/activations/roi";
 import { axisOptions } from "@/lib/marketing-plan/plan";
 import { roiVerdict, VERDICT_LABELS, VERDICT_TONES } from "@/lib/activations/shared";
 import { consumeForActivation, returnFromActivation } from "../../materiel/actions";
+import { saveFromActivationAction } from "../../bibliotheque/actions";
+import { canDo } from "@/lib/access";
 import {
   saveActivation, duplicateActivation, deleteActivationHard, changeActivationStatus, addActivationComment, saveResults,
   saveBudgetLine, deleteBudgetLine, addChecklistItem, toggleChecklistItem, deleteChecklistItem,
@@ -73,6 +75,7 @@ export default async function ActivationPage(props: { params: Promise<{ id: stri
   const visibleClients = options.clients.filter((c) => !scope.clientIds || scope.clientIds.includes(c.id) || a.clientIds.includes(c.id));
   const t = budget.totals;
   const done = checklist.filter((c) => c.done).length;
+  const canTemplate = await canDo("marketing", "edit");
   const fileHref = (assetId: string) => `/marketing/activations/fichier/${assetId}`;
   const linkedProducts = options.products.filter((p) => a.productIds.includes(p.id));
   const linkedClients = options.clients.filter((c) => a.clientIds.includes(c.id));
@@ -86,6 +89,7 @@ export default async function ActivationPage(props: { params: Promise<{ id: stri
           <Badge tone={safeTone(st?.tone)}>{st?.label ?? a.status}</Badge>
           {a.late.map((l) => <Badge key={l} tone="red">{LATENESS_LABELS[l]}</Badge>)}
           {st?.awaitingValidation && isValidator && <Link href={`/marketing/activations/validation?id=${a.id}`} className="btn-primary btn-sm">Ouvrir dans la file</Link>}
+          {canTemplate && <form action={saveFromActivationAction}><input type="hidden" name="activationId" value={a.id} /><button className="btn-secondary btn-sm" title="Ajoute cette activation (budget par poste, checklist datée) à la bibliothèque d'actions">Enregistrer comme modèle</button></form>}
         </>} />
       {erreur && <div className="mb-3 rounded-xl border border-red/30 bg-red-soft text-red px-3 py-2 text-[13px]">{erreur}</div>}
 

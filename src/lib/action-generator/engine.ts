@@ -55,6 +55,36 @@ export function productKind(p: { name: string; category: string | null } | null)
   return "DERMO";
 }
 
+/* ------------------------------ Textes à variables ------------------------------ */
+
+/** Rend `{variable}` et `{variable|texte de repli}` ; une variable vide prend le repli (ou disparaît). */
+export function renderPattern(pattern: string, vars: Record<string, string | null | undefined>): string {
+  return pattern.replace(/\{([a-z]+)(?:\|([^}]*))?\}/gi, (_, k: string, fallback: string | undefined) => {
+    const v = vars[k.toLowerCase()];
+    return v && v.trim() ? v.trim() : fallback ?? "";
+  }).replace(/\s{2,}/g, " ").replace(/\(\s*\)/g, "").trim();
+}
+
+/** Premier élément d'un champ de fiche produit (bénéfices, actifs, angle), en minuscule initiale, ≤ 90 caractères. */
+export function firstItem(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const first = text.split(/\n|;|•|\. |\|/).map((x) => x.replace(/^[-–*\s]+/, "").trim()).find((x) => x.length >= 3);
+  if (!first) return null;
+  const cut = first.length > 90 ? first.slice(0, 90).replace(/\s+\S*$/, "") : first.replace(/\.$/, "");
+  return /^[A-ZÀ-Ý][a-zà-ÿ]/.test(cut) ? cut[0].toLowerCase() + cut.slice(1) : cut;
+}
+
+export function adaptVars(c: AdaptCtx): Record<string, string | null> {
+  return { heros: c.hero, produit: c.product, marque: c.brand, ville: c.city, cible: c.target.toLowerCase(), benefice: c.benefit, actif: c.active, angle: c.angle, saison: c.season };
+}
+
+/** Valeur d'un KPI propre au modèle : fixe, ou budget × facteur ÷ coût unitaire. */
+export function extraKpiValue(k: { value?: number | string; per?: number; factor?: number }, budget: number): string {
+  if (k.value !== undefined) return String(k.value);
+  if (k.per && k.per > 0) return Math.round((budget * (k.factor ?? 1)) / k.per).toLocaleString("fr-FR");
+  return "—";
+}
+
 /* ------------------------------ Budget ------------------------------ */
 
 /**
@@ -151,15 +181,25 @@ export function scoreTemplate(t: ActionTemplate, i: { input: GeneratorInput; dat
   const { input, data } = i;
   const items: ScoreItem[] = [];
   const fit = t.objectives[input.objective] ?? 0;
-  items.push({ key: "objectif", label: "Cohérence avec l'objectif", points: Math.round(20 * fit), max: 20, why: `affinité ${Math.round(fit * 100)} % avec « ${OBJECTIVES[input.objective]} »`, tag: "INFERRED" });
+  items.push({ key: "objectif", label: "Cohérence avec l'objectif", points: Math.round(15 * fit), max: 15, why: `affinité ${Math.round(fit * 100)} % avec « ${OBJECTIVES[input.objective]} »`, tag: "INFERRED" });
 
   const budgetFit = Math.min(1, i.budget / t.budget.typical);
-  items.push({ key: "budget", label: "Budget", points: Math.round(15 * budgetFit), max: 15, why: budgetFit >= 1 ? `budget idéal du modèle (${mad(t.budget.typical)}) finançable` : `budget ramené à ${mad(i.budget)} (idéal ${mad(t.budget.typical)})`, tag: "CALCULATED" });
+  items.push({ key: "budget", label: "Budget", points: Math.round(10 * budgetFit), max: 10, why: budgetFit >= 1 ? `budget idéal du modèle (${mad(t.budget.typical)}) finançable` : `budget ramené à ${mad(i.budget)} (idéal ${mad(t.budget.typical)})`, tag: "CALCULATED" });
 
   const p = data.product;
   const prof = p?.profile ?? null;
   const commercial = prof ? PROFILE_POINTS[prof] ?? 8 : 7;
   items.push({ key: "commercial", label: "Potentiel commercial", points: commercial, max: 15, why: prof ? `profil ${prof.toLowerCase().replace("_", " ")}${p?.growthPct !== null && p?.growthPct !== undefined ? `, sell-in ${p.growthPct >= 0 ? "+" : ""}${Math.round(p.growthPct)} % sur 90 jours` : ""}` : "performance produit non lue : neutre", tag: prof ? "CALCULATED" : "MISSING" });
+
+  const pb = data.playbook;
+  const favorite = !!pb && pb.favorites.includes(t.key);
+  const avoided = !!pb && pb.avoid.includes(t.key);
+  const lever = pb?.levers[t.axis];
+  // Favori 10 ; levier pondéré jusqu'à 7 (un favori passe toujours devant les autres modèles de son levier) ; levier non retenu 3.
+  const pbPoints = !pb ? 5 : avoided ? 0 : favorite ? 10 : lever !== undefined ? Math.round(7 * lever) : 3;
+  items.push({ key: "marque", label: "Ce qui marche pour la marque", points: pbPoints, max: 10,
+    why: !pb ? "aucune conviction saisie pour la marque (Bibliothèque d'actions → Ce qui marche par marque) : neutre" : avoided ? "modèle écarté pour cette marque par la direction" : favorite ? `modèle favori de la marque${pb.note ? ` — ${pb.note}` : ""}` : lever !== undefined ? `levier ${AXES[t.axis].label.toLowerCase()} pondéré à ${Math.round(lever * 100)} % pour la marque${pb.note ? ` — ${pb.note}` : ""}` : `levier non retenu pour la marque${pb.note ? ` — ${pb.note}` : ""}`,
+    tag: pb ? "INFERRED" : "MISSING" });
 
   const verdict = data.verdicts[AXES[t.axis].mainCategory] ?? null;
   const hist = verdict === "SCALE" ? 10 : verdict === "MAINTAIN" ? 7 : verdict === "OPTIMIZE" ? 4 : verdict === "STOP" ? 1 : 5;
@@ -217,7 +257,14 @@ export function generate(input: GeneratorInput, data: GeneratorData, templates: 
     if (input.axis && t.axis !== input.axis) continue;
     const fit = t.objectives[input.objective];
     if (!fit) continue;
-    const name = t.name({ hero, brand: data.brand.name, product: product?.name ?? null, target: TARGETS[input.target], city: data.topCity, season: null, month: input.month });
+    const sheet = { benefit: firstItem(product?.benefits), active: firstItem(product?.actives), angle: firstItem(product?.marketingAngle) };
+    const name = renderPattern(t.name, adaptVars({ hero, brand: data.brand.name, product: product?.name ?? null, target: TARGETS[input.target], city: data.topCity, season: null, month: input.month, ...sheet }));
+    if (t.onlyWhen) {
+      const m = Number(input.month.slice(5, 7));
+      const ok = (t.onlyWhen.seasons ?? []).some((k) => data.seasonEvents.some((e) => e.key === k)) || (t.onlyWhen.months ?? []).includes(m);
+      if (!ok) { excluded.push({ templateKey: t.key, name, reason: `réservé à : ${t.onlyWhen.label}` }); continue; }
+    }
+    if (data.playbook?.avoid.includes(t.key)) { excluded.push({ templateKey: t.key, name, reason: "écarté pour cette marque (ce qui marche par marque)" }); continue; }
     if (t.productKinds !== "ANY" && kind && !t.productKinds.includes(kind)) { excluded.push({ templateKey: t.key, name, reason: kind === "COMPLEMENT" ? "non adapté à un complément alimentaire" : "non adapté à ce type de produit" }); continue; }
     if (openKeys.has(t.key)) { const h = data.history.find((x) => x.open && x.templateKey === t.key)!; excluded.push({ templateKey: t.key, name, reason: `déjà au plan : « ${h.label} »` }); continue; }
     // Sans levier imposé ni budget saisi, chaque modèle est borné par le disponible de SON levier quand une allocation existe.
@@ -234,7 +281,8 @@ export function generate(input: GeneratorInput, data: GeneratorData, templates: 
     const { score, items } = scoreTemplate(t, { input, data, budget, j, kind, recentSame, recentType });
     const est = estimate(t, budget, product, data.adsCost);
     const seasonLabel = data.seasonEvents.find((e) => (t.seasons[e.key] ?? 0) > 0)?.label ?? null;
-    const ctx: AdaptCtx = { hero, brand: data.brand.name, product: product?.name ?? null, target: TARGETS[input.target], city: t.cityBased ? data.topCity : null, season: seasonLabel, month: input.month };
+    const ctx: AdaptCtx = { hero, brand: data.brand.name, product: product?.name ?? null, target: TARGETS[input.target], city: t.cityBased ? data.topCity : null, season: seasonLabel, month: input.month, ...sheet };
+    const vars = adaptVars(ctx);
     const end = isoAdd(j, Math.max(0, t.durationDays - 1));
     const steps: StepOut[] = t.steps.map((s) => {
       const who = data.team[s.role] ?? null;
@@ -254,7 +302,7 @@ export function generate(input: GeneratorInput, data: GeneratorData, templates: 
       { label: "CA sell-out (TTC)", target: est.revenue === null ? "non mesurable" : mad(est.revenue), tag: (est.revenue === null ? "MISSING" : "INFERRED") as DataTag },
       { label: "Coût par essai", target: est.trials > 0 ? mad(budget / est.trials) : "—", tag: "CALCULATED" as DataTag },
       { label: "ROI (CA ÷ budget)", target: est.roi === null ? "non mesurable" : `${est.roi.toFixed(1)}×`, tag: (est.roi === null ? "MISSING" : "INFERRED") as DataTag },
-      ...t.extraKpis.map((k) => ({ label: k.label, target: String(k.value(budget)), tag: "INFERRED" as DataTag })),
+      ...t.extraKpis.map((k) => ({ label: k.label, target: extraKpiValue(k, budget), tag: (k.value === "mesuré" ? "CONFIRMED" : "INFERRED") as DataTag })),
     ];
     const ab = data.budgets[t.axis];
     const whyNow: string[] = [];
@@ -263,6 +311,8 @@ export function generate(input: GeneratorInput, data: GeneratorData, templates: 
     if (product?.stockRisk === "SURSTOCK") whyNow.push(`surstock de ${product.daysOfStock ?? "—"} jours à écouler`);
     if (ab.available !== null) whyNow.push(`${mad(ab.available)} disponibles en ${AXES[t.axis].label.toLowerCase()}${ab.source === "MARQUE" ? " (enveloppe de la marque)" : ""}`);
     if (seasonLabel) whyNow.push(`période favorable : ${seasonLabel}`);
+    if (data.playbook && (data.playbook.favorites.includes(t.key) || (data.playbook.levers[t.axis] ?? 0) >= 0.7)) whyNow.push(`ce qui marche pour ${data.brand.name} : ${AXES[t.axis].label.toLowerCase()}${data.playbook.note ? ` (${data.playbook.note})` : ""}`);
+    if (t.axis === "MEDICAL" && data.prescribers && data.prescribers.total > 0) whyNow.push(`${data.prescribers.a + data.prescribers.b} médecins de potentiel A ou B liés à la marque dans la base médicale`);
     if (!recentSame && !recentType) whyNow.push("aucune action de ce type récente pour la marque");
     const facts = [
       ...(product ? [
@@ -271,13 +321,14 @@ export function generate(input: GeneratorInput, data: GeneratorData, templates: 
         { label: "Croissance 90 jours", value: product.growthPct === null ? "pas encore comparable" : `${product.growthPct >= 0 ? "+" : ""}${Math.round(product.growthPct)} %`, tag: (product.growthPct === null ? "MISSING" : "CALCULATED") as DataTag },
         { label: "Couverture de stock", value: product.daysOfStock === null ? "non mesurable" : `${product.daysOfStock} jours`, tag: (product.daysOfStock === null ? "MISSING" : "CALCULATED") as DataTag },
         { label: "Prix public TTC", value: product.priceRetail === null ? "non renseigné" : mad(product.priceRetail), tag: (product.priceRetail === null ? "MISSING" : "CONFIRMED") as DataTag },
+        { label: "Bénéfice (fiche produit)", value: sheet.benefit ?? "fiche marketing à compléter", tag: (sheet.benefit ? "CONFIRMED" : "MISSING") as DataTag },
       ] : []),
       { label: `Budget ${AXES[t.axis].label.toLowerCase()} disponible`, value: ab.available === null ? "non défini" : mad(ab.available), tag: (ab.available === null ? "MISSING" : "CALCULATED") as DataTag },
       ...(est.costSource === "META" ? [{ label: "Coût par résultat Meta (90 j)", value: `${est.costPerContact.toFixed(1)} MAD`, tag: "CALCULATED" as DataTag }] : []),
     ];
     candidates.push({
       key: `${t.key}:${input.brandId}:${input.productId ?? "marque"}:${input.month}`,
-      templateKey: t.key, axis: t.axis, family: t.family, name: t.name(ctx), objectiveText: objectiveText(input, est, hero), concept: t.concept(ctx), target: TARGETS[input.target],
+      templateKey: t.key, axis: t.axis, family: t.family, name: renderPattern(t.name, vars), objectiveText: objectiveText(input, est, hero), concept: renderPattern(t.concept, vars), target: TARGETS[input.target],
       products: product ? [product.name] : [], channels: t.channels, budget, lines: splitBudget(budget, t.lines), eventDate: j, endDate: end, steps,
       contents: t.contents.map((c) => ({ format: c.format, count: c.count, title: c.title, date: isoAdd(j, c.offset) })),
       kpis, estimate: est, impact: impactLevel(est), roiLevel: roiLevel(est), complexity: t.complexity, score, scoreItems: items,
@@ -286,7 +337,8 @@ export function generate(input: GeneratorInput, data: GeneratorData, templates: 
       execution: t.execution, compliance: t.compliance ?? null, data: facts,
     });
   }
-  candidates.sort((a, b) => b.score - a.score || (b.estimate.revenue ?? 0) - (a.estimate.revenue ?? 0) || a.budget - b.budget);
+  const fav = (c: ActionProposal) => (data.playbook?.favorites.includes(c.templateKey) ? 1 : 0);
+  candidates.sort((a, b) => b.score - a.score || fav(b) - fav(a) || (b.estimate.revenue ?? 0) - (a.estimate.revenue ?? 0) || a.budget - b.budget);
   const max = Math.max(1, opts.maxOptions ?? 5);
   // Diversité : sans levier imposé, au plus 2 options par levier dans le premier choix.
   let options: ActionProposal[];
