@@ -83,6 +83,7 @@ export async function savePoliciesAction(fd: FormData) {
       amountWords: { major: str(fd, "wordsMajor") ?? g.amountWords.major, minor: str(fd, "wordsMinor") ?? g.amountWords.minor },
       shareLinkDays: intOrNull(fd, "shareLinkDays", "Durée des liens de partage", 1, 365) ?? g.shareLinkDays,
       uninvoicedAlertDays: intOrNull(fd, "uninvoicedAlertDays", "Alerte BL non facturés", 1, 365) ?? g.uninvoicedAlertDays,
+      orderPrepAlertDays: intOrNull(fd, "orderPrepAlertDays", "Alerte commandes à préparer", 0, 90) ?? g.orderPrepAlertDays,
       purchases: {
         lateOrderGraceDays: intOrNull(fd, "lateOrderGraceDays", "Délai de grâce des commandes", 0, 180) ?? g.purchases.lateOrderGraceDays,
         uninvoicedReceptionDays: intOrNull(fd, "uninvoicedReceptionDays", "Alerte réceptions sans facture", 1, 365) ?? g.purchases.uninvoicedReceptionDays,

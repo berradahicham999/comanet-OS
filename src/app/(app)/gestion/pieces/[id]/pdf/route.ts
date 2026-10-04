@@ -1,3 +1,4 @@
+import { moduleOfType, type DocType } from "@/lib/gestion/documents-shared";
 import { requireAccessContext, can, clientInScope } from "@/lib/access";
 import { getDocument } from "@/lib/gestion/documents";
 import { storedPdf } from "@/lib/gestion/pdf";
@@ -12,7 +13,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   if (!/^[0-9a-f-]{36}$/i.test(id)) return new Response("Introuvable", { status: 404 });
   const doc = await getDocument(id);
   if (!doc) return new Response("Introuvable", { status: 404 });
-  const permModule = doc.type === "BL" ? "livraisons" : "facturation";
+  const permModule = moduleOfType(doc.type as DocType);
   if (!can(a.perms, permModule, "view") || !(await clientInScope(doc.clientId))) return new Response("Accès refusé", { status: 403 });
   const pdf = await storedPdf(id, a.user.id);
   if (!pdf) return new Response("Introuvable", { status: 404 });

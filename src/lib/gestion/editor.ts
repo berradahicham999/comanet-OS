@@ -8,7 +8,8 @@ import { stockState } from "./ledger";
 
 /**
  * Données de la saisie d'une pièce (BL, facture directe) : clients actifs avec leurs remises,
- * articles actifs avec PPH, TVA et stock disponible, modes de règlement, commerciaux, sites.
+ * articles actifs avec PPH (prix public TTC, à défaut le PPH de la fiche : même prix par convention COMANET),
+ * TVA et stock disponible, modes de règlement, commerciaux, sites.
  * Aucun calcul ici : le formulaire utilise `calc.ts`, le serveur recalcule à l'enregistrement.
  */
 export type EditorClient = { id: string; name: string; legalName: string | null; city: string | null; blocked: boolean; defaultDiscountPct: string | null; paymentModeKey: string | null; brandDiscounts: Record<string, string>;
@@ -24,7 +25,7 @@ export async function editorData(opts: { clientIds?: string[] | null } = {}) {
       select c.id, c.name, c.legal_name, c.city, c.blocked, c.default_discount_pct::text, c.payment_mode_key from clients c where c.active ${scope} order by c.name`),
     db.execute<{ client_id: string; brand_id: string; pct: string }>(sql`select client_id, brand_id, discount_pct::text as pct from client_brand_discounts`),
     db.execute<{ id: string; name: string; ref: string | null; ean: string | null; kind: string; brand_id: string | null; brand: string | null; price_retail: string | null; rate: string | null; track_lots: boolean }>(sql`
-      select p.id, p.name, coalesce(p.code, p.sku) as ref, p.ean, p.kind, p.brand_id, b.name as brand, p.price_retail::text, tr.rate::text as rate, p.track_lots
+      select p.id, p.name, coalesce(p.code, p.sku) as ref, p.ean, p.kind, p.brand_id, b.name as brand, coalesce(p.price_retail, p.price_wholesale)::text as price_retail, tr.rate::text as rate, p.track_lots
       from products p left join brands b on b.id = p.brand_id left join tax_rates tr on tr.key = p.tax_rate_key where p.active order by b.name nulls last, p.name`),
     listPaymentModes(),
     db.execute<{ id: string; name: string }>(sql`select id, name from users where active order by name`),

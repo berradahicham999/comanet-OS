@@ -2,7 +2,7 @@ import Link from "next/link";
 import { can, clientFilter } from "@/lib/access";
 import { getSettings } from "@/lib/settings";
 import { listDocuments } from "@/lib/gestion/documents";
-import { DOC_TYPES, DOC_TYPE_LABELS, STATUS_META, statusLabel, type DocType } from "@/lib/gestion/documents-shared";
+import { DOC_TYPES, DOC_TYPE_LABELS, STATUS_META, moduleOfType, statusLabel, statusesOf, type DocType } from "@/lib/gestion/documents-shared";
 import { fmtDate } from "@/lib/format";
 import { fmtMoney } from "@/lib/gestion/money";
 import { PageHeader, Badge, Empty, Tabs } from "@/components/ui";
@@ -21,10 +21,11 @@ const MODE_HINT = {
 export default async function PiecesPage(props: { searchParams: Promise<{ type?: string; error?: string }> }) {
   const access = await requireGestionView();
   const sp = await props.searchParams;
-  const visibleTypes = DOC_TYPES.filter((t) => can(access.perms, t === "BL" ? "livraisons" : "facturation", "view"));
-  const type = (visibleTypes.includes(sp.type as DocType) ? sp.type : visibleTypes[0]) as DocType | undefined;
+  const visibleTypes = DOC_TYPES.filter((t) => can(access.perms, moduleOfType(t), "view"));
+  // Sans type demandé : les BL (le quotidien de l'administration), sinon le premier type visible.
+  const type = (visibleTypes.includes(sp.type as DocType) ? sp.type : visibleTypes.includes("BL") ? "BL" : visibleTypes[0]) as DocType | undefined;
   if (!type) return <Empty title="Accès restreint" hint="Les pièces de vente demandent le droit « Voir » sur Livraisons ou Facturation." />;
-  const permModule = type === "BL" ? "livraisons" : "facturation";
+  const permModule = moduleOfType(type);
   const [docs, settings] = await Promise.all([listDocuments({ type, clientIds: await clientFilter() }), getSettings()]);
   const canCreate = can(access.perms, permModule, "create");
   const mode = settings.gestion.cutover.mode;
@@ -37,7 +38,7 @@ export default async function PiecesPage(props: { searchParams: Promise<{ type?:
         subtitle={MODE_HINT[mode]}
         actions={<span className="flex gap-2 flex-wrap">
           <Link href={`/gestion/exports?types=${type}`} className="btn-secondary btn-sm">Sélectionner et exporter</Link>
-          {canCreate && <Link href={`/gestion/pieces/nouveau?type=${type}`} className="btn-primary btn-sm">+ {type === "BL" ? "Bon de livraison" : type === "AVOIR" ? "Avoir financier" : "Facture de services"}</Link>}
+          {canCreate && <Link href={`/gestion/pieces/nouveau?type=${type}`} className="btn-primary btn-sm">+ {type === "COMMANDE" ? "Commande client" : type === "BL" ? "Bon de livraison" : type === "AVOIR" ? "Avoir financier" : "Facture de services"}</Link>}
         </span>}
       >
         <GestionTabs current="/gestion/pieces" />
@@ -48,13 +49,15 @@ export default async function PiecesPage(props: { searchParams: Promise<{ type?:
 
       {docs.length === 0 ? (
         <Empty
-          title={`Aucun ${DOC_TYPE_LABELS[type].one.toLowerCase()}`}
-          hint={type === "BL"
+          title={`Aucun${type === "COMMANDE" ? "e" : ""} ${DOC_TYPE_LABELS[type].one.toLowerCase()}`}
+          hint={type === "COMMANDE"
+            ? "Le commercial saisit la commande du client sur son téléphone (produits habituels en tête, prix et remises pré-remplis, stock visible), la confirme (numéro BC, PDF à envoyer au client), puis « Préparer le BL » reprend ses lignes dans un bon de livraison modifiable. Ni stock ni vente avant le BL."
+            : type === "BL"
             ? "Un bon de livraison sort le stock du dépôt principal (lot au plus proche de la péremption). Il se facture ensuite, seul ou regroupé avec d'autres BL du même client."
             : type === "FACTURE"
               ? "Une facture d'articles se crée depuis les BL (onglet « Facturer des BL ») ; une facture directe ne porte que des services ou des frais."
               : "Un avoir se crée depuis une facture validée (bouton « Faire un avoir » sur la facture) : retour de marchandise, erreur de prix. Une remise hors facture (objectifs atteints) se fait en « avoir financier », ventilé par marque."}
-          action={canCreate && type === "BL" ? <Link href="/gestion/pieces/nouveau?type=BL" className="btn-primary btn-sm">Créer le premier BL</Link> : undefined}
+          action={canCreate && (type === "BL" || type === "COMMANDE") ? <Link href={`/gestion/pieces/nouveau?type=${type}`} className="btn-primary btn-sm">{type === "BL" ? "Créer le premier BL" : "Saisir la première commande"}</Link> : undefined}
         />
       ) : (
         <DataTable
@@ -82,7 +85,7 @@ export default async function PiecesPage(props: { searchParams: Promise<{ type?:
             filters: { status: d.status, nature: d.isSimulation ? "SIM" : "REEL", site: d.site },
           }))}
           filters={[
-            { key: "status", label: "Statut", options: Object.entries(STATUS_META).filter(([k]) => type === "BL" || ["BROUILLON", "VALIDE"].includes(k)).map(([value, m]) => ({ value, label: m.label })) },
+            { key: "status", label: "Statut", options: statusesOf(type).map((k) => ({ value: k, label: statusLabel(type, k) })) },
             { key: "nature", label: "Nature", options: [{ value: "REEL", label: "Pièces réelles" }, { value: "SIM", label: "Simulations" }] },
           ]}
           initialSort={{ key: "date", dir: "desc" }}

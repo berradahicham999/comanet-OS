@@ -212,6 +212,8 @@ export type GestionSettings = {
   shareLinkDays: number;
   /** Alerte : BL validés et non facturés depuis plus de N jours. */
   uninvoicedAlertDays: number;
+  /** Alerte : commandes clients confirmées dont une partie reste à livrer depuis plus de N jours. */
+  orderPrepAlertDays: number;
   /** Achats (lot 3) : alertes et tolérance de rapprochement facture / réception. */
   purchases: {
     /** Commande en retard : livraison attendue dépassée de plus de N jours et pas entièrement reçue. */
@@ -265,6 +267,7 @@ export const DEFAULT_GESTION: GestionSettings = {
   amountWords: { major: "MAD", minor: "cents" },
   shareLinkDays: 30,
   uninvoicedAlertDays: 15,
+  orderPrepAlertDays: 2,
   purchases: { lateOrderGraceDays: 7, uninvoicedReceptionDays: 30, priceGapTolerancePct: 0 },
   inventory: { staleCountDays: 7, maxDaysWithoutCount: 365, recurringCount: 2, lateEntryHours: 48, analysisWindowDays: 180 },
   receivables: { reminderDays: [7, 30, 60], reminderCooldownDays: 10, depositLeadDays: 5 },

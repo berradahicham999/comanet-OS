@@ -11,8 +11,8 @@ import { getSettings, type GestionSettings } from "@/lib/settings";
 import { amountInWords, computeDocument, netUnitPriceHt } from "./calc";
 import { billingIdentity, billingReadiness } from "./clients-shared";
 import {
-  DOC_TYPE_LABELS, allowedActions, blStatusAfterInvoicing, commercialIssues, defaultDiscount, dueDateOf, emitsReal, remainingQty, shouldProject,
-  type CommercialIssue, type DocStatus, type DocType,
+  DOC_TYPE_LABELS, allowedActions, blStatusAfterInvoicing, commercialIssues, defaultDiscount, dueDateOf, emitsReal, moduleOfType, orderStatusAfterDelivery,
+  remainingQty, shouldProject, type CommercialIssue, type DocStatus, type DocType,
 } from "./documents-shared";
 import { recordStockMovements, type LedgerInput } from "./ledger";
 import { allocateFefo } from "./ledger-shared";
@@ -25,6 +25,9 @@ import { allocateCreditIn } from "./payments";
  * Pièces de vente — SEUL module qui crée, valide, livre, annule ou facture une pièce (garde-fou
  * dans `tests/definitions-uniques.test.ts`). Une pièce validée est figée par la base (triggers de
  * la migration 0026) : ce module ne fait plus évoluer que son statut et ses compteurs.
+ * Commande client (COMMANDE) : confirmée avec un numéro BC, sans stock ni vente ; `createBLFromOrder()`
+ * en prépare le BL (lignes reprises, tout reste modifiable) et la validation du BL fait avancer
+ * la quantité livrée de la commande.
  */
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -80,7 +83,7 @@ export type DocumentView = Doc & {
   client: { id: string; name: string; legalName: string | null; city: string | null; blocked: boolean; accountCode: string | null };
   origin: { id: string; number: string | null; type: string } | null;
   children: { id: string; number: string | null; type: string; status: string; ttc: string }[];
-  sources: { id: string; number: string | null; date: string }[];
+  sources: { id: string; number: string | null; date: string; type: string }[];
 };
 
 export async function getDocument(id: string): Promise<DocumentView | null> {
@@ -99,8 +102,8 @@ export async function getDocument(id: string): Promise<DocumentView | null> {
       where d.origin_document_id = ${id}::uuid
          or l.source_line_id in (select id from sales_document_lines where document_id = ${id}::uuid)
       order by d.number nulls last`),
-    db.execute<{ id: string; number: string | null; date: string }>(sql`
-      select distinct d.id, d.number, d.date::text as date from sales_document_lines l
+    db.execute<{ id: string; number: string | null; date: string; type: string }>(sql`
+      select distinct d.id, d.number, d.date::text as date, d.type from sales_document_lines l
       join sales_document_lines s on s.id = l.source_line_id join sales_documents d on d.id = s.document_id
       where l.document_id = ${id}::uuid order by d.number`),
   ]);
@@ -114,7 +117,7 @@ export async function getDocument(id: string): Promise<DocumentView | null> {
         designation: r.designation, unit: r.unit, quantity: r.quantity, freeQuantity: r.free_quantity, unitPriceHt: r.unit_price_ht,
         publicPriceTtc: r.public_price_ttc, discountPct: r.discount_pct, grossHt: r.gross_ht, netHt: r.net_ht, taxRate: r.tax_rate,
         vatAmount: r.vat_amount, ttc: r.ttc, sourceLineId: r.source_line_id, sourceNumber: r.source_number, sourceDate: r.source_date,
-        invoicedQty: r.invoiced_qty, creditedQty: r.credited_qty, returnWarehouseKey: r.return_warehouse_key, lotAllocations: r.lot_allocations,
+        invoicedQty: r.invoiced_qty, creditedQty: r.credited_qty, deliveredQty: r.delivered_qty, returnWarehouseKey: r.return_warehouse_key, lotAllocations: r.lot_allocations,
         brandId: r.brand_id, productKind: r.product_kind, trackLots: !!r.track_lots,
       } as Line & { brandId: string | null; productKind: string | null; trackLots: boolean };
     }),
@@ -162,7 +165,7 @@ type ProductInfo = { id: string; name: string; code: string | null; sku: string 
 async function productInfos(t: Tx | typeof db, ids: string[]): Promise<Map<string, ProductInfo>> {
   if (!ids.length) return new Map();
   const r = await t.execute<ProductInfo>(sql`
-    select p.id, p.name, p.code, p.sku, p.unit, p.kind, p.brand_id, p.price_retail::text as price_retail, tr.rate::text as rate
+    select p.id, p.name, p.code, p.sku, p.unit, p.kind, p.brand_id, coalesce(p.price_retail, p.price_wholesale)::text as price_retail, tr.rate::text as rate
     from products p left join tax_rates tr on tr.key = p.tax_rate_key where p.id = any(${pgArray(ids)})`);
   return new Map(r.rows.map((p) => [p.id, p]));
 }
@@ -192,7 +195,7 @@ export async function saveDraft(input: DraftInput, actor: AuditActor): Promise<s
     const lines = input.lines.map((l, i) => {
       const p = l.productId ? products.get(l.productId) : null;
       if (l.productId && !p) throw new DocumentError(`Ligne ${i + 1} : article introuvable.`);
-      if (input.type === "BL" && (!p || p.kind !== "PRODUIT")) throw new DocumentError(`Ligne ${i + 1} : un bon de livraison ne porte que des articles stockés.`);
+      if ((input.type === "BL" || input.type === "COMMANDE") && (!p || p.kind !== "PRODUIT")) throw new DocumentError(`Ligne ${i + 1} : ${input.type === "BL" ? "un bon de livraison" : "une commande client"} ne porte que des articles stockés.`);
       if (input.type === "FACTURE" && p && p.kind === "PRODUIT" && !l.sourceLineId) throw new DocumentError(`Ligne ${i + 1} : un article stocké se facture depuis son bon de livraison (sortie de stock).`);
       const designation = p?.name ?? l.designation?.trim();
       if (!designation) throw new DocumentError(`Ligne ${i + 1} : désignation manquante.`);
@@ -241,12 +244,12 @@ export async function saveDraft(input: DraftInput, actor: AuditActor): Promise<s
         sourceNumber: l.sourceLineId ? src.get(l.sourceLineId)?.number ?? null : null, sourceDate: l.sourceLineId ? src.get(l.sourceLineId)?.date ?? null : null,
       })));
     }
-    await audit({ actor, action: input.id ? "UPDATE" : "CREATE", module: moduleOf(input.type), entity: "sales_document", entityId: id, label: `${DOC_TYPE_LABELS[input.type].one} (brouillon)`, after: { lines: lines.length, netHt: calc.netHt, ttc: calc.ttc } }, tx);
+    await audit({ actor, action: input.id ? "UPDATE" : "CREATE", module: moduleOfType(input.type), entity: "sales_document", entityId: id, label: `${DOC_TYPE_LABELS[input.type].one} (brouillon)`, after: { lines: lines.length, netHt: calc.netHt, ttc: calc.ttc } }, tx);
     return id!;
   });
 }
 
-const moduleOf = (t: DocType) => (t === "BL" ? "livraisons" : "facturation") as "livraisons" | "facturation";
+const moduleOf = moduleOfType;
 
 export async function deleteDraft(id: string, actor: AuditActor): Promise<void> {
   await db.transaction(async (tx) => {
@@ -305,6 +308,37 @@ export async function createCreditNote(invoiceId: string, actor: AuditActor): Pr
       discountPct: l.discountPct, taxRate: l.taxRate, sourceLineId: l.id, returnWarehouseKey: l.productId ? "PRINCIPAL" : null,
     })),
   }, actor);
+}
+
+/**
+ * Brouillon de BL préparé depuis une commande confirmée : en-tête repris (client, raison sociale,
+ * adresse, site, commercial, règlement, remise globale, note) et lignes au reste à livrer, prix et
+ * remises de la commande. Tout reste modifiable dans l'éditeur avant validation : c'est le BL qui
+ * engage, la commande n'est qu'une intention. Un seul BL brouillon à la fois par commande.
+ */
+export async function createBLFromOrder(orderId: string, actor: AuditActor): Promise<string> {
+  const order = await getDocument(orderId);
+  if (!order || order.type !== "COMMANDE") throw new DocumentError("Commande introuvable.");
+  if (!allowedActions("COMMANDE", order.status as DocStatus).prepareBL) throw new DocumentError("Seule une commande confirmée (et pas encore entièrement livrée) se transforme en bon de livraison.");
+  const lines = order.lines.filter((l) => (parseDecimal(l.deliveredQty, SCALE.qty) ?? 0n) < (parseDecimal(l.quantity, SCALE.qty) ?? 0n));
+  if (!lines.length) throw new DocumentError("Cette commande est entièrement livrée.");
+  const open = (await db.execute<{ id: string }>(sql`select id from sales_documents where origin_document_id = ${orderId}::uuid and type = 'BL' and status = 'BROUILLON' limit 1`)).rows[0];
+  if (open) throw new DocumentError("Un BL brouillon existe déjà pour cette commande : terminez-le ou supprimez-le.");
+  return saveDraft({
+    type: "BL", clientId: order.clientId, legalEntityId: order.legalEntityId, date: iso(today()), site: order.site, deliveryAddress: order.deliveryAddress,
+    salesRepId: order.salesRepId, paymentModeKey: order.paymentModeKey, globalDiscountPct: order.globalDiscountPct, notes: order.notes, originDocumentId: order.id,
+    lines: lines.map((l) => ({
+      productId: l.productId, quantity: remainingQty(l.quantity, l.deliveredQty),
+      // Les UG suivent la première livraison de la ligne seulement.
+      freeQuantity: (parseDecimal(l.deliveredQty, SCALE.qty) ?? 0n) === 0n ? l.freeQuantity : "0",
+      unitPriceHt: l.unitPriceHt, discountPct: l.discountPct, taxRate: l.taxRate, sourceLineId: l.id,
+    })),
+  }, actor);
+}
+
+/** Reste à livrer d'une commande (quantités), pour les écrans et les règles. */
+export function orderRemaining(lines: { quantity: string; deliveredQty: string }[]): bigint {
+  return lines.reduce((a, l) => a + ((parseDecimal(l.quantity, SCALE.qty) ?? 0n) - (parseDecimal(l.deliveredQty, SCALE.qty) ?? 0n)), 0n);
 }
 
 /* ------------------------------------------------------------------ */
@@ -409,7 +443,7 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
       { name: String(client.name), code: s(client.code), legalName: s(client.legal_name), accountCode: s(client.account_code), ice: s(client.ice), ifNumber: s(client.if_number), rc: s(client.rc), patente: s(client.patente), billingAddress: s(client.billing_address), postalCode: s(client.postal_code), city: s(client.city) },
       entity ? { legalName: entity.legal_name, accountCode: entity.account_code, ice: entity.ice, ifNumber: entity.if_number, rc: entity.rc, patente: entity.patente, billingAddress: entity.billing_address, postalCode: entity.postal_code, city: entity.city } : null,
     );
-    if (type !== "BL") {
+    if (type === "FACTURE" || type === "AVOIR") {
       const r = billingReadiness({ legalName: entity ? identity.legalName : s(client.legal_name), ice: identity.ice, billingAddress: identity.billingAddress, city: identity.city, accountCode: null, paymentDays: null, paymentModeKey: null });
       if (!r.ready) throw new DocumentError(`${entity ? `Raison sociale « ${identity.legalName} »` : "Fiche client"} incomplète pour facturer : ${r.missing.join(", ")}.`);
     }
@@ -419,8 +453,9 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
     if (issues.length && !opts.override) throw new CommercialBlockError(issues);
     const approvals = opts.override ? issues.map((i) => ({ code: i.code, label: i.label, by: actor.name, byId: actor.id, at: new Date().toISOString() })) : [];
 
-    // Numéro : série légale en mode ACTIF, série de simulation sinon.
-    const simulation = !emitsReal(g.cutover, { date: doc.date, site: doc.site });
+    // Numéro : série légale en mode ACTIF, série de simulation sinon. Une commande n'est pas une pièce
+    // fiscale : sa série BC est toujours réelle, avant comme après la bascule.
+    const simulation = type === "COMMANDE" ? false : !emitsReal(g.cutover, { date: doc.date, site: doc.site });
     const seriesKey = simulation ? DOC_TYPE_LABELS[type].simSeries : DOC_TYPE_LABELS[type].series;
     if (type === "FACTURE" && !simulation) {
       const last = (await tx.execute<{ d: string | null }>(sql`select max(date)::text as d from sales_documents where type = 'FACTURE' and series_key = ${seriesKey} and status <> 'BROUILLON'`)).rows[0]?.d;
@@ -477,6 +512,21 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
     for (const [lineId, alloc] of lineAllocations) await tx.update(salesDocumentLines).set({ lotAllocations: alloc }).where(eq(salesDocumentLines.id, lineId));
     if (movements.length) await recordStockMovements(movements, { id: actor.id }, { tx, allowNegative: g.insufficientStock === "WARN" });
 
+    // BL préparé depuis une commande : la quantité livrée de la commande avance (sans plafond : on peut
+    // livrer plus que commandé) et son statut suit. Une commande annulée ne se livre plus.
+    const touchedOrders = new Set<string>();
+    if (type === "BL") {
+      for (const l of doc.lines.filter((x) => x.sourceLineId)) {
+        const r = (await tx.execute<{ document_id: string; status: string; number: string | null }>(sql`
+          update sales_document_lines l set delivered_qty = l.delivered_qty + ${l.quantity}::numeric
+          from sales_documents d where l.id = ${l.sourceLineId}::uuid and d.id = l.document_id and d.type = 'COMMANDE'
+          returning d.id as document_id, d.status, d.number`)).rows[0];
+        if (!r) throw new DocumentError(`${l.designation} : la ligne de commande d'origine est introuvable.`);
+        if (r.status === "ANNULE") throw new DocumentError(`La commande ${r.number ?? ""} est annulée : retirez les lignes reprises ou préparez un nouveau BL.`);
+        touchedOrders.add(r.document_id);
+      }
+    }
+
     // Facture : les lignes de BL avancent ; avoir : les lignes de facture et le plafond du crédit.
     const touchedBLs = new Set<string>();
     if (type === "FACTURE") {
@@ -515,7 +565,7 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
       rc: identity.rc, patente: identity.patente, address: identity.billingAddress, postalCode: identity.postalCode, city: identity.city, phone: client.phone,
     };
     const due = type === "FACTURE" ? dueDateOf(doc.date, client.payment_days as number | null, g.defaultPaymentDays, g.maxPaymentDays) : null;
-    const words = type === "BL" ? null : amountInWords(doc.ttc, g.amountWords.major, g.amountWords.minor);
+    const words = type === "BL" || type === "COMMANDE" ? null : amountInWords(doc.ttc, g.amountWords.major, g.amountWords.minor);
     const hash = canonicalHash(
       { number, type, date: doc.date, client: clientSnapshot, grossHt: doc.grossHt, netHt: doc.netHt, vatTotal: doc.vatTotal, ttc: doc.ttc, globalDiscountPct: doc.globalDiscountPct },
       doc.lines.map((l) => ({ ref: l.ref, designation: l.designation, quantity: l.quantity, free: l.freeQuantity, pu: l.unitPriceHt, discount: l.discountPct, rate: l.taxRate, net: l.netHt, vat: l.vatAmount, ttc: l.ttc })),
@@ -526,6 +576,7 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
       amountInWords: words, approvals, contentHash: hash, validatedById: actor.id, validatedAt: new Date(), updatedAt: new Date(),
     }).where(eq(salesDocuments.id, id));
 
+    for (const orderId of touchedOrders) await refreshOrderStatus(tx, orderId);
     // BL facturés : statut d'après leurs lignes ; ventes projetées : numéro de facture.
     for (const blId of touchedBLs) {
       const [bl] = await tx.select({ status: salesDocuments.status }).from(salesDocuments).where(eq(salesDocuments.id, blId));
@@ -578,8 +629,43 @@ export async function cancelBL(id: string, reason: string, actor: AuditActor): P
       })), { id: actor.id }, { tx, allowNegative: true });
     }
     await removeProjection(tx, lines.map((l) => l.id));
+    // Les lignes de commande reprises par ce BL redeviennent à livrer.
+    const orders = new Set<string>();
+    for (const l of lines.filter((x) => x.sourceLineId)) {
+      const r = (await tx.execute<{ id: string }>(sql`
+        update sales_document_lines l set delivered_qty = greatest(l.delivered_qty - ${l.quantity}::numeric, 0)
+        from sales_documents d where l.id = ${l.sourceLineId}::uuid and d.id = l.document_id and d.type = 'COMMANDE' returning d.id`)).rows[0];
+      if (r) orders.add(r.id);
+    }
+    for (const orderId of orders) await refreshOrderStatus(tx, orderId);
     await tx.update(salesDocuments).set({ status: "ANNULE", cancelledAt: new Date(), cancelledById: actor.id, cancelReason: reason.trim(), updatedAt: new Date() }).where(eq(salesDocuments.id, id));
-    await audit({ actor, action: "CANCEL", module: "livraisons", entity: "sales_document", entityId: id, label: d.number, after: { reason, reversed: moves.length } }, tx);
+    await audit({ actor, action: "CANCEL", module: "livraisons", entity: "sales_document", entityId: id, label: d.number, after: { reason, reversed: moves.length, orders: orders.size || undefined } }, tx);
+  });
+}
+
+/** Statut d'une commande confirmée d'après ses quantités livrées (une commande annulée ne bouge plus). */
+async function refreshOrderStatus(tx: Tx, orderId: string): Promise<void> {
+  const [o] = await tx.select({ status: salesDocuments.status }).from(salesDocuments).where(eq(salesDocuments.id, orderId)).for("update");
+  if (!o || o.status === "ANNULE" || o.status === "BROUILLON") return;
+  const lines = await tx.select({ quantity: salesDocumentLines.quantity, deliveredQty: salesDocumentLines.deliveredQty }).from(salesDocumentLines).where(eq(salesDocumentLines.documentId, orderId));
+  const next = orderStatusAfterDelivery(lines);
+  if (next !== o.status) await tx.update(salesDocuments).set({ status: next, deliveredAt: next === "LIVRE" ? new Date() : null, updatedAt: new Date() }).where(eq(salesDocuments.id, orderId));
+}
+
+/**
+ * Annule une commande confirmée : ce qui restait à livrer ne le sera plus ; les BL déjà validés
+ * depuis cette commande restent (ils ont sorti le stock). Refusée tant qu'un BL brouillon en dépend.
+ */
+export async function cancelOrder(id: string, reason: string, actor: AuditActor): Promise<void> {
+  if (!reason.trim()) throw new DocumentError("Indiquez le motif de l'annulation.");
+  await db.transaction(async (tx) => {
+    const [d] = await tx.select().from(salesDocuments).where(eq(salesDocuments.id, id)).for("update");
+    if (!d || d.type !== "COMMANDE") throw new DocumentError("Commande introuvable.");
+    if (!allowedActions("COMMANDE", d.status as DocStatus).cancel) throw new DocumentError("Seule une commande confirmée et pas encore entièrement livrée s'annule.");
+    const open = (await tx.execute<{ id: string }>(sql`select id from sales_documents where origin_document_id = ${id}::uuid and type = 'BL' and status = 'BROUILLON' limit 1`)).rows[0];
+    if (open) throw new DocumentError("Un BL brouillon dépend de cette commande : supprimez-le d'abord.");
+    await tx.update(salesDocuments).set({ status: "ANNULE", cancelledAt: new Date(), cancelledById: actor.id, cancelReason: reason.trim(), updatedAt: new Date() }).where(eq(salesDocuments.id, id));
+    await audit({ actor, action: "CANCEL", module: "livraisons", entity: "sales_document", entityId: id, label: d.number, after: { reason } }, tx);
   });
 }
 

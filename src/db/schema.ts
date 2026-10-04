@@ -1021,7 +1021,7 @@ export const creditReasons = pgTable("credit_reasons", {
 });
 
 /**
- * Pièces de vente : BL, facture, avoir. Brouillon modifiable ; une fois validée, la pièce est
+ * Pièces de vente : commande client, BL, facture, avoir. Brouillon modifiable ; une fois validée, la pièce est
  * numérotée, figée (triggers de la migration 0026) et son statut n'évolue que par
  * `src/lib/gestion/documents.ts`. `isSimulation` : pièce de test ou de période parallèle, série
  * SIM…, jamais projetée dans les ventes. Identité client et société copiées à la validation.
@@ -1116,6 +1116,8 @@ export const salesDocumentLines = pgTable(
     sourceDate: date("source_date"),
     invoicedQty: numeric("invoiced_qty", { precision: 12, scale: 3 }).notNull().default("0"),
     creditedQty: numeric("credited_qty", { precision: 12, scale: 3 }).notNull().default("0"),
+    /** Ligne de commande client : quantité déjà livrée par des BL validés (le reste à livrer = quantité − livré). */
+    deliveredQty: numeric("delivered_qty", { precision: 12, scale: 3 }).notNull().default("0"),
     returnWarehouseKey: text("return_warehouse_key").references(() => warehouses.key, { onUpdate: "cascade" }),
     lotAllocations: jsonb("lot_allocations").$type<{ lotId: string; lotNumber: string; expiryDate: string | null; qty: string }[]>().notNull().default([]),
   },
