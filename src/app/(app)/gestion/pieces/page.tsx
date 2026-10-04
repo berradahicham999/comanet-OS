@@ -51,7 +51,7 @@ export default async function PiecesPage(props: { searchParams: Promise<{ type?:
         <Empty
           title={`Aucun${type === "COMMANDE" ? "e" : ""} ${DOC_TYPE_LABELS[type].one.toLowerCase()}`}
           hint={type === "COMMANDE"
-            ? "Le commercial saisit la commande du client sur son téléphone (produits habituels en tête, prix et remises pré-remplis, stock visible), la confirme (numéro BC, PDF à envoyer au client), puis « Préparer le BL » reprend ses lignes dans un bon de livraison modifiable. Ni stock ni vente avant le BL."
+            ? "Le commercial saisit la commande du client sur son téléphone (produits habituels en tête, prix au PPH, stock visible, sans remise), la confirme (numéro BC, PDF à envoyer au client), puis « Préparer le BL » reprend ses lignes dans un bon de livraison modifiable, avec la remise du client posée automatiquement. Ni stock ni vente avant le BL."
             : type === "BL"
             ? "Un bon de livraison sort le stock du dépôt principal (lot au plus proche de la péremption). Il se facture ensuite, seul ou regroupé avec d'autres BL du même client."
             : type === "FACTURE"
