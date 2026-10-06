@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Notifications" };
 
 const TYPE_LABEL: Record<string, { label: string; tone: "gray" | "blue" | "yellow" | "orange" | "green" | "red" | "purple" }> = {
-  BRIEF_ASSIGNED: { label: "Brief assigné", tone: "blue" }, DELIVERABLE_UPLOADED: { label: "Livrable déposé", tone: "purple" },
+  BRIEF_ASSIGNED: { label: "Brief assigné", tone: "blue" }, BRIEF_UPDATED: { label: "Brief disponible", tone: "blue" }, DELIVERABLE_UPLOADED: { label: "Livrable déposé", tone: "purple" },
   VALIDATION_REQUESTED: { label: "À valider", tone: "yellow" }, CORRECTIONS_REQUESTED: { label: "Corrections", tone: "orange" },
   CONTENT_VALIDATED: { label: "Validé", tone: "green" }, DEADLINE_PASSED: { label: "Retard", tone: "red" }, COMMENT: { label: "Commentaire", tone: "gray" },
 };

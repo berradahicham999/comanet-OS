@@ -114,3 +114,117 @@ export function shiftIso(dateIso: string, days: number): string {
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
+
+/* ------------------------------ Brief PDF importé ------------------------------ */
+
+/** Libellés des champs du brief, tels qu'affichés dans le formulaire. */
+export const BRIEF_FIELD_LABELS: Record<BriefField | "brief" | "references" | "platform" | "format" | "objective" | "deadline" | "products", string> = {
+  keyMessage: "Message clé", angle: "Angle", hook: "Accroche", caption: "Légende", hashtags: "Hashtags", cta: "Appel à l'action",
+  constraints: "Contraintes", mandatoryMentions: "Mentions obligatoires", forbiddenClaims: "Allégations interdites", deliverables: "Livrables attendus",
+  brief: "Notes de brief (résumé)", references: "Références", platform: "Plateforme", format: "Format", objective: "Objectif", deadline: "Deadline du livrable", products: "Produits",
+};
+
+/** Ce que la lecture d'un brief PDF a relevé (champ absent du document = null, jamais deviné). */
+export type ImportedBrief = Partial<Record<BriefField, string | null>> & {
+  summary: string | null;
+  missing?: string[];
+  references?: { url: string; label?: string | null }[];
+  platform?: string | null; format?: string | null; objective?: string | null;
+  deadline?: string | null;
+  products?: string[];
+};
+
+export type BriefState = Partial<Record<BriefField, string | null>> & {
+  brief: string | null; references: { url: string; label?: string }[];
+  platform: string | null; format: string | null; objective: string | null; deadline: string | null;
+  productIds: string[];
+};
+
+const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/**
+ * Fusion d'un brief PDF dans la fiche. Le PDF fait foi pour ce qu'il dit : un champ renseigné dans le document
+ * remplace la valeur de la fiche ; un champ absent du document ne vide jamais la fiche (anti-régression).
+ * Références et produits s'ajoutent. Plateforme, format et objectif ne sont pris que s'ils existent au
+ * référentiel. La deadline n'est posée que si la fiche n'en a pas (la date de publication n'est jamais touchée :
+ * c'est le calendrier qui la décide).
+ */
+export function mergeImportedBrief(
+  current: BriefState,
+  got: ImportedBrief,
+  ctx: { platforms: string[]; formats: string[]; objectives: string[]; products: { id: string; name: string }[] },
+): { patch: Partial<BriefState>; changed: string[] } {
+  const patch: Partial<BriefState> = {};
+  const changed: string[] = [];
+  const clean = (v: string | null | undefined) => (v ?? "").trim() || null;
+  const set = <K extends keyof BriefState>(k: K, v: BriefState[K], label: string) => {
+    if (JSON.stringify(current[k] ?? null) === JSON.stringify(v ?? null)) return;
+    patch[k] = v; changed.push(label);
+  };
+  for (const f of BRIEF_FIELDS) {
+    const v = clean(got[f]);
+    if (v) set(f, v, BRIEF_FIELD_LABELS[f]);
+  }
+  const summary = clean(got.summary);
+  const missing = (got.missing ?? []).map((m) => m.trim()).filter(Boolean);
+  if (summary) set("brief", missing.length ? `${summary}\n\nÀ préciser (absent du brief PDF) :\n${missing.map((m) => `- ${m}`).join("\n")}` : summary, BRIEF_FIELD_LABELS.brief);
+
+  const refs = [...current.references];
+  for (const r of got.references ?? []) {
+    const url = r.url?.trim();
+    if (url && /^https?:\/\//i.test(url) && !refs.some((x) => x.url === url)) refs.push({ url, label: r.label?.trim() || undefined });
+  }
+  if (refs.length !== current.references.length) set("references", refs, BRIEF_FIELD_LABELS.references);
+
+  const pick = (v: string | null | undefined, keys: string[]) => (v && keys.includes(v) ? v : null);
+  const platform = pick(got.platform, ctx.platforms), format = pick(got.format, ctx.formats), objective = pick(got.objective, ctx.objectives);
+  if (platform) set("platform", platform, BRIEF_FIELD_LABELS.platform);
+  if (format) set("format", format, BRIEF_FIELD_LABELS.format);
+  if (objective) set("objective", objective, BRIEF_FIELD_LABELS.objective);
+  if (!current.deadline && got.deadline && /^\d{4}-\d{2}-\d{2}$/.test(got.deadline)) set("deadline", got.deadline, BRIEF_FIELD_LABELS.deadline);
+
+  const ids = [...current.productIds];
+  for (const name of got.products ?? []) {
+    const n = norm(name);
+    const p = n ? ctx.products.find((x) => norm(x.name) === n) ?? ctx.products.find((x) => norm(x.name).includes(n) || n.includes(norm(x.name))) : undefined;
+    if (p && !ids.includes(p.id)) ids.push(p.id);
+  }
+  if (ids.length !== current.productIds.length) set("productIds", ids, BRIEF_FIELD_LABELS.products);
+  return { patch, changed };
+}
+
+/**
+ * Brief complet en texte (Markdown), à coller tel quel dans un assistant IA par la personne qui produit le contenu.
+ * Seulement ce qui est saisi : un champ vide est omis, jamais complété.
+ */
+export function briefMarkdown(b: {
+  title: string; brand: string; platform: string | null; format: string | null; objective: string | null;
+  date: string; publishTime: string | null; deadline: string | null; platformSpecs?: string | null;
+  fields: Partial<Record<BriefField | "brief", string | null>>;
+  references: { url: string; label?: string }[];
+  products: { name: string; benefits?: string | null; claims?: string | null; actives?: string | null; marketingAngle?: string | null }[];
+  briefPdf?: string | null;
+}): string {
+  const L: string[] = [`# Brief — ${b.title}`, ""];
+  const line = (k: string, v: string | null | undefined) => { if (v && v.trim()) L.push(`- **${k}** : ${v.trim()}`); };
+  line("Marque", b.brand); line("Plateforme", b.platform); line("Format", b.format); line("Objectif", b.objective);
+  line("Publication", `${b.date}${b.publishTime ? ` à ${b.publishTime.slice(0, 5)}` : ""}`); line("Livrable attendu pour le", b.deadline);
+  line("Contraintes de la plateforme", b.platformSpecs);
+  if (b.briefPdf) line("Brief détaillé", `PDF joint (${b.briefPdf})`);
+  const sec = (title: string, v: string | null | undefined) => { if (v && v.trim()) L.push("", `## ${title}`, v.trim()); };
+  sec("Résumé du besoin", b.fields.brief);
+  sec("Message clé", b.fields.keyMessage); sec("Angle", b.fields.angle); sec("Accroche proposée", b.fields.hook);
+  sec("Légende (caption)", b.fields.caption); sec("Hashtags", b.fields.hashtags); sec("Appel à l'action", b.fields.cta);
+  sec("Livrables attendus", b.fields.deliverables); sec("Contraintes (charte, technique)", b.fields.constraints);
+  sec("Mentions obligatoires", b.fields.mandatoryMentions); sec("Allégations interdites", b.fields.forbiddenClaims);
+  if (b.products.length) {
+    L.push("", "## Produits");
+    for (const p of b.products) {
+      L.push(`### ${p.name}`);
+      line("Bénéfices", p.benefits); line("Allégations autorisées", p.claims); line("Actifs", p.actives); line("Angle marketing", p.marketingAngle);
+    }
+  }
+  if (b.references.length) { L.push("", "## Références"); for (const r of b.references) L.push(`- ${r.label ? `${r.label} : ` : ""}${r.url}`); }
+  L.push("", "---", "Règles : ne rien inventer (ingrédient, chiffre, preuve, prix) au-delà de ce brief et des fiches produits ; respecter les allégations autorisées et les mentions obligatoires. Le livrable final est déposé dans COMANET OS (Planning éditorial → ce contenu → « Déposer le livrable ») pour validation.");
+  return L.join("\n");
+}

@@ -63,7 +63,33 @@ Cliquez sur une carte pour ouvrir sa **fiche**. À gauche, le brief :
 **« Appliquer un modèle… »** en haut du brief remplit les champs vides, sans jamais écraser ce que vous avez
 déjà écrit. **« Enregistrer le brief »** quand c'est prêt, puis bouton **« Brief prêt »** à droite.
 
+### Le brief en PDF (pour Hicham)
+
+Plutôt que de taper le brief, déposez-le : carte **« Brief PDF »** en haut à droite de la fiche,
+**« Déposer le brief PDF »**. Le document est lu par l'IA et le formulaire se remplit tout seul :
+
+- ce que le PDF dit **remplace** le champ (accroche, légende, mentions… recopiées mot pour mot) ;
+- ce que le PDF ne dit pas **ne vide jamais** un champ déjà rempli ; rien n'est inventé ;
+- le résumé du besoin va dans « Notes de brief », suivi de ce qui manque au PDF (« À préciser ») ;
+- les liens et les produits cités s'ajoutent ; la plateforme, le format et l'objectif sont repris s'ils
+  existent dans les listes ; la deadline seulement si la fiche n'en a pas ; la date de publication jamais.
+
+Chaque dépôt est une **version** (« Déposer une nouvelle version ») ; un commentaire dans le fil dit quels champs
+ont changé, et le journal d'audit garde l'avant / après. **« Relire le PDF »** relance la lecture (après une
+erreur, par exemple). Sans clé IA sur le serveur, le PDF est gardé et téléchargeable, le formulaire reste à
+remplir à la main. La personne responsable reçoit la notification **« Brief disponible »**.
+
+Écrivez le brief pour qu'il se suffise : quoi produire (nombre, format, ratio, durée), pour qui, le message,
+l'accroche et la légende prêtes s'il y en a, les mentions obligatoires, les mots interdits, la date de remise,
+les liens d'inspiration.
+
 ## 5. Produire et déposer le livrable
+
+**Où commencer (pour la personne qui produit, ex. Nasser)** : en haut du planning, **« À préparer »** liste vos
+contenus non publiés, du plus urgent au plus lointain, avec le bouton **« Brief PDF »** pour le télécharger
+directement. Dans la fiche, **« Copier le brief pour Claude »** copie tout le formulaire en texte (produits,
+allégations autorisées, mentions, références) : collez-le avec le PDF dans votre assistant, produisez, puis
+revenez déposer le résultat ici.
 
 1. Quand vous commencez, cliquez **« Lancer la création »**.
 2. Le fichier fini : bouton **« Déposer le livrable »** (image, vidéo, PDF, jusqu'à 25 Mo). Chaque nouveau
