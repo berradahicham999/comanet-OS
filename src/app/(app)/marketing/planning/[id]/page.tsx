@@ -8,16 +8,21 @@ import { PageHeader, Card, Badge, BrandDot, Facts } from "@/components/ui";
 import { PlatformIcon } from "@/components/platform-icon";
 import { ContentWorkflow } from "@/components/content-workflow";
 import { ContentUpload } from "@/components/content-upload";
+import { CopyButton } from "@/components/copy-button";
+import { PendingSubmit } from "@/components/pending-submit";
+import { Download, FileText } from "lucide-react";
 import { REG_STATUS } from "@/components/regulatory-form";
 import { contentRefs, listBriefTemplates } from "@/lib/content/refs";
 import { axisOptions } from "@/lib/marketing-plan/plan";
-import { nextTransitions, safeTone, lateness, toneClass } from "@/lib/content/shared";
+import { nextTransitions, safeTone, lateness, toneClass, briefMarkdown } from "@/lib/content/shared";
 import { canValidateBrand } from "@/lib/content/workflow";
 import { listAssets, isPreviewable } from "@/lib/content/assets";
 import { fmtDate, fmtAgo, initials, iso, today } from "@/lib/format";
-import { saveBrief, changeStatus, addContentComment, savePostPublication, deleteContentHard, beginAssetUpload, appendAssetChunk, finishAssetUpload, deleteAssetAction, applyTemplateToContent } from "../actions";
+import { saveBrief, changeStatus, addContentComment, savePostPublication, deleteContentHard, beginAssetUpload, appendAssetChunk, finishAssetUpload, deleteAssetAction, applyTemplateToContent, rereadBrief } from "../actions";
 
 export const dynamic = "force-dynamic";
+/** La lecture d'un brief PDF par le modèle passe par une action de cette page. */
+export const maxDuration = 300;
 
 export async function generateMetadata(props: { params: Promise<{ id: string }> }) {
   const { id } = await props.params;
@@ -36,10 +41,10 @@ type Row = {
 };
 type Prod = { id: string; name: string; benefits: string | null; claims: string | null; actives: string | null; target: string | null; marketing_angle: string | null; image_url: string | null; reg_status: string | null; reg_id: string | null; reg_expiry: string | null };
 
-export default async function ContentPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ erreur?: string }> }) {
+export default async function ContentPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ erreur?: string; info?: string }> }) {
   await requireAccess("marketing");
   const { id } = await props.params;
-  const { erreur } = await props.searchParams;
+  const { erreur, info } = await props.searchParams;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
 
   const r = await db.execute<Row>(sql`
@@ -74,6 +79,16 @@ export default async function ContentPage(props: { params: Promise<{ id: string 
   const fm = refs.formats.find((f) => f.key === c.format);
   const transitions = nextTransitions(refs, c.status, isValidator).map((t) => ({ toKey: t.toKey, label: t.label, requiresComment: t.requiresComment, requiresValidator: t.requiresValidator, allowed: t.allowed && canEdit, target: { label: t.target.label, tone: t.target.tone } }));
   const deliverables = assets.filter((a) => a.kind === "LIVRABLE"); const references = assets.filter((a) => a.kind === "REFERENCE");
+  const briefs = assets.filter((a) => a.kind === "BRIEF"); const brief = briefs[0];
+  const om = refs.objectives.find((o) => o.key === c.objective);
+  const forAi = briefMarkdown({
+    title: c.title, brand: c.brand, platform: pf?.label ?? null, format: fm?.label ?? null, objective: om?.label ?? null,
+    date: c.date, publishTime: c.publish_time, deadline: c.deadline,
+    platformSpecs: pf ? [pf.specs.ratios?.length ? `formats ${pf.specs.ratios.join(", ")}` : null, pf.specs.maxDurationSec ? `durée max ${pf.specs.maxDurationSec} s` : null, pf.specs.notes].filter(Boolean).join(" · ") || null : null,
+    fields: { brief: c.brief, keyMessage: c.key_message, angle: c.angle, hook: c.hook, caption: c.caption, hashtags: c.hashtags, cta: c.cta, constraints: c.constraints, mandatoryMentions: c.mandatory_mentions, forbiddenClaims: c.forbidden_claims, deliverables: c.deliverables },
+    references: c.references, products: prods.rows.map((p) => ({ name: p.name, benefits: p.benefits, claims: p.claims, actives: p.actives, marketingAngle: p.marketing_angle })),
+    briefPdf: brief?.name ?? null,
+  });
   const late = lateness({ date: c.date, deadline: c.deadline, status: c.status, hasDeliverable: deliverables.length > 0 }, refs.statuses, iso(today()));
   const latest = deliverables[0];
   const selected = new Set(prods.rows.map((p) => p.id));
@@ -90,6 +105,7 @@ export default async function ContentPage(props: { params: Promise<{ id: string 
           {st?.awaitingValidation && isValidator && <Link href={`/marketing/planning/validation?id=${c.id}`} className="btn-primary btn-sm">Ouvrir dans la file</Link>}
         </>} />
       {erreur && <div className="mb-3 rounded-xl border border-red/30 bg-red-soft text-red px-3 py-2 text-[13px]">{erreur}</div>}
+      {info && <div className="mb-3 rounded-xl border border-green/30 bg-green-soft text-green px-3 py-2 text-[13px]">{info}</div>}
 
       <div className="grid lg:grid-cols-[1fr_380px] gap-4 items-start">
         {/* ------------------------------ Colonne brief ------------------------------ */}
@@ -175,6 +191,34 @@ export default async function ContentPage(props: { params: Promise<{ id: string 
 
         {/* ------------------------------ Colonne droite ------------------------------ */}
         <div className="space-y-4">
+          <Card title="Brief PDF">
+            {brief ? (
+              <div className="space-y-3 text-[12.5px]">
+                <div className="flex items-center gap-2 min-w-0">
+                  <FileText size={18} className="text-accent shrink-0" />
+                  <div className="min-w-0"><div className="font-medium truncate">{brief.name}</div><div className="text-muted">v{brief.version} · {brief.uploadedBy ?? "—"} · {fmtAgo(brief.createdAt)}</div></div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <a href={`/marketing/planning/fichier/${brief.id}?dl=1`} className="btn-primary btn-sm inline-flex items-center gap-1.5"><Download size={13} /> Télécharger le brief</a>
+                  <a href={`/marketing/planning/fichier/${brief.id}`} target="_blank" rel="noreferrer" className="btn-ghost btn-sm">Ouvrir</a>
+                  {canEdit && <form action={rereadBrief}><input type="hidden" name="assetId" value={brief.id} /><PendingSubmit className="btn-ghost btn-sm" pendingLabel="Lecture du brief…">Relire le PDF</PendingSubmit></form>}
+                </div>
+                {briefs.length > 1 && (
+                  <details><summary className="cursor-pointer text-muted">Versions précédentes ({briefs.length - 1})</summary>
+                    <ul className="mt-1 space-y-1">{briefs.slice(1).map((a) => <li key={a.id} className="flex items-center gap-2"><Badge tone="gray">v{a.version}</Badge><a href={`/marketing/planning/fichier/${a.id}?dl=1`} className="truncate hover:underline">{a.name}</a><span className="text-muted ml-auto whitespace-nowrap">{fmtAgo(a.createdAt)}</span>{canValidatePerm && <form action={deleteAssetAction}><input type="hidden" name="id" value={a.id} /><input type="hidden" name="contentId" value={c.id} /><button className="text-faint hover:text-red" title="Supprimer cette version" type="submit">×</button></form>}</li>)}</ul>
+                  </details>
+                )}
+              </div>
+            ) : (
+              <p className="text-[13px] text-muted">{canEdit ? "Déposez le brief en PDF : il est lu et le formulaire se remplit tout seul. La personne responsable le télécharge ici." : "Pas encore de brief PDF pour ce contenu : le brief est dans le formulaire."}</p>
+            )}
+            {canEdit && <div className="mt-3"><ContentUpload contentId={c.id} kind="BRIEF" accept=".pdf,application/pdf" variant={brief ? "secondary" : "primary"} label={brief ? "Déposer une nouvelle version" : "Déposer le brief PDF"} actions={uploadActions} /></div>}
+            <div className="mt-3 pt-3 border-t border-line flex items-center gap-2 flex-wrap">
+              <CopyButton text={forAi} label="Copier le brief pour Claude" />
+              <span className="text-[11px] text-muted">Le formulaire complet en texte (produits, allégations autorisées, mentions), à coller avec le PDF.</span>
+            </div>
+          </Card>
+
           <Card title="Étape suivante">
             <ContentWorkflow id={c.id} transitions={transitions} action={changeStatus} />
             <Facts cols={2} items={[

@@ -153,7 +153,12 @@ transitions sont des tables de référence modifiables dans `/parametres/contenu
 aucun nom de statut, il lit les drapeaux (`is_published`, `awaiting_validation`, `in_production`,
 `is_archived`). Archiver ne supprime rien. Les livrables sont stockés en `bytea` dans `content_assets`
 via `src/lib/content/assets.ts` (seul module à toucher pour passer à un stockage objet). Les notifications
-in-app vivent dans `notifications` (`src/lib/content/notify.ts`).
+in-app vivent dans `notifications` (`src/lib/content/notify.ts`). **Brief PDF** : fichier `BRIEF` versionné dans
+`content_assets` ; à la fin du dépôt, `importBriefFromAsset()` (`src/lib/content/brief-import.ts`) le fait lire par le modèle
+(`runStage("brief-import")`, PDF joint en bloc document, prompt `brief-import.md`, aucune invention) puis `applyImportedBrief()`
+écrit la fiche selon `mergeImportedBrief()` (le PDF remplace ce qu'il dit, ne vide jamais un champ ; références et produits
+ajoutés ; deadline seulement si absente ; date de publication jamais), avec commentaire et `audit()`. Sans clé IA : fichier
+gardé, formulaire à la main. « À préparer » (`myQueue()`) en tête du planning ; `briefMarkdown()` = brief à coller dans un assistant.
 
 **Activations** (`docs/guide-activations.md`). Types (avec checklist par défaut), statuts (drapeaux `awaiting_validation`,
 `is_validated`, `is_running`, `is_done`, `is_measured`, `is_archived`, `is_cancelled`), transitions, objectifs, cibles,

@@ -4,7 +4,7 @@
  */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { checkTransition, nextTransitions, lateness, applyTemplate, refKey, shiftIso, type StatusRef, type TransitionRef } from "@/lib/content/shared";
+import { checkTransition, nextTransitions, lateness, applyTemplate, refKey, shiftIso, mergeImportedBrief, briefMarkdown, type StatusRef, type TransitionRef, type BriefState } from "@/lib/content/shared";
 
 const S = (key: string, sort: number, flags: Partial<StatusRef> = {}): StatusRef => ({ key, label: key, tone: "gray", sort, active: true, isPublished: false, isArchived: false, awaitingValidation: false, inProduction: false, ...flags });
 const statuses: StatusRef[] = [
@@ -65,5 +65,51 @@ describe("Templates et clés", () => {
   test("décalage de date ISO", () => {
     assert.equal(shiftIso("2026-01-30", 3), "2026-02-02");
     assert.equal(shiftIso("2026-03-01", -1), "2026-02-28");
+  });
+});
+
+describe("Brief PDF importé", () => {
+  const ctx = { platforms: ["INSTAGRAM", "TIKTOK"], formats: ["REEL", "POST"], objectives: ["NOTORIETE"], products: [{ id: "p1", name: "Gamarde Crème Hydratante" }, { id: "p2", name: "Gamarde Sérum Éclat" }] };
+  const base: BriefState = { keyMessage: "Ancien message", hook: "Accroche saisie", caption: null, brief: "Notes", references: [{ url: "https://a.ma" }], platform: "INSTAGRAM", format: "POST", objective: null, deadline: "2026-10-10", productIds: ["p1"] };
+
+  test("le PDF remplace ce qu'il dit, ne vide jamais ce qu'il ne dit pas", () => {
+    const { patch, changed } = mergeImportedBrief(base, { summary: "Un reel produit.", keyMessage: "Hydrate 24 h", hook: null, caption: "  " }, ctx);
+    assert.equal(patch.keyMessage, "Hydrate 24 h");
+    assert.equal("hook" in patch, false);
+    assert.equal("caption" in patch, false);
+    assert.equal(patch.brief, "Un reel produit.");
+    assert.deepEqual(changed, ["Message clé", "Notes de brief (résumé)"]);
+  });
+  test("les points manquants s'ajoutent au résumé", () => {
+    const { patch } = mergeImportedBrief(base, { summary: "Résumé", missing: ["durée de la vidéo"] }, ctx);
+    assert.match(patch.brief ?? "", /À préciser[\s\S]*- durée de la vidéo/);
+  });
+  test("clés hors référentiel ignorées, deadline posée seulement si absente", () => {
+    const { patch } = mergeImportedBrief(base, { summary: null, platform: "SNAPCHAT", format: "REEL", objective: "NOTORIETE", deadline: "2026-10-08" }, ctx);
+    assert.equal("platform" in patch, false);
+    assert.equal(patch.format, "REEL");
+    assert.equal(patch.objective, "NOTORIETE");
+    assert.equal("deadline" in patch, false);
+    const sans = mergeImportedBrief({ ...base, deadline: null }, { summary: null, deadline: "2026-10-08" }, ctx);
+    assert.equal(sans.patch.deadline, "2026-10-08");
+  });
+  test("références et produits s'ajoutent sans doublon (noms sans accents ni casse)", () => {
+    const { patch } = mergeImportedBrief(base, { summary: null, references: [{ url: "https://a.ma" }, { url: "https://b.ma", label: "Inspi" }, { url: "javascript:x" }], products: ["gamarde serum eclat", "Produit inconnu", "Gamarde Crème Hydratante"] }, ctx);
+    assert.deepEqual(patch.references, [{ url: "https://a.ma" }, { url: "https://b.ma", label: "Inspi" }]);
+    assert.deepEqual(patch.productIds, ["p1", "p2"]);
+  });
+  test("relire le même PDF ne change rien", () => {
+    const first = mergeImportedBrief(base, { summary: "R", keyMessage: "M" }, ctx);
+    const again = mergeImportedBrief({ ...base, ...first.patch }, { summary: "R", keyMessage: "M" }, ctx);
+    assert.deepEqual(again.changed, []);
+  });
+  test("le brief à coller omet les champs vides et rappelle où déposer le livrable", () => {
+    const md = briefMarkdown({ title: "Reel crème", brand: "Gamarde", platform: "Instagram", format: null, objective: null, date: "2026-10-12", publishTime: "18:00:00", deadline: null, fields: { keyMessage: "Hydrate", hook: "" }, references: [], products: [{ name: "Crème", claims: "Hydrate 24 h" }], briefPdf: "brief.pdf" });
+    assert.match(md, /# Brief — Reel crème/);
+    assert.match(md, /2026-10-12 à 18:00/);
+    assert.match(md, /## Message clé\nHydrate/);
+    assert.doesNotMatch(md, /Accroche/);
+    assert.match(md, /Allégations autorisées\*\* : Hydrate 24 h/);
+    assert.match(md, /Déposer le livrable/);
   });
 });

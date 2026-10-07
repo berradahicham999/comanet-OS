@@ -5,12 +5,13 @@ import { redirect } from "next/navigation";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { contentItems, contentProducts, contentComments, contentStatusHistory, contentAssets, briefTemplates, type BriefTemplateDefaults } from "@/db/schema";
-import { requirePermission, requireAccess, brandInScope } from "@/lib/access";
+import { requirePermission, requireAccess, brandInScope, canDo } from "@/lib/access";
 import { transition, canValidateBrand } from "@/lib/content/workflow";
 import { contentRefs, defaultStatusKey } from "@/lib/content/refs";
 import { syncBriefTask } from "@/lib/content/tasks";
 import { notify } from "@/lib/content/notify";
-import { beginAsset, appendChunk, deleteAsset as removeAsset, type AssetKind } from "@/lib/content/assets";
+import { beginAsset, appendChunk, deleteAsset as removeAsset, assetMeta, type AssetKind } from "@/lib/content/assets";
+import { importBriefFromAsset, BRIEF_MIMES, type BriefImportResult } from "@/lib/content/brief-import";
 import { applyTemplate, shiftIso, BRIEF_FIELDS } from "@/lib/content/shared";
 import { fmtDate } from "@/lib/format";
 
@@ -238,8 +239,11 @@ export async function deleteContentHard(formData: FormData) {
 export async function beginAssetUpload(input: { contentId: string; kind: AssetKind; name: string; size: number; mime: string }) {
   const user = await requirePermission("marketing", "edit");
   if (!isUuid(input.contentId)) throw new Error("Contenu introuvable.");
-  const kind: AssetKind = input.kind === "REFERENCE" ? "REFERENCE" : "LIVRABLE";
-  return beginAsset({ owner: { contentId: input.contentId }, kind, name: input.name, mime: input.mime, size: input.size, uploadedById: user.id });
+  const kind: AssetKind = input.kind === "REFERENCE" ? "REFERENCE" : input.kind === "BRIEF" ? "BRIEF" : "LIVRABLE";
+  const mime = kind === "BRIEF" && !input.mime && /\.pdf$/i.test(input.name) ? "application/pdf" : input.mime;
+  if (kind === "BRIEF" && !BRIEF_MIMES.includes(mime)) throw new Error("Le brief se dépose en PDF.");
+  await assertContentScope(input.contentId);
+  return beginAsset({ owner: { contentId: input.contentId }, kind, name: input.name, mime, size: input.size, uploadedById: user.id });
 }
 
 export async function appendAssetChunk(formData: FormData) {
@@ -249,8 +253,17 @@ export async function appendAssetChunk(formData: FormData) {
   return appendChunk(id, Buffer.from(await chunk.arrayBuffer()));
 }
 
-/** Fin de téléversement : notifie le validateur qu'un livrable est déposé. */
-export async function finishAssetUpload(input: { assetId: string }) {
+async function assertContentScope(contentId: string) {
+  const c = (await db.select({ brandId: contentItems.brandId }).from(contentItems).where(eq(contentItems.id, contentId)))[0];
+  if (!c) throw new Error("Contenu introuvable.");
+  await assertBrand(c.brandId);
+}
+
+/**
+ * Fin de téléversement : un livrable notifie le validateur ; un brief PDF est lu (le formulaire se remplit)
+ * et la personne responsable est prévenue qu'il est disponible. Renvoie ce qu'il faut afficher.
+ */
+export async function finishAssetUpload(input: { assetId: string }): Promise<{ message?: string; error?: string } | void> {
   const user = await requirePermission("marketing", "edit");
   const a = (await db.select({ contentId: contentAssets.contentId, kind: contentAssets.kind, name: contentAssets.name, version: contentAssets.version }).from(contentAssets).where(eq(contentAssets.id, input.assetId)))[0];
   if (!a?.contentId) return;
@@ -259,7 +272,33 @@ export async function finishAssetUpload(input: { assetId: string }) {
     const c = (await db.select({ title: contentItems.title, validatorId: contentItems.validatorId, createdById: contentItems.createdById }).from(contentItems).where(eq(contentItems.id, a.contentId)))[0];
     if (c) await notify([c.validatorId, c.createdById], { type: "DELIVERABLE_UPLOADED", title: `Livrable déposé : ${c.title}`, body: `${user.name} a déposé « ${a.name} » (v${a.version}).`, href: `${PLANNING}/${a.contentId}`, entityType: "content", entityId: a.contentId }, { except: user.id });
   }
+  if (a.kind === "BRIEF") {
+    const res = await importBriefFromAsset(input.assetId, user, { isAdmin: await canDo("administration", "validate") });
+    const c = (await db.select({ title: contentItems.title, responsibleId: contentItems.responsibleId }).from(contentItems).where(eq(contentItems.id, a.contentId)))[0];
+    if (c) await notify([c.responsibleId], { type: "BRIEF_UPDATED", title: `Brief disponible : ${c.title}`, body: `${user.name} a déposé le brief « ${a.name} » (v${a.version}). À télécharger depuis le planning.`, href: `${PLANNING}/${a.contentId}`, entityType: "content", entityId: a.contentId }, { except: user.id });
+    revalidateContent(a.contentId);
+    return briefImportMessage(res);
+  }
   revalidateContent(a.contentId);
+}
+
+function briefImportMessage(res: BriefImportResult): { message?: string; error?: string } {
+  if (!res.ok) return { error: res.error };
+  const head = res.changed.length ? `Brief lu : ${res.changed.join(", ")} mis à jour.` : "Brief lu : le formulaire était déjà à jour.";
+  return { message: res.missing.length ? `${head} À préciser : ${res.missing.join(" ; ")}.` : head };
+}
+
+/** Relit la dernière version du brief PDF (après un échec, ou une fois la clé IA posée). */
+export async function rereadBrief(formData: FormData) {
+  const user = await requirePermission("marketing", "edit");
+  const id = str(formData, "assetId");
+  if (!isUuid(id)) return;
+  const a = await assetMeta(id);
+  if (!a?.contentId || a.kind !== "BRIEF") return;
+  await assertContentScope(a.contentId);
+  const res = briefImportMessage(await importBriefFromAsset(id, user, { isAdmin: await canDo("administration", "validate") }));
+  revalidateContent(a.contentId);
+  redirect(`${PLANNING}/${a.contentId}?${res.error ? `erreur=${encodeURIComponent(res.error)}` : `info=${encodeURIComponent(res.message ?? "")}`}`);
 }
 
 export async function deleteAssetAction(formData: FormData) {

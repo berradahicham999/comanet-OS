@@ -3101,7 +3101,7 @@ export const contentAssets = pgTable(
     /** PDF figé d'une pièce de vente validée. */
     salesDocumentId: uuid("sales_document_id").references((): AnyPgColumn => salesDocuments.id, { onDelete: "cascade" }),
     purchaseDocumentId: uuid("purchase_document_id").references((): AnyPgColumn => purchaseDocuments.id, { onDelete: "cascade" }),
-    kind: text("kind").notNull().default("LIVRABLE"), // LIVRABLE | REFERENCE | DEVIS | FACTURE | VISUEL | PHOTO | COMPTE_RENDU
+    kind: text("kind").notNull().default("LIVRABLE"), // BRIEF | LIVRABLE | REFERENCE | DEVIS | FACTURE | VISUEL | PHOTO | COMPTE_RENDU
     name: text("name").notNull(),
     mime: text("mime").notNull().default("application/octet-stream"),
     size: integer("size").notNull().default(0),

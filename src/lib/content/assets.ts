@@ -17,10 +17,10 @@ import { contentAssets } from "@/db/schema";
  * du planning passent l'identifiant du contenu en chaîne : ils restent valides.
  */
 export const MAX_ASSET_BYTES = 25 * 1024 * 1024;
-export const ASSET_KINDS = ["LIVRABLE", "REFERENCE", "DEVIS", "FACTURE", "VISUEL", "PHOTO", "COMPTE_RENDU", "PIECE"] as const;
+export const ASSET_KINDS = ["BRIEF", "LIVRABLE", "REFERENCE", "DEVIS", "FACTURE", "VISUEL", "PHOTO", "COMPTE_RENDU", "PIECE"] as const;
 export type AssetKind = (typeof ASSET_KINDS)[number];
 export const ASSET_KIND_LABELS: Record<AssetKind, string> = {
-  LIVRABLE: "Livrable", REFERENCE: "Référence", DEVIS: "Devis", FACTURE: "Facture", VISUEL: "Visuel", PHOTO: "Photo", COMPTE_RENDU: "Compte rendu", PIECE: "PDF de la pièce",
+  BRIEF: "Brief", LIVRABLE: "Livrable", REFERENCE: "Référence", DEVIS: "Devis", FACTURE: "Facture", VISUEL: "Visuel", PHOTO: "Photo", COMPTE_RENDU: "Compte rendu", PIECE: "PDF de la pièce",
 };
 
 export type AssetOwner = { contentId: string } | { activationId: string } | { inventoryItemId: string } | { companySlot: CompanySlot } | { salesDocumentId: string } | { purchaseDocumentId: string };

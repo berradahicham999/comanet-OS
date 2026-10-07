@@ -3,11 +3,13 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { requireAccess, brandFilter, canDo } from "@/lib/access";
 import { listBrands, listUsers } from "@/lib/users";
-import { PageHeader } from "@/components/ui";
+import { PageHeader, Card, Badge, BrandDot } from "@/components/ui";
+import { Download } from "lucide-react";
 import { ContentCalendar, type CalendarView, type CalendarMode } from "@/components/content-calendar";
 import { contentRefs, listBriefTemplates } from "@/lib/content/refs";
-import { listContents, indicators } from "@/lib/content/queries";
-import { iso, startOfMonth, addMonths, mondayOf, addDays, today } from "@/lib/format";
+import { listContents, indicators, myQueue } from "@/lib/content/queries";
+import { safeTone, lateness } from "@/lib/content/shared";
+import { iso, startOfMonth, addMonths, mondayOf, addDays, today, fmtDate } from "@/lib/format";
 import { moveContent, quickCreateContent, duplicateContent } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +18,7 @@ export const metadata = { title: "Planning éditorial" };
 type SP = { view?: string; mode?: string; d?: string; brand?: string; platform?: string; format?: string; status?: string; responsible?: string };
 
 export default async function PlanningPage(props: { searchParams: Promise<SP> }) {
-  await requireAccess("marketing");
+  const me = await requireAccess("marketing");
   const sp = await props.searchParams;
   const now = today(); const todayIso = iso(now);
   const anchor = sp.d && /^\d{4}-\d{2}-\d{2}$/.test(sp.d) ? sp.d : todayIso;
@@ -33,6 +35,7 @@ export default async function PlanningPage(props: { searchParams: Promise<SP> })
     canDo("marketing", "create"), canDo("marketing", "edit"),
   ]);
   const visibleBrands = brands.filter((b) => !scope || scope.includes(b.id));
+  const queue = await myQueue(me.id, scope);
   const cards = await listContents({ start, end, brandIds: scope, brand: sp.brand, platform: sp.platform, format: sp.format, status: sp.status, responsible: sp.responsible, includeArchived: !!sp.status && refs.statuses.some((s) => s.key === sp.status && s.isArchived) }, refs, todayIso);
   const ind = indicators(cards, refs, visibleBrands.map((b) => ({ id: b.id, name: b.name, color: b.color, active: b.active })), todayIso);
 
@@ -43,6 +46,29 @@ export default async function PlanningPage(props: { searchParams: Promise<SP> })
           <Link href="/marketing/planning/validation" className="btn-secondary btn-sm">File de validation{ind.awaiting ? ` · ${ind.awaiting}` : ""}</Link>
           <Link href="/marketing/planning/modeles" className="btn-ghost btn-sm">Modèles de briefs</Link>
         </>} />
+      {queue.length > 0 && (
+        <Card title={`À préparer (${queue.length})`} className="mb-4">
+          <ul className="divide-y divide-line text-[13px]">
+            {queue.map((q) => {
+              const st = refs.statuses.find((s) => s.key === q.status);
+              const late = lateness({ date: q.date, deadline: q.deadline, status: q.status, hasDeliverable: q.hasDeliverable }, refs.statuses, todayIso);
+              return (
+                <li key={q.id} className="flex items-center gap-2 py-2 flex-wrap">
+                  <span className="w-[150px] shrink-0 text-muted whitespace-nowrap">{q.deadline ? `livrable ${fmtDate(q.deadline)}` : `publié ${fmtDate(q.date)}`}</span>
+                  <BrandDot color={q.color} /><span className="text-muted">{q.brand}</span>
+                  <Link href={`/marketing/planning/${q.id}`} className="font-medium hover:underline min-w-0 truncate">{q.title}</Link>
+                  <Badge tone={safeTone(st?.tone)}>{st?.label ?? q.status}</Badge>
+                  {late && <Badge tone="red">En retard</Badge>}
+                  {q.hasDeliverable && <Badge tone="green">Livrable déposé</Badge>}
+                  <span className="ml-auto">{q.briefId
+                    ? <a href={`/marketing/planning/fichier/${q.briefId}?dl=1`} className="btn-secondary btn-sm inline-flex items-center gap-1.5"><Download size={13} /> Brief PDF</a>
+                    : <Link href={`/marketing/planning/${q.id}`} className="text-[12px] text-muted hover:underline">Brief dans la fiche</Link>}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+      )}
       <ContentCalendar
         cards={cards} refs={refs} brands={visibleBrands.map((b) => ({ id: b.id, name: b.name, color: b.color, active: b.active }))}
         users={users.map((u) => ({ id: u.id, name: u.name }))} products={productRows.rows}

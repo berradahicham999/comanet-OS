@@ -86,3 +86,26 @@ export async function validationQueue(brandIds: string[] | null) {
     order by since asc`);
   return r.rows;
 }
+
+export type QueueItem = {
+  id: string; date: string; deadline: string | null; title: string; brand: string; color: string; status: string;
+  platform: string | null; format: string | null; briefId: string | null; hasDeliverable: boolean;
+};
+
+/**
+ * « À préparer » : les contenus dont la personne est responsable, ni publiés ni archivés, du plus urgent
+ * (deadline, sinon date de publication) au plus lointain, avec la dernière version du brief PDF.
+ */
+export async function myQueue(userId: string, brandIds: string[] | null, limit = 8): Promise<QueueItem[]> {
+  const r = await db.execute<QueueItem>(sql`
+    select c.id, c.date::text as date, c.deadline::text as deadline, c.title, b.name as brand, b.color, c.status, c.platform, c.format,
+      (select a.id from content_assets a where a.content_id = c.id and a.kind = 'BRIEF' order by a.version desc limit 1) as "briefId",
+      exists (select 1 from content_assets a where a.content_id = c.id and a.kind = 'LIVRABLE') as "hasDeliverable"
+    from content_items c join brands b on b.id = c.brand_id
+    where c.responsible_id = ${userId}::uuid
+      and c.status not in (select key from content_statuses where is_published or is_archived)
+      ${brandIds ? sql`and c.brand_id = any(${pgArray(brandIds)})` : sql``}
+    order by coalesce(c.deadline, c.date), c.date, c.title
+    limit ${limit}`);
+  return r.rows;
+}
