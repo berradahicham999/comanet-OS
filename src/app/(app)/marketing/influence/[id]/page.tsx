@@ -10,6 +10,7 @@ import { fmtMAD, fmtNum, fmtPct, fmtDateShort, iso, addDays } from "@/lib/format
 import { COLLAB_STATUS } from "@/lib/marketing-shared";
 import { listCollaborations, collabKpis, scoreCollaborations, rankInfluencers, influenceTotals, exposureAggregates } from "@/lib/influence";
 import { INFLUENCE_ERRORS, INFLUENCE_OK } from "@/lib/influence-shared";
+import { CollabPeriod } from "@/components/influence-period";
 import { CollabForm, CollabRowActions, InfluencerEditButton, type FormInfluencer } from "@/components/influence-forms";
 import { saveInfluencer, saveCollaboration, setCollaborationStatus, deleteCollaboration } from "../../actions";
 
@@ -171,11 +172,11 @@ export default async function InfluencerDetailPage(props: { params: Promise<{ id
           {scored.length === 0 ? <Empty title="Aucune collaboration enregistrée" hint="Saisissez la première ci-dessous." /> : (
             <div className="overflow-x-auto">
               <table className="tbl text-[12.5px]">
-                <thead><tr><th>Date</th><th>Marque</th><th>Contenu</th><th className="num">Coût</th><th className="num">Reach</th><th className="num">Eng.</th><th className="num">Clics</th><th className="num">CA mesuré</th><th className="num">Score</th><th colSpan={2}>Statut</th></tr></thead>
+                <thead><tr><th>Période</th><th>Marque</th><th>Contenu</th><th className="num">Coût</th><th className="num">Reach</th><th className="num">Eng.</th><th className="num">Clics</th><th className="num">CA mesuré</th><th className="num">Score</th><th colSpan={2}>Statut</th></tr></thead>
                 <tbody>
                   {scored.map((r) => (
                     <tr key={r.id}>
-                      <td className="whitespace-nowrap">{fmtDateShort(r.date)}</td>
+                      <td><CollabPeriod start={r.date} end={r.end_date} today={iso(ref)} /></td>
                       <td><span className="flex items-center gap-1.5">{r.brand_color && <BrandDot color={r.brand_color} />}{r.brand}</span>{r.product && <div className="text-[11px] text-faint">{r.product}</div>}</td>
                       <td className="text-muted">{[r.reels ? `${r.reels} reel(s)` : null, r.stories ? `${r.stories} story(s)` : null, r.posts ? `${r.posts} post(s)` : null].filter(Boolean).join(" · ") || r.content_type || "—"}{r.campaign && <span className="text-faint"> · {r.campaign}</span>}</td>
                       <td className="num">{seeCosts ? fmtMAD(r.cost, { suffix: false }) : "•••"}</td>
@@ -186,7 +187,7 @@ export default async function InfluencerDetailPage(props: { params: Promise<{ id
                       <td className="num">{r.score === null ? <span className="text-faint">n/c</span> : <Badge tone={r.score >= 70 ? "green" : r.score >= 40 ? "yellow" : "red"}>{r.score}</Badge>}</td>
                       <td colSpan={2}>
                         {canEdit || canDelete ? (
-                          <CollabRowActions row={r} label={`${r.influencer} · ${r.brand} · ${fmtDateShort(r.date)}`} canEdit={canEdit} canDelete={canDelete} statusAction={setCollaborationStatus} deleteAction={deleteCollaboration} {...formProps} />
+                          <CollabRowActions row={r} label={`${r.influencer} · ${r.brand} · ${fmtDateShort(r.date)}${r.end_date ? ` → ${fmtDateShort(r.end_date)}` : ""}`} canEdit={canEdit} canDelete={canDelete} statusAction={setCollaborationStatus} deleteAction={deleteCollaboration} {...formProps} />
                         ) : <Badge tone={COLLAB_STATUS[r.status]?.tone ?? "gray"}>{COLLAB_STATUS[r.status]?.label ?? r.status}</Badge>}
                       </td>
                     </tr>

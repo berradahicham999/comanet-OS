@@ -16,7 +16,10 @@ export type Range = { start: string; end: string };
 
 export type CollabRow = {
   id: string;
+  /** Début de la collaboration. */
   date: string;
+  /** Fin (incluse) ; null = un seul jour. */
+  end_date: string | null;
   influencer_id: string;
   influencer: string;
   followers: number | null;
@@ -106,10 +109,14 @@ export function collabKpis(r: CollabRow): CollabKpis {
   };
 }
 
-/** `range.end` est exclusif ([start, end)), comme partout dans le marketing. */
+/**
+ * `range.end` est exclusif ([start, end)), comme partout dans le marketing. Une collaboration
+ * est retenue dès que sa période chevauche la plage : une collaboration de deux mois apparaît
+ * dans chacun des mois qu'elle couvre (son coût n'est jamais réparti au prorata).
+ */
 export async function listCollaborations(range: Range, filter?: { brandId?: string | null; influencerId?: string | null; status?: string | null; brandIds?: string[] | null }): Promise<CollabRow[]> {
   const res = await db.execute(sql`
-    select c.id, c.date::text as date, c.influencer_id, i.name as influencer, i.followers, i.engagement_rate::float8 as engagement_rate,
+    select c.id, c.date::text as date, c.end_date::text as end_date, c.influencer_id, i.name as influencer, i.followers, i.engagement_rate::float8 as engagement_rate,
            i.category, i.city, c.brand_id, b.name as brand, b.color as brand_color,
            p.name as product, c.campaign_id, ca.name as campaign, c.axis_id, c.content_type,
            c.stories, c.reels, c.posts, c.fee::float8 as fee, c.product_value::float8 as product_value, c.status,
@@ -120,7 +127,7 @@ export async function listCollaborations(range: Range, filter?: { brandId?: stri
     join brands b on b.id = c.brand_id
     left join products p on p.id = c.product_id
     left join campaigns ca on ca.id = c.campaign_id
-    where c.date >= ${range.start}::date and c.date < ${range.end}::date
+    where c.date < ${range.end}::date and coalesce(c.end_date, c.date) >= ${range.start}::date
       ${filter?.brandId ? sql`and c.brand_id = ${filter.brandId}::uuid` : sql``}
       ${filter?.brandIds ? sql`and c.brand_id = any(${pgArray(filter.brandIds)})` : sql``}
       ${filter?.influencerId ? sql`and c.influencer_id = ${filter.influencerId}::uuid` : sql``}

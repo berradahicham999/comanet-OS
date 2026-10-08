@@ -2438,7 +2438,10 @@ export const collaborations = pgTable(
     campaignId: uuid("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
     /** Axe du plan marketing (facultatif). */
     axisId: uuid("axis_id").references((): AnyPgColumn => marketingAxes.id, { onDelete: "set null" }),
+    /** Début de la collaboration. */
     date: date("date").notNull(),
+    /** Fin de la collaboration (bornes incluses) ; NULL = un seul jour. Contrainte : `end_date >= date`. */
+    endDate: date("end_date"),
     contentType: text("content_type"),
     stories: integer("stories").notNull().default(0),
     reels: integer("reels").notNull().default(0),

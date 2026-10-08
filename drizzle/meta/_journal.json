@@ -344,6 +344,13 @@
       "when": 1790000300000,
       "tag": "0048_studio_creatif",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1790000400000,
+      "tag": "0049_collaboration_periode",
+      "breakpoints": true
     }
   ]
 }

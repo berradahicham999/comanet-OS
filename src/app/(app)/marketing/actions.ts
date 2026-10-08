@@ -10,7 +10,7 @@ import {
   type BudgetCategory,
 } from "@/db/schema";
 import { requirePermission, requireFlag, brandInScope } from "@/lib/access";
-import { parseAmount } from "@/lib/influence-shared";
+import { parseAmount, collabEndError } from "@/lib/influence-shared";
 import { COLLAB_STATUS } from "@/lib/marketing-shared";
 import { categoryFromLabel } from "@/lib/budget-categories";
 import { matchKeyFor, backfillLink, clearLink } from "@/lib/meta/links";
@@ -195,6 +195,10 @@ export async function saveCollaboration(formData: FormData) {
   if (!influencerId) backToInfluence(formData, { erreur: "influenceuse" });
   if (!brandId || !(await brandInScope(brandId))) backToInfluence(formData, { erreur: "marque" });
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) backToInfluence(formData, { erreur: "date" });
+  // Fin vide = collaboration d'un seul jour ; sinon postérieure ou égale au début.
+  const endDate = str(formData, "endDate");
+  const endError = collabEndError(date, endDate);
+  if (endError) backToInfluence(formData, { erreur: endError });
   const status = str(formData, "status") ?? "PROSPECT";
   if (!(status in COLLAB_STATUS)) backToInfluence(formData, { erreur: "statut" });
   if (id && !(await collaborationInScope(id))) backToInfluence(formData, { erreur: "introuvable" });
@@ -212,7 +216,7 @@ export async function saveCollaboration(formData: FormData) {
 
   const int = (k: string) => { const v = amount(formData, k, formData); return v === null ? null : Math.round(v); };
   const values: Partial<typeof collaborations.$inferInsert> = {
-    influencerId, brandId, date, productId, campaignId,
+    influencerId, brandId, date, endDate: endDate && endDate !== date ? endDate : null, productId, campaignId,
     ...(formData.has("axisId") ? { axisId: str(formData, "axisId") } : {}),
     contentType: str(formData, "contentType"),
     stories: int("stories") ?? 0, reels: int("reels") ?? 0, posts: int("posts") ?? 0,

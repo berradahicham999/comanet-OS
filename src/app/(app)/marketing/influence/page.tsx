@@ -8,6 +8,7 @@ import { resolvePeriod, PERIOD_OPTIONS, type PeriodParam } from "@/lib/periods";
 import { PageHeader, Card, Kpi, Badge, BrandDot, Section, Empty, Tabs, Progress } from "@/components/ui";
 import { fmtMAD, fmtNum, fmtPct, fmtDateShort, iso } from "@/lib/format";
 import { INFLUENCE_ERRORS, INFLUENCE_OK } from "@/lib/influence-shared";
+import { CollabPeriod } from "@/components/influence-period";
 import { CollabForm, CollabRowActions, InfluencerDirectory, type FormInfluencer } from "@/components/influence-forms";
 import { COLLAB_STATUS, CAMPAIGN_STATUS } from "@/lib/marketing-shared";
 import { listCollaborations, collabKpis, scoreCollaborations, rankInfluencers, collabPipeline, influenceTotals, influenceAdvice } from "@/lib/influence";
@@ -155,11 +156,11 @@ export default async function InfluencePage(props: { searchParams: Promise<{ bra
         <Card>
           <div className="overflow-x-auto">
             <table className="tbl text-[12.5px]">
-              <thead><tr><th>Date</th><th>Influenceuse</th><th>Marque</th><th>Contenu</th><th className="num">Coût</th><th className="num">Reach</th><th className="num">Eng.</th><th className="num">CA mesuré</th><th className="num">Score</th><th colSpan={2}>Statut</th></tr></thead>
+              <thead><tr><th>Période</th><th>Influenceuse</th><th>Marque</th><th>Contenu</th><th className="num">Coût</th><th className="num">Reach</th><th className="num">Eng.</th><th className="num">CA mesuré</th><th className="num">Score</th><th colSpan={2}>Statut</th></tr></thead>
               <tbody>
                 {scored.map((r) => (
                   <tr key={r.id}>
-                    <td className="whitespace-nowrap">{fmtDateShort(r.date)}</td>
+                    <td><CollabPeriod start={r.date} end={r.end_date} today={iso(ref)} /></td>
                     <td className="font-medium"><Link href={`/marketing/influence/${r.influencer_id}`} className="hover:text-accent">{r.influencer}</Link></td>
                     <td><span className="flex items-center gap-1.5">{r.brand_color && <BrandDot color={r.brand_color} />}{r.brand}</span></td>
                     <td className="text-muted">{[r.reels ? `${r.reels} reel(s)` : null, r.stories ? `${r.stories} story(s)` : null, r.posts ? `${r.posts} post(s)` : null].filter(Boolean).join(" · ") || r.content_type || "—"}{r.campaign && <span className="text-faint"> · {r.campaign}</span>}</td>
@@ -169,7 +170,7 @@ export default async function InfluencePage(props: { searchParams: Promise<{ bra
                     <td className="num">{r.measured ? fmtMAD(r.attributed_revenue ?? 0, { suffix: false }) : <span className="text-faint" title="Aucun code promo ou lien tracké : impossible d'attribuer un CA à cette collaboration.">non mesurable</span>}</td>
                     <td className="num">{r.score === null ? <span className="text-faint">n/c</span> : r.score}</td>
                     <td colSpan={2}>
-                      <CollabRowActions row={r} label={`${r.influencer} · ${r.brand} · ${fmtDateShort(r.date)}`} canEdit={canEdit} canDelete={canDelete} statusAction={setCollaborationStatus} deleteAction={deleteCollaboration} {...formProps} />
+                      <CollabRowActions row={r} label={`${r.influencer} · ${r.brand} · ${fmtDateShort(r.date)}${r.end_date ? ` → ${fmtDateShort(r.end_date)}` : ""}`} canEdit={canEdit} canDelete={canDelete} statusAction={setCollaborationStatus} deleteAction={deleteCollaboration} {...formProps} />
                     </td>
                   </tr>
                 ))}
