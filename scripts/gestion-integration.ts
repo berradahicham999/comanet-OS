@@ -467,6 +467,40 @@ async function main() {
     const vReal = await D.validateDocument(blReal, who, { override: true });
     assert.ok(/^BL\d/.test(vReal.number) && !vReal.simulation, vReal.number);
     assert.equal((await one<{ n: number }>(sql`select count(*)::int as n from sales where source = 'COMANET_OS' and lvc_ref = ${vReal.number}`)).n, 1);
+    // Changer de client : BL validé sur la mauvaise fiche → tout suit (identité figée, ventes projetées, PDF), le reste ne bouge pas.
+    const realBefore = (await D.getDocument(blReal))!;
+    await refused("changement de client sans motif", () => D.reassignDocumentClient(blReal, { clientId: keptC.id, legalEntityId: null, reason: " " }, who), /motif/);
+    await refused("changement vers le même client et la même identité", () => D.reassignDocumentClient(blReal, { clientId: client.id, legalEntityId: null, reason: "test" }, who), /Rien à changer/);
+    await refused("raison sociale d'un autre client", () => D.reassignDocumentClient(blReal, { clientId: client.id, legalEntityId: ent.id, reason: "test" }, who), /n'appartient pas/);
+    const regen = await D.reassignDocumentClient(blReal, { clientId: keptC.id, legalEntityId: null, reason: "Saisi sur le mauvais client" }, who);
+    assert.deepEqual(regen, [blReal]);
+    const realAfter = (await D.getDocument(blReal))!;
+    const realSnap = realAfter.clientSnapshot as Record<string, string | null>;
+    assert.equal(realAfter.clientId, keptC.id);
+    assert.equal(realSnap.legalName, "PARA GLOIRE " + tag);
+    assert.equal(realSnap.ice, "001234567000089");
+    assert.equal(realSnap.city, "FES");
+    assert.equal(realAfter.number, realBefore.number);
+    assert.equal(realAfter.ttc, realBefore.ttc);
+    assert.equal(realAfter.pdfAssetId, null);
+    assert.notEqual(realAfter.contentHash, realBefore.contentHash);
+    assert.equal((await one<{ c: string; r: string }>(sql`select client_id::text as c, raw_client as r from sales where source = 'COMANET_OS' and lvc_ref = ${vReal.number}`)).c, keptC.id);
+    assert.equal((await D.listDocuments({ type: "BL", clientIds: [keptC.id] })).find((x) => x.id === blReal)?.client, "PARA GLOIRE " + tag);
+    // Même fiche, raison sociale supplémentaire : l'identité de l'entité remplace celle de la fiche.
+    await D.reassignDocumentClient(blReal, { clientId: keptC.id, legalEntityId: ent.id, reason: "Au nom de la SARL" }, who);
+    assert.equal(((await D.getDocument(blReal))!.clientSnapshot as Record<string, string>).ice, "002222222000022");
+    await refused("modifier le client d'une pièce validée hors de la fonction", () => db.execute(sql`update sales_documents set client_id = ${client.id}::uuid where id = ${blReal}::uuid`), /plus modifiable/);
+    await refused("changer le client d'une facture", () => D.reassignDocumentClient(invM, { clientId: client.id, legalEntityId: null, reason: "test" }, who), /avoir/);
+    await refused("le garde-fou de la base, même annoncé, pour une facture", () => db.execute(sql`
+      with s as (select set_config('comanet.reassign_client', 'on', true) as v)
+      update sales_documents set client_id = ${client.id}::uuid where id = ${invM}::uuid and exists (select 1 from s where v = 'on')`), /plus modifiable/);
+    await refused("changer le client d'un BL issu d'une commande", () => D.reassignDocumentClient(blA, { clientId: keptC.id, legalEntityId: null, reason: "test" }, who), /commande/);
+    await refused("commande avec BL validés sans le droit sur les livraisons", () => D.reassignDocumentClient(bc, { clientId: keptC.id, legalEntityId: null, reason: "test" }, who), /livraison/);
+    const viaOrder = await D.reassignDocumentClient(bc, { clientId: keptC.id, legalEntityId: null, reason: "Mauvais client" }, who, { canCascadeBL: true });
+    assert.deepEqual(viaOrder.sort(), [bc, blA].sort());
+    assert.equal((await D.getDocument(blA))!.clientId, keptC.id);
+    assert.equal((await D.getDocument(blB))!.clientId, client.id, "un BL annulé reste sur son client");
+    console.log(`✓ changement de client : ${vReal.number} passe sur « PARA GLOIRE » (ICE, ventes, empreinte, PDF), facture et BL de commande refusés, la commande emporte ses BL`);
     const ledger = (await stockState({ productIds: [p2.id] }))[0].available;
     assert.equal((await productStocks({ productId: p2.id }))[0].stock, Number(ledger));
     const vr = await RG.createPayment({ clientId: client.id, date: day, modeKey: "VIREMENT", amount: "100", reference: "VIR2", allocations: [{ invoiceId: repDoc.id, amount: "100" }] }, who);

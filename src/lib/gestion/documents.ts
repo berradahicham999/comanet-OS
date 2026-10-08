@@ -18,7 +18,7 @@ import { recordStockMovements, type LedgerInput } from "./ledger";
 import { allocateFefo } from "./ledger-shared";
 import { SCALE, formatScaled, fromDb, parseDecimal } from "./money";
 import { allocateNumber } from "./numbering";
-import { attachInvoiceNumber, projectDocument, removeProjection } from "./projection";
+import { attachInvoiceNumber, projectDocument, reassignProjection, removeProjection } from "./projection";
 import { allocateCreditIn } from "./payments";
 
 /**
@@ -136,7 +136,7 @@ export type DocumentListRow = {
 /** `ownerId` : portée « ses données » — seulement les pièces saisies par cette personne ou qui lui sont attribuées (commandes d'un commercial). */
 export async function listDocuments(opts: { type?: DocType; clientIds?: string[] | null; ownerId?: string; limit?: number } = {}): Promise<DocumentListRow[]> {
   const r = await db.execute<DocumentListRow>(sql`
-    select d.id, d.type, d.status, d.number, d.date::text as date, d.client_id as "clientId", c.name as client, c.city,
+    select d.id, d.type, d.status, d.number, d.date::text as date, d.client_id as "clientId", coalesce(d.client_snapshot->>'legalName', c.name) as client, coalesce(d.client_snapshot->>'city', c.city) as city,
       d.net_ht::text as "netHt", d.ttc::text as ttc, d.is_simulation as "isSimulation", d.sales_rep_name as "salesRep",
       d.due_date::text as "dueDate", d.site, (d.approval_requested_at is not null and d.status = 'BROUILLON') as "approvalRequested"
     from sales_documents d join clients c on c.id = d.client_id
@@ -424,6 +424,39 @@ function canonicalHash(doc: Record<string, unknown>, lines: Record<string, unkno
   return createHash("sha256").update(JSON.stringify({ doc, lines })).digest("hex");
 }
 
+type HashedDoc = { type: string; date: string; grossHt: string; netHt: string; vatTotal: string; ttc: string; globalDiscountPct: string };
+type HashedLine = { ref: string | null; designation: string; quantity: string; freeQuantity: string; unitPriceHt: string; discountPct: string; taxRate: string; netHt: string; vatAmount: string; ttc: string };
+
+/** Empreinte d'une pièce validée : numéro, identité figée du client, montants et lignes. */
+function documentHash(number: string, doc: HashedDoc, client: Record<string, unknown>, lines: HashedLine[]): string {
+  return canonicalHash(
+    { number, type: doc.type, date: doc.date, client, grossHt: doc.grossHt, netHt: doc.netHt, vatTotal: doc.vatTotal, ttc: doc.ttc, globalDiscountPct: doc.globalDiscountPct },
+    lines.map((l) => ({ ref: l.ref, designation: l.designation, quantity: l.quantity, free: l.freeQuantity, pu: l.unitPriceHt, discount: l.discountPct, rate: l.taxRate, net: l.netHt, vat: l.vatAmount, ttc: l.ttc })),
+  );
+}
+
+/** Identité légale lue dans la fiche client (et la raison sociale choisie), au format figé sur la pièce. */
+async function clientIdentitySnapshot(tx: Tx, clientId: string, legalEntityId: string | null) {
+  const client = (await tx.execute<Record<string, string | number | boolean | null>>(sql`
+    select id, name, legal_name, account_code, code, ice, if_number, rc, patente, billing_address, postal_code, city, phone, email, payment_days, payment_mode_key, active
+    from clients where id = ${clientId}::uuid`)).rows[0];
+  if (!client) throw new DocumentError("Client introuvable.");
+  const entity = legalEntityId ? (await tx.execute<Record<string, string | null>>(sql`
+    select legal_name, account_code, ice, if_number, rc, patente, billing_address, postal_code, city from client_legal_entities
+    where id = ${legalEntityId}::uuid and client_id = ${clientId}::uuid`)).rows[0] : null;
+  if (legalEntityId && !entity) throw new DocumentError("Cette raison sociale n'appartient pas au client choisi.");
+  const s = (v: unknown) => (v ?? null) as string | null;
+  const identity = billingIdentity(
+    { name: String(client.name), code: s(client.code), legalName: s(client.legal_name), accountCode: s(client.account_code), ice: s(client.ice), ifNumber: s(client.if_number), rc: s(client.rc), patente: s(client.patente), billingAddress: s(client.billing_address), postalCode: s(client.postal_code), city: s(client.city) },
+    entity ? { legalName: entity.legal_name, accountCode: entity.account_code, ice: entity.ice, ifNumber: entity.if_number, rc: entity.rc, patente: entity.patente, billingAddress: entity.billing_address, postalCode: entity.postal_code, city: entity.city } : null,
+  );
+  const snapshot = {
+    name: identity.name, legalName: identity.legalName, accountCode: identity.accountCode, ice: identity.ice, ifNumber: identity.ifNumber,
+    rc: identity.rc, patente: identity.patente, address: identity.billingAddress, postalCode: identity.postalCode, city: identity.city, phone: client.phone,
+  };
+  return { client, entity, identity, snapshot };
+}
+
 /**
  * Valide une pièce : contrôles, levée des blocages (si `override` et droit), numéro pris dans la
  * transaction, identités figées, sortie de stock (BL, au plus proche de la péremption) ou retour
@@ -443,16 +476,8 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
     if (doc.date > todayIso) throw new DocumentError("Une pièce ne se valide pas à une date future.");
 
     // Identité : une facture ou un avoir porte les mentions obligatoires.
-    const client = (await tx.execute<Record<string, string | number | boolean | null>>(sql`
-      select id, name, legal_name, account_code, code, ice, if_number, rc, patente, billing_address, postal_code, city, phone, email, payment_days, payment_mode_key
-      from clients where id = ${doc.clientId}::uuid`)).rows[0];
-    const entity = doc.legalEntityId ? (await tx.execute<Record<string, string | null>>(sql`
-      select legal_name, account_code, ice, if_number, rc, patente, billing_address, postal_code, city from client_legal_entities where id = ${doc.legalEntityId}::uuid`)).rows[0] : null;
+    const { client, entity, identity, snapshot: clientSnapshot } = await clientIdentitySnapshot(tx, doc.clientId, doc.legalEntityId);
     const s = (v: unknown) => (v ?? null) as string | null;
-    const identity = billingIdentity(
-      { name: String(client.name), code: s(client.code), legalName: s(client.legal_name), accountCode: s(client.account_code), ice: s(client.ice), ifNumber: s(client.if_number), rc: s(client.rc), patente: s(client.patente), billingAddress: s(client.billing_address), postalCode: s(client.postal_code), city: s(client.city) },
-      entity ? { legalName: entity.legal_name, accountCode: entity.account_code, ice: entity.ice, ifNumber: entity.if_number, rc: entity.rc, patente: entity.patente, billingAddress: entity.billing_address, postalCode: entity.postal_code, city: entity.city } : null,
-    );
     if (type === "FACTURE" || type === "AVOIR") {
       const r = billingReadiness({ legalName: entity ? identity.legalName : s(client.legal_name), ice: identity.ice, billingAddress: identity.billingAddress, city: identity.city, accountCode: null, paymentDays: null, paymentModeKey: null });
       if (!r.ready) throw new DocumentError(`${entity ? `Raison sociale « ${identity.legalName} »` : "Fiche client"} incomplète pour facturer : ${r.missing.join(", ")}.`);
@@ -570,16 +595,9 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
     const { number, year } = await allocateNumber(tx, seriesKey, doc.date);
     const files = (await tx.execute<{ slot: string; id: string }>(sql`select distinct on (company_slot) company_slot as slot, id from content_assets where company_slot is not null order by company_slot, version desc`)).rows;
     const companySnapshot = { ...g.company, logoAssetId: files.find((f) => f.slot === "LOGO")?.id ?? null, cachetAssetId: files.find((f) => f.slot === "CACHET")?.id ?? null };
-    const clientSnapshot = {
-      name: identity.name, legalName: identity.legalName, accountCode: identity.accountCode, ice: identity.ice, ifNumber: identity.ifNumber,
-      rc: identity.rc, patente: identity.patente, address: identity.billingAddress, postalCode: identity.postalCode, city: identity.city, phone: client.phone,
-    };
     const due = type === "FACTURE" ? dueDateOf(doc.date, client.payment_days as number | null, g.defaultPaymentDays, g.maxPaymentDays) : null;
     const words = type === "BL" || type === "COMMANDE" ? null : amountInWords(doc.ttc, g.amountWords.major, g.amountWords.minor);
-    const hash = canonicalHash(
-      { number, type, date: doc.date, client: clientSnapshot, grossHt: doc.grossHt, netHt: doc.netHt, vatTotal: doc.vatTotal, ttc: doc.ttc, globalDiscountPct: doc.globalDiscountPct },
-      doc.lines.map((l) => ({ ref: l.ref, designation: l.designation, quantity: l.quantity, free: l.freeQuantity, pu: l.unitPriceHt, discount: l.discountPct, rate: l.taxRate, net: l.netHt, vat: l.vatAmount, ttc: l.ttc })),
-    );
+    const hash = documentHash(number, doc, clientSnapshot, doc.lines);
     await tx.update(salesDocuments).set({
       status: "VALIDE", number, seriesKey, fiscalYear: year, isSimulation: simulation, clientSnapshot, companySnapshot,
       paymentDays: due?.days ?? null, dueDate: due?.dueDate ?? null, paymentModeKey: doc.paymentModeKey ?? (client.payment_mode_key as string | null),
@@ -743,6 +761,90 @@ export async function renameDocumentClient(id: string, name: string, reason: str
     if (before === next) throw new DocumentError("Le nom est inchangé.");
     await tx.update(salesDocuments).set({ clientSnapshot: { ...snap, legalName: next }, pdfAssetId: null, updatedAt: new Date() }).where(eq(salesDocuments.id, id));
     await audit({ actor, action: "RENAME_CLIENT", module: moduleOf(d.type as DocType), entity: "sales_document", entityId: id, label: d.number, before: { legalName: before }, after: { legalName: next, reason: reason.trim() } }, tx);
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Changement de client d'une pièce validée                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Rattache un BL ou une commande validés à un autre client (pièce saisie sur la mauvaise fiche), ou
+ * reprend l'identité actuelle de la même fiche (ICE ou adresse corrigés après coup). Tout suit : client,
+ * raison sociale, identité figée (nom, ICE, adresse, code), empreinte, ventes projetées, PDF détaché pour
+ * être régénéré. Une commande emporte ses BL. Montants, numéro, lignes et stock ne bougent pas.
+ * Refusé pour une facture ou un avoir (pièce fiscale : avoir puis nouvelle facture), un BL facturé, un BL
+ * issu d'une commande (on change la commande), une pièce annulée (sauf une commande : ses BL livrés la suivent).
+ * Motif obligatoire, `audit()` par pièce.
+ * Rend les pièces validées dont le PDF est à régénérer.
+ */
+export async function reassignDocumentClient(
+  id: string,
+  input: { clientId: string; legalEntityId: string | null; reason: string },
+  actor: AuditActor,
+  opts: { canCascadeBL?: boolean } = {},
+): Promise<string[]> {
+  const reason = input.reason.trim();
+  if (!reason) throw new DocumentError("Indiquez le motif du changement de client.");
+  return db.transaction(async (tx) => {
+    const [d] = await tx.select().from(salesDocuments).where(eq(salesDocuments.id, id)).for("update");
+    if (!d) throw new DocumentError("Pièce introuvable.");
+    const type = d.type as DocType;
+    if (d.status === "BROUILLON") throw new DocumentError("Un brouillon change de client dans sa saisie.");
+    // Une commande annulée garde ses BL déjà livrés : elle change encore de client pour les emporter.
+    if (d.status === "ANNULE" && type !== "COMMANDE") throw new DocumentError("Une pièce annulée ne change plus de client.");
+    if (type === "FACTURE" || type === "AVOIR") throw new DocumentError("Une facture ou un avoir ne change pas de client : faites un avoir sur la pièce, puis refacturez au bon client.");
+    if (type === "BL" && d.originDocumentId) {
+      const o = (await tx.execute<{ number: string | null; type: string }>(sql`select number, type from sales_documents where id = ${d.originDocumentId}::uuid`)).rows[0];
+      if (o?.type === "COMMANDE") throw new DocumentError(`Ce BL vient de la commande ${o.number} : changez le client sur la commande, ses BL suivent.`);
+    }
+
+    const { client, snapshot, identity } = await clientIdentitySnapshot(tx, input.clientId, input.legalEntityId);
+    if (client.active === false) throw new DocumentError("Ce client est archivé : réactivez sa fiche d'abord.");
+
+    // Pièces concernées : la pièce, et pour une commande les BL qui en sont issus (non annulés).
+    const children = type === "COMMANDE"
+      ? await tx.select().from(salesDocuments).where(sql`${salesDocuments.originDocumentId} = ${id}::uuid and ${salesDocuments.type} = 'BL' and ${salesDocuments.status} <> 'ANNULE'`).for("update")
+      : [];
+    const docs = [d, ...children];
+    const validated = docs.filter((x) => x.status !== "BROUILLON");
+    if (children.some((x) => x.status !== "BROUILLON") && !opts.canCascadeBL) throw new DocumentError("Des BL validés suivent cette commande : il faut aussi le droit « Valider » sur les bons de livraison.");
+    const linesByDoc = new Map<string, (typeof salesDocumentLines.$inferSelect)[]>();
+    for (const x of validated) {
+      const lines = await tx.select().from(salesDocumentLines).where(eq(salesDocumentLines.documentId, x.id)).orderBy(salesDocumentLines.position);
+      if (x.type === "BL" && lines.some((l) => (parseDecimal(l.invoicedQty, SCALE.qty) ?? 0n) > 0n)) {
+        throw new DocumentError(`Le BL ${x.number} est (en partie) facturé : il ne change plus de client. Faites un avoir sur la facture, puis refacturez.`);
+      }
+      linesByDoc.set(x.id, lines);
+    }
+
+    const same = (x: typeof d) => x.clientId === input.clientId && (x.legalEntityId ?? null) === (input.legalEntityId ?? null)
+      && Object.entries(snapshot).every(([k, v]) => ((x.clientSnapshot ?? {}) as Record<string, unknown>)[k] == v);
+    if (same(d)) throw new DocumentError("Rien à changer : la pièce porte déjà ce client et son identité actuelle.");
+
+    // Le garde-fou de la table ne laisse bouger client, identité et empreinte que dans cette transaction.
+    await tx.execute(sql`select set_config('comanet.reassign_client', 'on', true)`);
+    const regen: string[] = [];
+    for (const x of docs) {
+      if (x.status === "BROUILLON") {
+        await tx.update(salesDocuments).set({ clientId: input.clientId, legalEntityId: input.legalEntityId, updatedAt: new Date() }).where(eq(salesDocuments.id, x.id));
+        continue;
+      }
+      const lines = linesByDoc.get(x.id)!;
+      const hash = documentHash(x.number!, x, snapshot, lines);
+      await tx.update(salesDocuments).set({
+        clientId: input.clientId, legalEntityId: input.legalEntityId, clientSnapshot: snapshot, contentHash: hash, pdfAssetId: null, updatedAt: new Date(),
+      }).where(eq(salesDocuments.id, x.id));
+      const projected = await reassignProjection(tx, lines.map((l) => l.id), input.clientId, String(identity.legalName));
+      const before = (x.clientSnapshot ?? {}) as Record<string, unknown>;
+      await audit({
+        actor, action: "REASSIGN_CLIENT", module: moduleOf(x.type as DocType), entity: "sales_document", entityId: x.id, label: x.number,
+        before: { clientId: x.clientId, legalName: before.legalName ?? null, ice: before.ice ?? null, city: before.city ?? null },
+        after: { clientId: input.clientId, legalName: snapshot.legalName, ice: snapshot.ice, city: snapshot.city, reason, viaOrder: x.id === id ? undefined : d.number, sales: projected || undefined },
+      }, tx);
+      regen.push(x.id);
+    }
+    return regen;
   });
 }
 

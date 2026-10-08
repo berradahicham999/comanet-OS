@@ -2,11 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { clientInScope, hasFlag, isOwnOnly, requireAccessContext, requirePermission } from "@/lib/access";
+import { canDo, clientInScope, hasFlag, isOwnOnly, requireAccessContext, requirePermission } from "@/lib/access";
 import { errorParam, isUuid, str } from "@/lib/gestion/form";
 import { DOC_TYPES, isOwnOrder, moduleOfType as moduleOf, type DocType } from "@/lib/gestion/documents-shared";
 import {
-  CommercialBlockError, cancelBL, cancelOrder, createBLFromOrder, renameDocumentClient, createCreditNote, createInvoiceFromBLs, deleteDraft, getDocument, markDelivered,
+  CommercialBlockError, cancelBL, cancelOrder, createBLFromOrder, reassignDocumentClient, renameDocumentClient, createCreditNote, createInvoiceFromBLs, deleteDraft, getDocument, markDelivered,
   requestApproval, saveDraft, validateDocument, type DraftInput,
 } from "@/lib/gestion/documents";
 import { storedPdf } from "@/lib/gestion/pdf";
@@ -208,6 +208,32 @@ export async function creditNoteAction(fd: FormData) {
     redirect(`/gestion/pieces/${invoiceId}?error=${errorParam(e)}`);
   }
   done(id);
+  redirect(`/gestion/pieces/${id}?done=1`);
+}
+
+/**
+ * Change le client d'un BL ou d'une commande validés (droit Valider du module de la pièce ; une commande
+ * qui emporte des BL validés demande aussi Valider sur les livraisons), puis régénère les PDF.
+ */
+export async function reassignClientAction(fd: FormData) {
+  const id = str(fd, "id");
+  try {
+    const d = await docOrThrow(id);
+    const user = await requirePermission(moduleOf(d.type as DocType), "validate");
+    const clientId = str(fd, "clientId");
+    if (!isUuid(clientId)) throw new Error("Choisissez le client.");
+    if (!(await clientInScope(clientId))) throw new Error("Accès refusé : ce client n'est pas dans votre périmètre.");
+    const entity = str(fd, "legalEntityId");
+    const regen = await reassignDocumentClient(d.id, { clientId, legalEntityId: isUuid(entity) ? entity : null, reason: str(fd, "reason") ?? "" },
+      { id: user.id, name: user.name }, { canCascadeBL: await canDo("livraisons", "validate") });
+    for (const x of regen) {
+      try { await storedPdf(x, user.id); } catch (e) { console.error("PDF de pièce", x, e); }
+      revalidatePath(`/gestion/pieces/${x}`);
+    }
+  } catch (e) {
+    redirect(`/gestion/pieces/${id}?error=${errorParam(e)}`);
+  }
+  done(id!);
   redirect(`/gestion/pieces/${id}?done=1`);
 }
 
