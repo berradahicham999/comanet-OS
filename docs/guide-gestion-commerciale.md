@@ -100,9 +100,9 @@ mêmes tables que BL, factures et avoirs (migration 0042 : série `BC`, colonne 
 | Écran | Rôle |
 |---|---|
 | **Commandes clients** (`/gestion/pieces?type=COMMANDE`, entrée de menu dédiée) | Liste des commandes : brouillons, confirmées, livrées en partie, livrées, annulées. |
-| **+ Commande client** (`/gestion/pieces/nouveau?type=COMMANDE`) | Même éditeur que le BL, **sans remise** (ni par ligne, ni globale) : client, raison sociale, date, site, commercial ; **produits habituels du client** (12 mois, un appui ajoute la quantité moyenne commandée), recherche d'article, stock disponible, prix au PPH ; « Brouillon » ou « Confirmer ». |
+| **+ Commande client** (`/gestion/pieces/nouveau?type=COMMANDE`) | Même éditeur que le BL, **avec la remise négociée** (par ligne, pré-remplie avec la remise du client, et globale) : client, raison sociale, date, site, commercial ; **produits habituels du client** (12 mois, un appui ajoute la quantité moyenne commandée), recherche d'article, stock disponible, prix au PPH ; « Brouillon » ou « Confirmer ». |
 | **Fiche commande** | Confirmée : numéro `BC`, PDF, envoi WhatsApp / e-mail avec lien public, colonne « Livré x / y » par ligne, **Préparer le BL**, Annuler la commande, pièces liées (ses BL), historique. |
-| **BL préparé depuis une commande** | Brouillon de BL avec l'en-tête et les lignes au reste à livrer (UG sur la première livraison), **la remise du client posée automatiquement** sur chaque ligne (remise sur la marque, sinon remise par défaut, comme sur un BL saisi à la main). **Tout reste modifiable** avant validation : quantités, prix, remises, remise globale, raison sociale, articles ajoutés. Le BL imprime « Suivant commande n° BC… ». |
+| **BL préparé depuis une commande** | Brouillon de BL avec l'en-tête et les lignes au reste à livrer (UG sur la première livraison), **les remises de la commande reprises telles quelles** (par ligne et globale) ; une commande sans aucune remise (saisie avant le 08/10/2026) reçoit la remise du client (sur la marque, sinon par défaut). **Tout reste modifiable** avant validation : quantités, prix, remises, remise globale, raison sociale, articles ajoutés. Le BL imprime « Suivant commande n° BC… ». |
 | **Action Center** | « Commandes clients à préparer » (confirmées sans BL au-delà de `settings.gestion.orderPrepAlertDays`, 2 jours par défaut) et « Commandes clients sans stock » (reste à livrer supérieur au stock de l'entrepôt). |
 
 Règles :
@@ -110,8 +110,10 @@ Règles :
 - **Cycle.** Brouillon → Confirmée (`VALIDE`, numéro BC) → Livrée en partie (`LIVRE_PARTIEL`) → Livrée (`LIVRE`) ;
   ou Annulée. Le statut suit les quantités livrées (`orderStatusAfterDelivery()`), recalculées à chaque validation
   ou annulation de BL. Livrer plus que commandé est permis : la commande est une intention, le BL engage.
-- **Pas de remise sur la commande** (décision d'Hicham) : le serveur force 0 quoi que le formulaire envoie ; la remise
-  n'apparaît qu'au BL, calculée depuis la fiche client. Le montant d'une commande est donc au PPH, avant remise.
+- **Remise sur la commande** (décision d'Hicham, 08/10/2026, qui remplace « pas de remise sur la commande ») : le
+  commercial saisit la remise négociée, pré-remplie avec celle du client. Au-delà de la remise autorisée, la
+  confirmation est bloquée (déblocage comme sur un BL). Le BL préparé reprend la remise confirmée et la considère
+  comme autorisée : pas de second déblocage, sauf si on la relève sur le BL. Le PDF de la commande imprime la remise.
 - **Ni stock, ni vente, ni encours.** Seul le BL sort le stock et, en mode actif, alimente les ventes. La série `BC`
   est réelle avant comme après la bascule : une commande n'est pas une pièce fiscale, elle sert dès aujourd'hui.
 - **Blocages commerciaux** à la confirmation comme sur un BL (client bloqué, remise, vente à perte, encours si

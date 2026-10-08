@@ -81,8 +81,6 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
   // Verrou des lignes et de l'en-tête repris : facture et avoir seulement. Un BL préparé depuis une commande reste libre.
   const locked = fromOrigin && type !== "BL";
   const stocked = type === "BL" || type === "COMMANDE";
-  // Une commande client ne porte pas de remise : la remise du client s'applique au BL préparé depuis la commande.
-  const noDiscount = type === "COMMANDE";
 
   // Produits habituels du client (12 mois), chargés dès que le client est connu : commande et BL.
   const [usualFor, setUsualFor] = useState<{ clientId: string; rows: UsualClientProduct[] } | null>(null);
@@ -136,7 +134,7 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
     const c = data.clients.find((x) => x.id === id);
     if (c?.paymentModeKey && !paymentModeKey) setPaymentModeKey(c.paymentModeKey);
     // Les remises par défaut suivent le client choisi (lignes saisies, pas les lignes reprises).
-    if (c && !noDiscount) setLines((ls) => ls.map((l) => {
+    if (c) setLines((ls) => ls.map((l) => {
       if (l.sourceLineId || !l.productId) return l;
       const p = data.products.find((x) => x.id === l.productId);
       return { ...l, discountPct: defaultDiscount(c.defaultDiscountPct, p?.brandId ? c.brandDiscounts[p.brandId] ?? null : null) };
@@ -152,7 +150,7 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
     }
     setLines((ls) => [...ls, {
       key: newKey(), productId: p.id, designation: p.name, ref: p.ref, quantity: String(qty), freeQuantity: "0",
-      unitPriceHt: baseUnitPriceHt(p.publicPriceTtc, p.taxRate) ?? "", discountPct: client && !noDiscount ? defaultDiscount(client.defaultDiscountPct, p.brandId ? client.brandDiscounts[p.brandId] ?? null : null) : "0",
+      unitPriceHt: baseUnitPriceHt(p.publicPriceTtc, p.taxRate) ?? "", discountPct: client ? defaultDiscount(client.defaultDiscountPct, p.brandId ? client.brandDiscounts[p.brandId] ?? null : null) : "0",
       taxRate: p.taxRate, sourceLineId: null, sourceNumber: null, returnWarehouseKey: null, maxQty: null,
     }]);
   };
@@ -164,11 +162,11 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
   const remove = (key: string) => setLines((ls) => ls.filter((l) => l.key !== key));
 
   const payload = JSON.stringify({
-    id: initial.id, type, clientId, legalEntityId: legalEntityId || null, date, site, salesRepId: salesRepId || null, paymentModeKey: paymentModeKey || null, globalDiscountPct: noDiscount ? "0" : globalDiscountPct || "0",
+    id: initial.id, type, clientId, legalEntityId: legalEntityId || null, date, site, salesRepId: salesRepId || null, paymentModeKey: paymentModeKey || null, globalDiscountPct: globalDiscountPct || "0",
     notes: notes.trim() || null, reasonKey: type === "AVOIR" ? reasonKey || null : null, originDocumentId: initial.originDocumentId,
     lines: lines.map((l) => ({
       productId: l.productId, designation: l.designation, quantity: l.quantity, freeQuantity: l.freeQuantity || "0", unitPriceHt: l.unitPriceHt,
-      discountPct: noDiscount ? "0" : l.discountPct || "0", taxRate: l.taxRate, sourceLineId: l.sourceLineId,
+      discountPct: l.discountPct || "0", taxRate: l.taxRate, sourceLineId: l.sourceLineId,
       returnWarehouseKey: type === "AVOIR" && reason?.withReturn && l.productId ? l.returnWarehouseKey ?? "PRINCIPAL" : null,
     })),
   });
@@ -314,8 +312,8 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
                       <input className="input h-9 text-right" inputMode="decimal" value={l.freeQuantity} disabled={frozen} onChange={(e) => update(l.key, { freeQuantity: e.target.value.replace(",", ".") })} /></label>}
                     <label className="block"><span className="label block mb-0.5">P.U. HT</span>
                       <input className="input h-9 text-right" inputMode="decimal" value={l.unitPriceHt} disabled={frozen} onChange={(e) => update(l.key, { unitPriceHt: e.target.value.replace(",", ".") })} /></label>
-                    {!noDiscount && <label className="block"><span className="label block mb-0.5">Remise %</span>
-                      <input className="input h-9 text-right" inputMode="decimal" value={l.discountPct} disabled={frozen} onChange={(e) => update(l.key, { discountPct: e.target.value.replace(",", ".") })} /></label>}
+                    <label className="block"><span className="label block mb-0.5">Remise %</span>
+                      <input className="input h-9 text-right" inputMode="decimal" value={l.discountPct} disabled={frozen} onChange={(e) => update(l.key, { discountPct: e.target.value.replace(",", ".") })} /></label>
                     {!l.productId && !l.sourceLineId ? (
                       <label className="block"><span className="label block mb-0.5">TVA %</span>
                         <input className="input h-9 text-right" inputMode="decimal" value={l.taxRate} onChange={(e) => update(l.key, { taxRate: e.target.value.replace(",", ".") })} /></label>
@@ -337,11 +335,11 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
       {/* Pied */}
       <div className="grid lg:grid-cols-[1fr_320px] gap-4">
         <div className="card p-4 space-y-3">
-          {!locked && !noDiscount && (
+          {!locked && (
             <label className="block max-w-40"><span className="label block mb-1">Remise globale %</span>
               <input className="input h-9 text-right" inputMode="decimal" value={globalDiscountPct} onChange={(e) => setGlobal(e.target.value.replace(",", "."))} /></label>
           )}
-          {noDiscount && <p className="text-[12px] text-muted">Pas de remise sur la commande : la remise du client (par marque, sinon par défaut) sera posée automatiquement sur le bon de livraison préparé depuis cette commande.</p>}
+          {type === "COMMANDE" && <p className="text-[12px] text-muted">Remise pré-remplie avec celle du client (par marque, sinon par défaut), modifiable ligne par ligne. Au-delà de la remise autorisée, la confirmation demande un déblocage ; la remise confirmée est reprise telle quelle sur le BL.</p>}
           <label className="block"><span className="label block mb-1">Note imprimée sur la pièce</span>
             <textarea className="input min-h-16 py-2" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} /></label>
         </div>

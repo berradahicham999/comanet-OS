@@ -138,6 +138,18 @@ export function defaultDiscount(clientDefaultPct: string | null, brandPct: strin
   return brandPct ?? clientDefaultPct ?? "0";
 }
 
+/** Remise effective d'une ligne (en cascade avec la remise globale, pas en addition) : 1 − (1 − d)(1 − g). */
+export function effectiveDiscountPct(linePct: string, globalPct: string): string {
+  const d = parseDecimal(linePct, SCALE.pct) ?? 0n, g = parseDecimal(globalPct, SCALE.pct) ?? 0n;
+  return formatScaled(10000n - roundDiv((10000n - d) * (10000n - g), 10000n), SCALE.pct);
+}
+
+/** La plus grande de deux remises (la seconde peut manquer). */
+export function maxPct(a: string, b: string | null): string {
+  if (b === null) return a;
+  return (parseDecimal(b, SCALE.pct) ?? 0n) > (parseDecimal(a, SCALE.pct) ?? 0n) ? b : a;
+}
+
 /** Montant lisible dans un message : arrondi au centime, virgule décimale (« 126,25 »). */
 const frAmount = (v: bigint, scale: number) => formatScaled(rescale(v, scale, 2), 2).replace(".", ",");
 
@@ -164,12 +176,10 @@ export function commercialIssues(input: {
   const out: CommercialIssue[] = [];
   if (input.clientBlocked) out.push({ code: "CLIENT_BLOQUE", label: `Client bloqué${input.blockedReason ? ` : ${input.blockedReason}` : ""}.` });
   const tol = BigInt(Math.round(input.tolerancePct * 100));
-  const g = parseDecimal(input.globalDiscountPct, SCALE.pct) ?? 0n;
   for (const l of input.lines) {
-    const d = parseDecimal(l.discountPct, SCALE.pct) ?? 0n;
     const allowed = parseDecimal(l.allowedDiscountPct, SCALE.pct) ?? 0n;
-    // Remise effective (cascade) comparée à la remise autorisée : 1 − (1 − d)(1 − g).
-    const effective = 10000n - roundDiv((10000n - d) * (10000n - g), 10000n);
+    // Remise effective (cascade) comparée à la remise autorisée.
+    const effective = parseDecimal(effectiveDiscountPct(l.discountPct, input.globalDiscountPct), SCALE.pct) ?? 0n;
     if (effective > allowed + tol) {
       out.push({ code: "REMISE", label: `${l.designation} : remise ${formatScaled(effective, 2).replace(/\.?0+$/, "")} % au-delà de la remise autorisée (${formatScaled(allowed, 2).replace(/\.?0+$/, "")} %).` });
     }

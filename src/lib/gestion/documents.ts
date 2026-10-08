@@ -11,7 +11,7 @@ import { getSettings, type GestionSettings } from "@/lib/settings";
 import { amountInWords, computeDocument, netUnitPriceHt } from "./calc";
 import { billingIdentity, billingReadiness } from "./clients-shared";
 import {
-  DOC_TYPE_LABELS, allowedActions, blStatusAfterInvoicing, commercialIssues, defaultDiscount, dueDateOf, emitsReal, moduleOfType, orderStatusAfterDelivery,
+  DOC_TYPE_LABELS, allowedActions, blStatusAfterInvoicing, commercialIssues, defaultDiscount, dueDateOf, effectiveDiscountPct, emitsReal, maxPct, moduleOfType, orderStatusAfterDelivery,
   remainingQty, shouldProject, type CommercialIssue, type DocStatus, type DocType,
 } from "./documents-shared";
 import { recordStockMovements, type LedgerInput } from "./ledger";
@@ -194,9 +194,6 @@ export async function saveDraft(input: DraftInput, actor: AuditActor): Promise<s
     }
     const products = await productInfos(tx, input.lines.map((l) => l.productId).filter((x): x is string => !!x));
     const rate = await defaultRate(tx, g);
-    // Une commande client ne porte aucune remise (décision d'Hicham) : le commercial saisit produits et
-    // quantités au PPH ; la remise du client s'applique automatiquement au BL préparé depuis la commande.
-    const noDiscount = input.type === "COMMANDE";
     const lines = input.lines.map((l, i) => {
       const p = l.productId ? products.get(l.productId) : null;
       if (l.productId && !p) throw new DocumentError(`Ligne ${i + 1} : article introuvable.`);
@@ -214,11 +211,11 @@ export async function saveDraft(input: DraftInput, actor: AuditActor): Promise<s
         position: i, productId: p?.id ?? null, lotId: l.lotId ?? null, warehouseKey: l.warehouseKey ?? "PRINCIPAL",
         ref: p ? (p.code ?? p.sku) : null, designation, unit: p?.unit ?? null,
         quantity: formatScaled(qty, SCALE.qty), freeQuantity: formatScaled(free, SCALE.qty), unitPriceHt: formatScaled(pu, SCALE.money),
-        publicPriceTtc: p?.price_retail ?? null, discountPct: noDiscount ? formatScaled(0n, SCALE.pct) : formatScaled(parseDecimal(l.discountPct || "0", SCALE.pct) ?? 0n, SCALE.pct),
+        publicPriceTtc: p?.price_retail ?? null, discountPct: formatScaled(parseDecimal(l.discountPct || "0", SCALE.pct) ?? 0n, SCALE.pct),
         taxRate: p?.rate ?? l.taxRate ?? rate, sourceLineId: l.sourceLineId ?? null, returnWarehouseKey: l.returnWarehouseKey ?? null,
       };
     });
-    const globalDiscountPct = noDiscount ? formatScaled(0n, SCALE.pct) : formatScaled(parseDecimal(input.globalDiscountPct || "0", SCALE.pct) ?? 0n, SCALE.pct);
+    const globalDiscountPct = formatScaled(parseDecimal(input.globalDiscountPct || "0", SCALE.pct) ?? 0n, SCALE.pct);
     const calc = computeDocument(lines.map((l) => ({ quantity: l.quantity, unitPriceHt: l.unitPriceHt, discountPct: l.discountPct, taxRate: l.taxRate })), globalDiscountPct);
     // Numéro et date d'origine des BL facturés, imprimés sur la facture.
     const sourceIds = lines.map((l) => l.sourceLineId).filter((x): x is string => !!x);
@@ -317,11 +314,12 @@ export async function createCreditNote(invoiceId: string, actor: AuditActor): Pr
 
 /**
  * Brouillon de BL préparé depuis une commande confirmée : en-tête repris (client, raison sociale,
- * adresse, site, commercial, règlement, note) et lignes au reste à livrer, au prix de la commande.
- * La commande ne porte pas de remise : la remise du client (sur la marque, sinon par défaut) est
- * posée ici sur chaque ligne, comme sur un BL saisi à la main. Tout reste modifiable dans l'éditeur
- * avant validation : c'est le BL qui engage, la commande n'est qu'une intention. Un seul BL
- * brouillon à la fois par commande.
+ * adresse, site, commercial, règlement, note) et lignes au reste à livrer, au prix et aux remises de
+ * la commande (remise par ligne et remise globale négociées par le commercial). Une commande sans
+ * aucune remise (saisie avant que la commande en porte une) reçoit la remise du client (sur la marque,
+ * sinon par défaut), comme un BL saisi à la main. Tout reste modifiable dans l'éditeur avant
+ * validation : c'est le BL qui engage, la commande n'est qu'une intention. Un seul BL brouillon à la
+ * fois par commande.
  */
 export async function createBLFromOrder(orderId: string, actor: AuditActor): Promise<string> {
   const order = await getDocument(orderId);
@@ -331,17 +329,22 @@ export async function createBLFromOrder(orderId: string, actor: AuditActor): Pro
   if (!lines.length) throw new DocumentError("Cette commande est entièrement livrée.");
   const open = (await db.execute<{ id: string }>(sql`select id from sales_documents where origin_document_id = ${orderId}::uuid and type = 'BL' and status = 'BROUILLON' limit 1`)).rows[0];
   if (open) throw new DocumentError("Un BL brouillon existe déjà pour cette commande : terminez-le ou supprimez-le.");
-  const client = (await db.execute<{ default_discount_pct: string | null }>(sql`select default_discount_pct::text from clients where id = ${order.clientId}::uuid`)).rows[0];
-  const brandDiscounts = new Map((await db.execute<{ brand_id: string; pct: string }>(sql`select brand_id, discount_pct::text as pct from client_brand_discounts where client_id = ${order.clientId}::uuid`)).rows.map((r) => [r.brand_id, r.pct]));
+  const isZero = (pct: string) => (parseDecimal(pct, SCALE.pct) ?? 0n) === 0n;
+  const negotiated = !isZero(order.globalDiscountPct) || order.lines.some((l) => !isZero(l.discountPct));
+  let discountOf = (l: (typeof lines)[number]) => l.discountPct;
+  if (!negotiated) {
+    const client = (await db.execute<{ default_discount_pct: string | null }>(sql`select default_discount_pct::text from clients where id = ${order.clientId}::uuid`)).rows[0];
+    const brandDiscounts = new Map((await db.execute<{ brand_id: string; pct: string }>(sql`select brand_id, discount_pct::text as pct from client_brand_discounts where client_id = ${order.clientId}::uuid`)).rows.map((r) => [r.brand_id, r.pct]));
+    discountOf = (l) => defaultDiscount(client?.default_discount_pct ?? null, l.brandId ? brandDiscounts.get(l.brandId) ?? null : null);
+  }
   return saveDraft({
     type: "BL", clientId: order.clientId, legalEntityId: order.legalEntityId, date: iso(today()), site: order.site, deliveryAddress: order.deliveryAddress,
-    salesRepId: order.salesRepId, paymentModeKey: order.paymentModeKey, globalDiscountPct: "0", notes: order.notes, originDocumentId: order.id,
+    salesRepId: order.salesRepId, paymentModeKey: order.paymentModeKey, globalDiscountPct: negotiated ? order.globalDiscountPct : "0", notes: order.notes, originDocumentId: order.id,
     lines: lines.map((l) => ({
       productId: l.productId, quantity: remainingQty(l.quantity, l.deliveredQty),
       // Les UG suivent la première livraison de la ligne seulement.
       freeQuantity: (parseDecimal(l.deliveredQty, SCALE.qty) ?? 0n) === 0n ? l.freeQuantity : "0",
-      unitPriceHt: l.unitPriceHt, discountPct: defaultDiscount(client?.default_discount_pct ?? null, l.brandId ? brandDiscounts.get(l.brandId) ?? null : null),
-      taxRate: l.taxRate, sourceLineId: l.id,
+      unitPriceHt: l.unitPriceHt, discountPct: discountOf(l), taxRate: l.taxRate, sourceLineId: l.id,
     })),
   }, actor);
 }
@@ -385,6 +388,12 @@ export async function documentIssues(doc: DocumentView, t: Tx | typeof db = db):
   const productIds = doc.lines.map((l) => l.productId).filter((x): x is string => !!x);
   const cmups = productIds.length ? new Map((await t.execute<{ product_id: string; cmup: string }>(sql`
     select distinct on (product_id) product_id, cmup_after::text as cmup from stock_movements where product_id = any(${pgArray(productIds)}) and cmup_after is not null order by product_id, seq desc`)).rows.map((r) => [r.product_id, r.cmup])) : new Map<string, string>();
+  // BL préparé depuis une commande : la remise confirmée sur la commande (contrôlée, ou débloquée, à sa
+  // confirmation) est autorisée sur ses lignes ; elle ne se redemande pas au BL.
+  const orderLineIds = doc.type === "BL" ? doc.lines.map((l) => l.sourceLineId).filter((x): x is string => !!x) : [];
+  const orderDiscounts = orderLineIds.length ? new Map((await t.execute<{ id: string; pct: string; global_pct: string }>(sql`
+    select l.id, l.discount_pct::text as pct, d.global_discount_pct::text as global_pct from sales_document_lines l join sales_documents d on d.id = l.document_id
+    where l.id = any(${pgArray(orderLineIds)}) and d.type = 'COMMANDE' and d.status <> 'BROUILLON'`)).rows.map((r) => [r.id, effectiveDiscountPct(r.pct, r.global_pct)])) : new Map<string, string>();
   const simulation = !emitsReal(g.cutover, { date: doc.date, site: doc.site });
   return commercialIssues({
     clientBlocked: client.blocked, blockedReason: client.blocked_reason,
@@ -393,7 +402,7 @@ export async function documentIssues(doc: DocumentView, t: Tx | typeof db = db):
     documentTtc: doc.ttc, tolerancePct: g.discountTolerancePct, globalDiscountPct: doc.globalDiscountPct,
     lines: doc.lines.map((l) => ({
       designation: l.designation, discountPct: l.discountPct,
-      allowedDiscountPct: defaultDiscount(client.default_discount_pct, l.brandId ? brandDiscounts.get(l.brandId) ?? null : null),
+      allowedDiscountPct: maxPct(defaultDiscount(client.default_discount_pct, l.brandId ? brandDiscounts.get(l.brandId) ?? null : null), l.sourceLineId ? orderDiscounts.get(l.sourceLineId) ?? null : null),
       netUnitHt: netUnitPriceHt({ quantity: l.quantity, unitPriceHt: l.unitPriceHt, discountPct: l.discountPct, taxRate: l.taxRate }, doc.globalDiscountPct),
       cmup: l.productId ? cmups.get(l.productId) ?? null : null,
     })),

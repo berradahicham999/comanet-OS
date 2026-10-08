@@ -6,7 +6,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { amountInWords, baseUnitPriceHt, computeDocument, computeLine, netUnitPriceHt, numberToWords } from "@/lib/gestion/calc";
 import {
-  allowedActions, blStatusAfterInvoicing, commercialIssues, defaultDiscount, dueDateOf, moduleOfType, orderStatusAfterDelivery, paginate, projectionRows, remainingQty,
+  allowedActions, blStatusAfterInvoicing, commercialIssues, defaultDiscount, dueDateOf, effectiveDiscountPct, maxPct, moduleOfType, orderStatusAfterDelivery, paginate, projectionRows, remainingQty,
   shouldProject, sourceLabel, sourceRef, statusLabel, statusesOf, waPhone,
 } from "@/lib/gestion/documents-shared";
 import { fmtSage, globalDiscountAmount, pdfPages, pdfRows, type PdfLine } from "@/lib/gestion/pdf-model";
@@ -140,6 +140,15 @@ describe("règles des pièces", () => {
     assert.equal(defaultDiscount("25.00", "30.00"), "30.00");
     assert.equal(defaultDiscount("25.00", null), "25.00");
     assert.equal(defaultDiscount(null, null), "0");
+  });
+  test("remise effective en cascade, plus grande remise autorisée", () => {
+    assert.equal(effectiveDiscountPct("25", "10"), "32.50");
+    assert.equal(effectiveDiscountPct("30", "5"), "33.50");
+    assert.equal(effectiveDiscountPct("0", "0"), "0.00");
+    // BL préparé depuis une commande : la remise confirmée sur la commande compte comme autorisée.
+    assert.equal(maxPct("25.00", "33.50"), "33.50");
+    assert.equal(maxPct("25.00", "10.00"), "25.00");
+    assert.equal(maxPct("25.00", null), "25.00");
   });
   test("blocages commerciaux", () => {
     const base = { clientBlocked: false, blockedReason: null, creditLimit: null, outstanding: "0", documentTtc: "1000", tolerancePct: 0, globalDiscountPct: "0", lines: [] as never[] };

@@ -188,9 +188,9 @@ async function main() {
   const blADoc = (await D.getDocument(blA))!;
   assert.equal(blADoc.type, "BL");
   assert.equal(blADoc.originDocumentId, bc);
-  // La commande ne porte pas de remise (la remise 10 % saisie est ignorée) ; le BL préparé reçoit la remise du client (25 %).
-  assert.deepEqual((await D.getDocument(bc))!.lines.map((l) => l.discountPct), ["0.00", "0.00"]);
-  assert.deepEqual(blADoc.lines.map((l) => [l.quantity, l.freeQuantity, l.discountPct]), [["10.000", "1.000", "25.00"], ["4.000", "0.000", "25.00"]]);
+  // La remise négociée sur la commande (10 % et 0 %) est gardée et reprise telle quelle sur le BL préparé.
+  assert.deepEqual((await D.getDocument(bc))!.lines.map((l) => l.discountPct), ["10.00", "0.00"]);
+  assert.deepEqual(blADoc.lines.map((l) => [l.quantity, l.freeQuantity, l.discountPct]), [["10.000", "1.000", "10.00"], ["4.000", "0.000", "0.00"]]);
   await refused("second BL brouillon sur la même commande", () => D.createBLFromOrder(bc, who), /brouillon existe déjà/);
   // Le BL reste à la main : on livre 6 sur 10 à 12 % de remise, et rien du second article.
   await D.saveDraft({ id: blA, type: "BL", clientId: client.id, date: day, site: "COMANET", deliveryAddress: null, salesRepId: null, paymentModeKey: null, globalDiscountPct: "0", notes: null, originDocumentId: bc,
@@ -204,8 +204,6 @@ async function main() {
   const blB = (await one<{ id: string }>(sql`select id from sales_documents where origin_document_id = ${bc}::uuid and type = 'BL' and status = 'BROUILLON'`)).id;
   const blBDoc = (await D.getDocument(blB))!;
   assert.deepEqual(blBDoc.lines.map((l) => [l.quantity, l.freeQuantity]), [["4.000", "0.000"], ["4.000", "0.000"]]); // reste 4 de p1 (UG déjà livrées), 4 de p2
-  // Avec la remise client de 25 %, le prix net passe sous le coût de revient : blocage à lever, comme sur tout BL.
-  await assert.rejects(D.validateDocument(blB, who), (e) => e instanceof D.CommercialBlockError && /coût de revient/.test(e.message));
   await D.validateDocument(blB, who, { override: true });
   bcDoc = (await D.getDocument(bc))!;
   assert.equal(bcDoc.status, "LIVRE");
@@ -220,6 +218,27 @@ async function main() {
   assert.equal((await D.getDocument(bc))!.status, "ANNULE");
   await refused("modifier une commande confirmée", () => db.execute(sql`update sales_documents set ttc = 1 where id = ${bc}::uuid`), /plus modifiable/);
   console.log(`✓ commande ${vbc.number} : BL préparé et modifié avant validation, livrée en partie puis en totalité, BL annulé rend le reste à livrer, commande annulée et figée`);
+
+  // Remise au-delà de la remise autorisée du client (25 %) : la confirmation de la commande la bloque ;
+  // une fois débloquée, son BL la reprend sans redemander le déblocage (sauf si on la relève sur le BL).
+  const bcHigh = await D.saveDraft({ ...draft("2", "30"), type: "COMMANDE", globalDiscountPct: "5" }, who);
+  await assert.rejects(D.validateDocument(bcHigh, who), (e) => e instanceof D.CommercialBlockError && /remise 33,5|remise 33.5/.test(e.message));
+  await D.validateDocument(bcHigh, who, { override: true });
+  const blHigh = await D.createBLFromOrder(bcHigh, who);
+  const blHighDoc = (await D.getDocument(blHigh))!;
+  assert.deepEqual([blHighDoc.globalDiscountPct, blHighDoc.lines.map((l) => l.discountPct)], ["5.00", ["30.00"]]);
+  assert.ok(!(await D.documentIssues(blHighDoc)).some((i) => i.code === "REMISE"), "remise confirmée sur la commande redemandée au BL");
+  await D.saveDraft({ id: blHigh, type: "BL", clientId: client.id, date: day, site: "COMANET", deliveryAddress: null, salesRepId: null, paymentModeKey: null, globalDiscountPct: "5", notes: null, originDocumentId: bcHigh,
+    lines: [{ productId: p1.id, quantity: "2", freeQuantity: "0", unitPriceHt: "165.83", discountPct: "35", sourceLineId: blHighDoc.lines[0].sourceLineId }] }, who);
+  assert.ok((await D.documentIssues((await D.getDocument(blHigh))!)).some((i) => i.code === "REMISE"), "remise relevée sur le BL au-delà de la commande non signalée");
+  await D.deleteDraft(blHigh, who);
+  // Commande sans aucune remise (saisie avant que la commande en porte une) : le BL reçoit la remise du client.
+  const bcZero = await D.saveDraft({ ...draft("1", "0"), type: "COMMANDE" }, who);
+  await D.validateDocument(bcZero, who);
+  const blZero = (await D.getDocument(await D.createBLFromOrder(bcZero, who)))!;
+  assert.deepEqual(blZero.lines.map((l) => l.discountPct), ["25.00"]);
+  await D.deleteDraft(blZero.id, who);
+  console.log("✓ remise sur la commande : contrôlée à la confirmation, reprise sur le BL sans second déblocage ; commande sans remise → remise du client");
 
 
   // Achats (lot 3) : commande en euros, réception partielle avec lot et frais d'approche (CMUP,
