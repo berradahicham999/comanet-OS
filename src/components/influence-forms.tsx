@@ -6,6 +6,7 @@ import { Pencil, Trash2 } from "lucide-react";
 import { Modal } from "@/components/content-calendar";
 import { COLLAB_STATUS } from "@/lib/marketing-shared";
 import { normKey } from "@/lib/import/normalize";
+import { collabDays, endAfterMonths } from "@/lib/influence-shared";
 import { fmtMAD, fmtNum } from "@/lib/format";
 
 export type FormBrand = { id: string; name: string };
@@ -18,7 +19,7 @@ export type FormProduct = { id: string; name: string; brand_id: string | null };
 export type ReturnParams = Record<string, string>;
 
 export type CollabInitial = {
-  id: string; influencer_id: string; brand_id: string; date: string; status: string; campaign_id: string | null; product_id: string | null; axis_id?: string | null;
+  id: string; influencer_id: string; brand_id: string; date: string; end_date?: string | null; status: string; campaign_id: string | null; product_id: string | null; axis_id?: string | null;
   reels: number; stories: number; posts: number; fee: number; product_value: number;
   reach: number | null; impressions: number | null; views: number | null; likes: number | null; comments: number | null; shares: number | null; saves: number | null;
   link_clicks: number | null; promo_code: string | null; conversions: number | null; attributed_revenue: number | null; notes: string | null;
@@ -43,6 +44,8 @@ export function CollabForm({ action, brands, influencers, campaigns, products, a
   const [brandId, setBrandId] = useState(initial?.brand_id ?? defaultBrandId ?? "");
   const [influencerId, setInfluencerId] = useState(initial?.influencer_id ?? "");
   const [query, setQuery] = useState("");
+  const [start, setStart] = useState(initial?.date ?? "");
+  const [end, setEnd] = useState(initial?.end_date ?? "");
   const brandCampaigns = useMemo(() => campaigns.filter((c) => c.brand_id === brandId), [campaigns, brandId]);
   const brandAxes = useMemo(() => axes.filter((a) => a.brand_id === brandId), [axes, brandId]);
   const brandProducts = useMemo(() => products.filter((p) => !p.brand_id || p.brand_id === brandId), [products, brandId]);
@@ -71,8 +74,19 @@ export function CollabForm({ action, brands, influencers, campaigns, products, a
       <label className="block"><span className="label block mb-1">Marque *</span>
         <select name="brandId" value={brandId} onChange={(e) => setBrandId(e.target.value)} className="select h-9" required><option value="">— choisir —</option>{brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>
       </label>
-      <label className="block"><span className="label block mb-1">Date *</span><input type="date" name="date" defaultValue={initial?.date ?? ""} className="input h-9" required /></label>
       <label className="block"><span className="label block mb-1">Statut</span><select name="status" className="select h-9" defaultValue={initial?.status ?? "CONFIRMEE"}>{Object.entries(COLLAB_STATUS).map(([k, s]) => <option key={k} value={k}>{s.label}</option>)}</select></label>
+      <div className="sm:col-span-2 grid grid-cols-2 gap-2">
+        <label className="block"><span className="label block mb-1">Début *</span><input type="date" name="date" value={start} onChange={(e) => { setStart(e.target.value); if (end && e.target.value > end) setEnd(""); }} className="input h-9" required /></label>
+        <label className="block"><span className="label block mb-1">Fin</span><input type="date" name="endDate" value={end} min={start || undefined} onChange={(e) => setEnd(e.target.value)} className="input h-9" /></label>
+        <div className="col-span-2 flex flex-wrap items-center gap-1.5 text-[11.5px]">
+          <span className="text-faint">Durée :</span>
+          {[1, 2, 3, 6].map((m) => (
+            <button key={m} type="button" disabled={!start} onClick={() => setEnd(endAfterMonths(start, m))} className="btn-ghost h-6 px-2 rounded-md border border-line disabled:opacity-40">{m} mois</button>
+          ))}
+          <button type="button" disabled={!start} onClick={() => setEnd("")} className="btn-ghost h-6 px-2 rounded-md border border-line disabled:opacity-40">1 jour</button>
+          {start && <span className="text-faint">{end && end >= start ? `${collabDays(start, end)} jours, du début à la fin incluse` : "fin vide = un seul jour"}</span>}
+        </div>
+      </div>
       <label className="block"><span className="label block mb-1">Campagne</span>
         <select name="campaignId" className="select h-9" defaultValue={initial?.campaign_id ?? ""} disabled={!brandId}><option value="">{brandId ? (brandCampaigns.length ? "— aucune —" : "— aucune campagne influence pour cette marque —") : "— choisir d'abord la marque —"}</option>{brandCampaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
       </label>

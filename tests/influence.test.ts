@@ -5,10 +5,10 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { collabKpis, exposureAggregates, relativeScore, influenceTotals, rankInfluencers, influenceAdvice, scoreCollaborations, type CollabRow } from "@/lib/influence";
-import { parseAmount } from "@/lib/influence-shared";
+import { parseAmount, collabEndError, collabDays, endAfterMonths, collabPhase } from "@/lib/influence-shared";
 
 const base: CollabRow = {
-  id: "c1", date: "2026-09-10", influencer_id: "i1", influencer: "Sara", followers: 50_000, engagement_rate: null, category: null, city: "Casablanca",
+  id: "c1", date: "2026-09-10", end_date: null, influencer_id: "i1", influencer: "Sara", followers: 50_000, engagement_rate: null, category: null, city: "Casablanca",
   brand_id: "b1", brand: "Gamarde", brand_color: null, product: null, campaign_id: null, axis_id: null, campaign: null, content_type: null,
   stories: 0, reels: 1, posts: 0, fee: 1000, product_value: 200, status: "PUBLIE",
   reach: 10_000, impressions: null, views: null, likes: 300, comments: 50, shares: 0, saves: 50, link_clicks: 40,
@@ -114,5 +114,27 @@ describe("parseAmount — montants saisis à la main", () => {
     assert.equal(parseAmount(null), null);
     assert.ok(Number.isNaN(parseAmount("abc")));
     assert.ok(Number.isNaN(parseAmount("1.2.3")));
+  });
+});
+
+describe("période d'une collaboration", () => {
+  test("fin vide = un seul jour, fin avant le début ou impossible = refusée", () => {
+    assert.equal(collabEndError("2026-06-01", null), null);
+    assert.equal(collabEndError("2026-06-01", "2026-07-31"), null);
+    assert.equal(collabEndError("2026-06-01", "2026-05-31"), "periode");
+    assert.equal(collabEndError("2026-02-01", "2026-02-31"), "periode");
+    assert.equal(collabDays("2026-06-01", null), 1);
+    assert.equal(collabDays("2026-06-01", "2026-07-31"), 61);
+  });
+  test("durée en mois : la veille du même jour, sans déborder en fin de mois", () => {
+    assert.equal(endAfterMonths("2026-06-01", 1), "2026-06-30");
+    assert.equal(endAfterMonths("2026-06-01", 2), "2026-07-31");
+    assert.equal(endAfterMonths("2026-01-31", 1), "2026-02-27");
+    assert.equal(endAfterMonths("2026-11-15", 3), "2027-02-14");
+  });
+  test("à venir / en cours / terminée selon la date métier", () => {
+    assert.equal(collabPhase("2026-06-01", "2026-07-31", "2026-05-31"), "A_VENIR");
+    assert.equal(collabPhase("2026-06-01", "2026-07-31", "2026-07-31"), "EN_COURS");
+    assert.equal(collabPhase("2026-06-01", null, "2026-06-02"), "TERMINEE");
   });
 });

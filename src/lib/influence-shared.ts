@@ -8,7 +8,8 @@ export const INFLUENCE_ERRORS: Record<string, string> = {
   nombre: "Une valeur numérique est invalide (cachet, valeur produits, reach, statistiques ou CA).",
   influenceuse: "Influenceuse manquante ou inconnue.",
   marque: "Marque manquante, ou hors de votre périmètre.",
-  date: "Date invalide.",
+  date: "Date de début invalide.",
+  periode: "Date de fin invalide : elle doit être postérieure ou égale à la date de début.",
   statut: "Statut inconnu.",
   campagne: "La campagne choisie n'appartient pas à cette marque.",
   produit: "Le produit choisi n'appartient pas à cette marque.",
@@ -50,3 +51,49 @@ export function parseAmount(raw: string | null | undefined): number | null {
   const n = Number(normalized);
   return normalized === "" || Number.isNaN(n) ? NaN : n;
 }
+
+/* ------------------------------ Période d'une collaboration ------------------------------ */
+
+const ISO = /^\d{4}-\d{2}-\d{2}$/;
+const utc = (d: string) => new Date(`${d}T00:00:00Z`);
+
+/** Dernier jour couvert : la fin saisie, sinon le jour de début (collaboration d'un jour). */
+export function collabLastDay(start: string, end: string | null | undefined): string {
+  return end || start;
+}
+
+/** Fin saisie : `null` si vide (un seul jour), message d'erreur si illisible ou avant le début. */
+export function collabEndError(start: string, end: string | null): string | null {
+  if (!end) return null;
+  if (!ISO.test(end) || Number.isNaN(utc(end).getTime()) || utc(end).toISOString().slice(0, 10) !== end) return "periode";
+  return end < start ? "periode" : null;
+}
+
+/** Nombre de jours couverts, bornes incluses. */
+export function collabDays(start: string, end: string | null | undefined): number {
+  return Math.round((utc(collabLastDay(start, end)).getTime() - utc(start).getTime()) / 86400000) + 1;
+}
+
+/** Fin d'une période de `months` mois à partir de `start` : la veille du même jour, `months` mois plus tard (01/06 + 2 mois → 31/07). */
+export function endAfterMonths(start: string, months: number): string {
+  const d = utc(start);
+  const y = d.getUTCFullYear(), m = d.getUTCMonth() + months, day = d.getUTCDate();
+  // Jour absent du mois d'arrivée (31 → février) : dernier jour de ce mois, sans déborder sur le suivant.
+  const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  const target = new Date(Date.UTC(y, m, Math.min(day, last)));
+  return new Date(target.getTime() - 86400000).toISOString().slice(0, 10);
+}
+
+export type CollabPhase = "A_VENIR" | "EN_COURS" | "TERMINEE";
+
+/** Où en est la période par rapport à `today` (date métier ISO) — indépendant du statut saisi. */
+export function collabPhase(start: string, end: string | null | undefined, today: string): CollabPhase {
+  if (today < start) return "A_VENIR";
+  return today <= collabLastDay(start, end) ? "EN_COURS" : "TERMINEE";
+}
+
+export const COLLAB_PHASE: Record<CollabPhase, { label: string; tone: "blue" | "green" | "gray" }> = {
+  A_VENIR: { label: "À venir", tone: "blue" },
+  EN_COURS: { label: "En cours", tone: "green" },
+  TERMINEE: { label: "Terminée", tone: "gray" },
+};
