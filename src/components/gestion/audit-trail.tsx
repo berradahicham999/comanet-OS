@@ -6,7 +6,7 @@ const ACTION_LABELS: Record<string, string> = {
   BLOCK: "Blocage", UNBLOCK: "Déblocage", ADD_ADDRESS: "Adresse de livraison ajoutée", REMOVE_ADDRESS: "Adresse de livraison retirée",
   BRAND_DISCOUNT: "Remise par marque", SET_NEXT_NUMBER: "Prochain numéro réglé", MOVEMENT: "Mouvement de stock", SETTINGS: "Paramètres",
   VALIDATE: "Validation", DELIVER: "Livraison confirmée", CANCEL: "Annulation", APPROVAL_REQUESTED: "Déblocage demandé",
-  RENAME_CLIENT: "Nom du client corrigé", START: "Démarrage du comptage", ZERO_UNCOUNTED: "Non comptés mis à zéro", CLOSE: "Solde",
+  RENAME_CLIENT: "Nom du client corrigé", REASSIGN_CLIENT: "Client changé", START: "Démarrage du comptage", ZERO_UNCOUNTED: "Non comptés mis à zéro", CLOSE: "Solde",
 };
 
 /** Libellés des champs pour un historique lisible. */
@@ -28,6 +28,10 @@ function summary(row: AuditRow): string | null {
   if (row.action === "RENAME_CLIENT") {
     const a = after as { legalName?: string; reason?: string }, b = before as { legalName?: string };
     return `${b.legalName ?? "—"} → ${a.legalName ?? "—"}${a.reason ? ` (motif : ${a.reason})` : ""}`;
+  }
+  if (row.action === "REASSIGN_CLIENT") {
+    const a = after as { legalName?: string; ice?: string | null; reason?: string; viaOrder?: string }, b = before as { legalName?: string; ice?: string | null };
+    return `${b.legalName ?? "—"} (ICE ${b.ice ?? "—"}) → ${a.legalName ?? "—"} (ICE ${a.ice ?? "—"})${a.viaOrder ? `, avec la commande ${a.viaOrder}` : ""}${a.reason ? ` (motif : ${a.reason})` : ""}`;
   }
   if (row.action !== "UPDATE" && row.action !== "BRAND_DISCOUNT" && row.action !== "SET_NEXT_NUMBER" && row.action !== "BLOCK" && row.action !== "UNBLOCK") return null;
   const keys = Object.keys(after);

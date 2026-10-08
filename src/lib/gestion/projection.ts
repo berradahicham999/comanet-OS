@@ -34,3 +34,10 @@ export async function removeProjection(tx: DbLike, lineIds: string[]): Promise<n
   const r = await tx.execute(sql`delete from sales where source = 'COMANET_OS' and document_line_id = any(${pgArray(lineIds)})`);
   return r.rowCount ?? 0;
 }
+
+/** Une pièce qui change de client (`reassignDocumentClient()`) emporte ses ventes projetées : même ligne, autre client. */
+export async function reassignProjection(tx: DbLike, lineIds: string[], clientId: string, legalName: string): Promise<number> {
+  if (!lineIds.length) return 0;
+  const r = await tx.execute(sql`update sales set client_id = ${clientId}::uuid, raw_client = ${legalName} where source = 'COMANET_OS' and document_line_id = any(${pgArray(lineIds)})`);
+  return r.rowCount ?? 0;
+}

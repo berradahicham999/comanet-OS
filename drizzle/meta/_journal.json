@@ -351,6 +351,13 @@
       "when": 1790000400000,
       "tag": "0049_collaboration_periode",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1790000500000,
+      "tag": "0050_piece_changer_client",
+      "breakpoints": true
     }
   ]
 }

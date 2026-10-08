@@ -325,7 +325,17 @@ sur le serveur Next : `/gestion/pieces/<id>/pdf`.
 - **BL** : le prix unitaire s'imprime en **TTC** (P.U. HT × (1 + TVA), au centime) ; le reste du BL est inchangé.
 - **Nom du client imprimé** corrigeable sur une pièce validée (fiche de la pièce, droit Valider) : motif obligatoire,
   historique « ancien → nouveau », PDF régénéré (l'ancien reste archivé). Seule la raison sociale imprimée change —
-  client rattaché, ICE, adresse, montants et numéro restent figés par la base (migration 0030).
+  client rattaché, ICE, adresse, montants et numéro restent figés par la base (migration 0030). À réserver à une faute de frappe.
+- **Changer de client** sur un BL ou une commande validés (carte « Client de la pièce », droit Valider ; migration 0050) :
+  pour une pièce saisie sur la mauvaise fiche. On cherche le bon client (nom, ville, ICE), on choisit sa raison sociale,
+  on donne un motif : client rattaché, nom, ICE, adresse et code client sont repris de la fiche, les ventes projetées de
+  la pièce passent sur ce client, la liste des pièces affiche le nouveau nom, le PDF est régénéré, l'historique garde
+  « ancien (ICE) → nouveau (ICE) ». Choisir la même fiche reprend son identité actuelle (ICE ou adresse corrigés après
+  coup). Lignes, montants, numéro et stock ne bougent pas. Une commande emporte ses BL (il faut aussi Valider sur les
+  livraisons s'ils sont validés), y compris une commande annulée après une livraison partielle ; un BL issu d'une
+  commande se change par la commande. Refusé pour une facture ou un avoir (pièce fiscale : avoir puis nouvelle
+  facture) et pour un BL déjà facturé. Le garde-fou de la base ne laisse bouger client, identité et empreinte que pour
+  un BL ou une commande, et seulement depuis `reassignDocumentClient()`.
 - **Avoir financier** (Pièces → Avoirs → « + Avoir financier ») : sans facture ni BL, motif sans retour en stock
   (« Remise sur objectifs » par défaut), une ligne par marque avec son montant HT. Sans effet sur le stock ni sur le
   sell-in produit ; validé, il devient un crédit client imputable sur ses factures depuis sa fiche.

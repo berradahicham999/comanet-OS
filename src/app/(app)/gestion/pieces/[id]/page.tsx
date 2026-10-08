@@ -21,8 +21,9 @@ import { fmtMoney } from "@/lib/gestion/money";
 import { PageHeader, Card, Badge, Facts } from "@/components/ui";
 import { DocumentEditor } from "@/components/gestion/document-editor";
 import { AuditTrail } from "@/components/gestion/audit-trail";
+import { ReassignClientForm, type ReassignClient } from "@/components/gestion/reassign-client-form";
 import {
-  renameClientAction, cancelBLAction, cancelOrderAction, creditNoteAction, deleteDraftAction, deliverAction, prepareBLAction, requestApprovalAction, saveDocumentAction, validateDocumentAction,
+  reassignClientAction, renameClientAction, cancelBLAction, cancelOrderAction, creditNoteAction, deleteDraftAction, deliverAction, prepareBLAction, requestApprovalAction, saveDocumentAction, validateDocumentAction,
 } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -144,13 +145,36 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
   const settlement = type === "FACTURE" && !draft ? await invoiceSettlement(id) : null;
   const credit = type === "AVOIR" && !draft ? (await openCredits(doc.clientId)).find((x) => x.id === id) ?? null : null;
   const creditTargets = credit ? await openInvoices({ clientId: doc.clientId, simulation: doc.isSimulation }) : [];
+  // Changer de client : BL ou commande validés, non facturés ; un BL issu d'une commande suit sa commande.
+  const canFixClient = !draft && can(a.perms, permModule, "validate");
+  const fromOrder = type === "BL" && doc.origin?.type === "COMMANDE" ? doc.origin : null;
+  const cancelledFixed = status === "ANNULE" && type !== "COMMANDE";
+  const reassignBlock = !canFixClient || cancelledFixed ? null
+    : type === "FACTURE" || type === "AVOIR" ? "Une facture ou un avoir ne change pas de client : faites un avoir sur la pièce, puis refacturez au bon client."
+    : type === "BL" && anyInvoiced ? "Ce BL est (en partie) facturé : il ne change plus de client. Faites un avoir sur la facture, puis refacturez."
+    : fromOrder ? `Ce BL vient de la commande ${fromOrder.number} : changez le client sur la commande, ses BL suivent.`
+    : null;
+  const canReassign = canFixClient && !cancelledFixed && !reassignBlock;
+  const reassignClients: ReassignClient[] = [];
+  if (canReassign) {
+    const scope = await clientFilter();
+    const [cs, es] = await Promise.all([
+      db.execute<{ id: string; name: string; legal_name: string | null; city: string | null; ice: string | null }>(sql`
+        select id, name, legal_name, city, ice from clients where active ${scope ? (scope.length ? sql`and id = any(${pgArray(scope)})` : sql`and false`) : sql``} order by name`),
+      db.execute<{ id: string; client_id: string; legal_name: string; ice: string | null }>(sql`select id, client_id, legal_name, ice from client_legal_entities where active order by legal_name`),
+    ]);
+    const byClient = new Map<string, ReassignClient["entities"]>();
+    for (const e of es.rows) byClient.set(e.client_id, [...(byClient.get(e.client_id) ?? []), { id: e.id, legalName: e.legal_name, ice: e.ice }]);
+    for (const c of cs.rows) reassignClients.push({ id: c.id, name: c.name, legalName: c.legal_name, city: c.city, ice: c.ice, entities: byClient.get(c.id) ?? [] });
+  }
+  const followingBLs = type === "COMMANDE" ? doc.children.filter((c) => c.type === "BL" && c.status !== "ANNULE") : [];
 
   return (
     <>
       <PageHeader
         eyebrow={<Link href={`/gestion/pieces?type=${type}`} className="hover:underline">Pièces de vente</Link>}
         title={<span className="flex items-center gap-2 flex-wrap"><span className="font-mono">{doc.number ?? "Brouillon"}</span><Badge tone={STATUS_META[status].tone}>{statusLabel(type, status)}</Badge>{doc.isSimulation && !draft && <Badge tone="purple">simulation</Badge>}</span>}
-        subtitle={`${label} du ${fmtDate(doc.date)} · ${doc.client.name}${doc.client.city ? ` · ${doc.client.city}` : ""}`}
+        subtitle={`${label} du ${fmtDate(doc.date)} · ${client.legalName ?? doc.client.name}${(client.city ?? doc.client.city) ? ` · ${client.city ?? doc.client.city}` : ""}`}
         actions={
           <span className="flex gap-2 flex-wrap">
             <a href={`/gestion/pieces/${id}/pdf`} target="_blank" className="btn-secondary btn-sm">Voir le PDF</a>
@@ -219,15 +243,31 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
         </div>
 
         <div className="space-y-4">
-          {!draft && can(a.perms, permModule, "validate") && (
-            <Card title="Nom du client imprimé">
-              <form action={renameClientAction} className="space-y-2 text-[13px]">
-                <input type="hidden" name="id" value={id} />
-                <input name="name" defaultValue={client.legalName ?? doc.client.legalName ?? doc.client.name} className="input h-9" required />
-                <input name="reason" className="input h-9" placeholder="Motif de la correction *" required />
-                <button className="btn-secondary btn-sm" type="submit">Corriger le nom</button>
-                <p className="text-[11.5px] text-faint">Seul le nom imprimé change : client, ICE, montants et numéro restent. Le PDF est régénéré ; l&apos;ancien reste archivé et la correction figure dans l&apos;historique.</p>
-              </form>
+          {canFixClient && (
+            <Card title="Client de la pièce">
+              <div className="space-y-3 text-[13px]">
+                {canReassign ? (
+                  <ReassignClientForm
+                    id={id}
+                    currentClientId={doc.clientId}
+                    clients={reassignClients}
+                    action={reassignClientAction}
+                    cascadeNote={followingBLs.length ? `Les BL de cette commande suivent (${followingBLs.map((b) => b.number ?? "brouillon").join(", ")}).` : undefined}
+                  />
+                ) : reassignBlock ? (
+                  <p className="text-[12px] text-muted">{reassignBlock}{fromOrder && <> <Link href={`/gestion/pieces/${fromOrder.id}`} className="hover:underline font-mono">Ouvrir la commande</Link></>}</p>
+                ) : null}
+                <details className="border-t border-line pt-2">
+                  <summary className="cursor-pointer text-[12.5px] text-muted">Corriger seulement le nom imprimé</summary>
+                  <form action={renameClientAction} className="space-y-2 mt-2">
+                    <input type="hidden" name="id" value={id} />
+                    <input name="name" defaultValue={client.legalName ?? doc.client.legalName ?? doc.client.name} className="input h-9" required />
+                    <input name="reason" className="input h-9" placeholder="Motif de la correction *" required />
+                    <button className="btn-secondary btn-sm" type="submit">Corriger le nom</button>
+                    <p className="text-[11.5px] text-faint">Seul le nom imprimé change (faute de frappe) : client rattaché, ICE, adresse, montants et numéro restent. Pour une pièce saisie sur le mauvais client, utilisez « Changer de client ».</p>
+                  </form>
+                </details>
+              </div>
             </Card>
           )}
           {!draft && status !== "ANNULE" && (
