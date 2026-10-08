@@ -42,11 +42,11 @@ export const PDF_GREY = GREY;
 
 type Col = { key: string; label: string; width: number; align?: "left" | "right" | "center" };
 function columns(type: DocType, model: "PPH_REMISE" | "NET"): Col[] {
-  // La commande s'imprime comme un BL (P.U. TTC, montant HT), sans lot ni remise : la remise se pose sur le BL.
+  // La commande s'imprime comme un BL (P.U. TTC, remise, montant HT), sans lot : rien n'est encore sorti du stock.
   if (type === "COMMANDE") return [
-    { key: "ref", label: "REF", width: 50 }, { key: "designation", label: "Désignation", width: 240 },
+    { key: "ref", label: "REF", width: 50 }, { key: "designation", label: "Désignation", width: 202 },
     { key: "quantity", label: "Qté", width: 40, align: "right" }, { key: "free", label: "UG", width: 32, align: "right" }, { key: "unitPriceTtc", label: "P.U. TTC", width: 56, align: "right" },
-    { key: "netHt", label: "Montant HT", width: 64, align: "right" },
+    { key: "discount", label: "REMISE", width: 38, align: "right" }, { key: "netHt", label: "Montant HT", width: 64, align: "right" },
   ];
   if (type === "BL") return [
     { key: "ref", label: "REF", width: 48 }, { key: "designation", label: "Désignation", width: 150 }, { key: "lot", label: "Lot (péremption)", width: 82 },
