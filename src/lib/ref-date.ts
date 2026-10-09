@@ -10,6 +10,12 @@ export type RefDate = {
   lastSale: Date | null;
   /** Nombre de jours de retard des données par rapport à aujourd'hui. */
   staleDays: number;
+  /**
+   * Repère des périodes affichées (« mois en cours » de Ventes) : la vente la plus récente, BL saisis dans
+   * COMANET OS compris, plafonnée à aujourd'hui. Les moyennes et le stock restent calés sur `ref` (les imports),
+   * sinon un import en retard ferait chuter la rotation des marques importées.
+   */
+  periodRef: Date;
 };
 
 /**
@@ -19,10 +25,11 @@ export type RefDate = {
 export const getRefDate = cache(async (): Promise<RefDate> => {
   const t = today();
   // Les ventes projetées par COMANET OS sont à jour par construction : la fraîcheur se lit sur les imports.
-  const r = await db.execute(sql`select coalesce(max(date) filter (where source <> 'COMANET_OS'), max(date))::text as d from sales`);
-  const d = (r.rows[0] as { d: string | null } | undefined)?.d;
-  if (!d) return { ref: t, lastSale: null, staleDays: 0 };
-  const last = new Date(d + "T12:00:00Z");
+  const r = await db.execute(sql`select coalesce(max(date) filter (where source <> 'COMANET_OS'), max(date))::text as d, max(date)::text as latest from sales`);
+  const row = r.rows[0] as { d: string | null; latest: string | null } | undefined;
+  if (!row?.d) return { ref: t, lastSale: null, staleDays: 0, periodRef: t };
+  const last = new Date(row.d + "T12:00:00Z");
+  const latest = new Date((row.latest ?? row.d) + "T12:00:00Z");
   const ref = last < t ? last : t;
-  return { ref, lastSale: last, staleDays: Math.max(0, daysBetween(last, t)) };
+  return { ref, lastSale: last, staleDays: Math.max(0, daysBetween(last, t)), periodRef: latest < t ? latest : t };
 });
