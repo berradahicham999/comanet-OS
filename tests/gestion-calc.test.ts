@@ -6,7 +6,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { amountInWords, baseUnitPriceHt, computeDocument, computeLine, netUnitPriceHt, numberToWords } from "@/lib/gestion/calc";
 import {
-  allowedActions, blStatusAfterInvoicing, commercialIssues, defaultDiscount, dueDateOf, effectiveDiscountPct, maxPct, moduleOfType, orderStatusAfterDelivery, paginate, projectionRows, remainingQty,
+  allowedActions, blStatusAfterInvoicing, commercialIssues, defaultDiscount, dueDateOf, effectiveDiscountPct, maxPct, moduleOfType, importSkippedForDocuments, orderStatusAfterDelivery, paginate, projectedLines, projectionRows, remainingQty,
   shouldProject, sourceLabel, sourceRef, statusLabel, statusesOf, waPhone,
 } from "@/lib/gestion/documents-shared";
 import { fmtSage, globalDiscountAmount, pdfPages, pdfRows, type PdfLine } from "@/lib/gestion/pdf-model";
@@ -178,6 +178,28 @@ describe("projection vers les ventes", () => {
     assert.equal(shouldProject(c, { isSimulation: true, date: "2027-01-05", site: "COMANET" }), false);
     assert.equal(shouldProject(c, { isSimulation: false, date: "2026-12-31", site: "COMANET" }), false);
     assert.equal(shouldProject(c, { isSimulation: false, date: "2027-01-05", site: "COS" }), false);
+  });
+  test("avant la bascule : seules les marques choisies, à partir de la date, sur un site qui bascule", () => {
+    const off = { ...c, mode: "OFF" as const };
+    const f = { from: "2026-10-01", brandIds: ["cyg", "alpha"] };
+    const lines = [{ id: "a", brandId: "cyg" }, { id: "b", brandId: "gam" }, { id: "c", brandId: null }];
+    const doc = { isSimulation: true, date: "2026-10-05", site: "comanet" };
+    assert.deepEqual(projectedLines(off, f, doc, lines).map((l) => l.id), ["a"]);
+    assert.deepEqual(projectedLines(off, f, { ...doc, date: "2026-09-30" }, lines), []);
+    assert.deepEqual(projectedLines(off, f, { ...doc, site: "COS" }, lines), []);
+    assert.deepEqual(projectedLines(off, { from: null, brandIds: ["cyg"] }, doc, lines), []);
+    // Après la bascule réelle, toutes les lignes d'une pièce légale.
+    assert.deepEqual(projectedLines(c, f, { isSimulation: false, date: "2027-01-05", site: "COMANET" }, lines).length, 3);
+  });
+  test("l'import ignore les marques choisies sur les sites qui basculent, garde le reste", () => {
+    const off = { ...c, mode: "OFF" as const };
+    const f = { from: "2026-10-01", brandIds: ["cyg"] };
+    assert.equal(importSkippedForDocuments(off, f, "2026-10-02", "COMANET", "cyg"), true);
+    assert.equal(importSkippedForDocuments(off, f, "2026-10-02", "DESK DIGITAL", "cyg"), true);
+    assert.equal(importSkippedForDocuments(off, f, "2026-10-02", "COMANET", "gam"), false);
+    assert.equal(importSkippedForDocuments(off, f, "2026-10-02", "COS", "cyg"), false);
+    assert.equal(importSkippedForDocuments(off, f, "2026-09-30", "COMANET", "cyg"), false);
+    assert.equal(importSkippedForDocuments(off, f, "2026-10-02", null, "cyg"), false);
   });
   test("un BL donne des ventes positives, un avoir négatives ; pas de service", () => {
     const doc = { type: "BL" as const, number: "BL202700001", date: "2027-01-05", clientId: "c", site: "comanet", salesRepName: "Saliha", legalName: "OHPHARMA" };

@@ -478,6 +478,44 @@ async function main() {
     lines: [{ productId: p2.id, quantity: "1", unitPriceHt: "200", discountPct: "0" }] }, who), /n'appartient pas/);
   console.log(`✓ fusion : ventes, assignations, brouillon et libellé d'import rattachés à la fiche gardée ; BL ${vMoved.number} puis facture au nom de « LA GLOIRE SARL » (ICE exigé, identité figée)`);
 
+  // Ventes depuis les pièces (avant la bascule, mode OFF) : seules les marques choisies alimentent les ventes,
+  // le réglage recalcule les lignes déjà validées, l'annulation et la désactivation les retirent.
+  {
+    const CUT = await import("@/lib/gestion/cutover");
+    const bA = await one<{ id: string }>(sql`insert into brands (name, slug) values (${"IT DIRECTE " + tag}, ${"it-directe-" + tag.toLowerCase()}) returning id`);
+    const bB = await one<{ id: string }>(sql`insert into brands (name, slug) values (${"IT IMPORTEE " + tag}, ${"it-importee-" + tag.toLowerCase()}) returning id`);
+    await db.execute(sql`update products set brand_id = ${bA.id}::uuid where id = ${p1.id}::uuid`);
+    await db.execute(sql`update products set brand_id = ${bB.id}::uuid where id = ${p2.id}::uuid`);
+    const saved = await getSettings();
+    try {
+      await CUT.setSalesFromDocuments({ from: day, brandIds: [bA.id] }, who);
+      const blSf = await D.saveDraft({ type: "BL", clientId: client.id, date: day, site: "COMANET", deliveryAddress: null, salesRepId: null, paymentModeKey: null, globalDiscountPct: "0", notes: null,
+        lines: [{ productId: p1.id, quantity: "1", unitPriceHt: "165.83", discountPct: "0" }, { productId: p2.id, quantity: "1", unitPriceHt: "200", discountPct: "0" }] }, who);
+      const vSf = await D.validateDocument(blSf, who, { override: true });
+      assert.ok(vSf.simulation, "Sage reste la pièce légale");
+      const fedRows = async () => (await db.execute<{ p: string }>(sql`select product_id::text as p from sales where source = 'COMANET_OS' and lvc_ref = ${vSf.number}`)).rows.map((r) => r.p);
+      assert.deepEqual(await fedRows(), [p1.id], "seule la marque choisie entre dans les ventes");
+      const r2 = await CUT.setSalesFromDocuments({ from: day, brandIds: [bA.id, bB.id] }, who);
+      assert.ok(r2.added >= 1);
+      assert.deepEqual((await fedRows()).sort(), [p1.id, p2.id].sort(), "ajouter une marque reprend les BL déjà validés");
+      await D.cancelBL(blSf, "Test", who);
+      assert.deepEqual(await fedRows(), [], "un BL annulé sort des ventes");
+      const blSf2 = await D.saveDraft({ type: "BL", clientId: client.id, date: day, site: "COMANET", deliveryAddress: null, salesRepId: null, paymentModeKey: null, globalDiscountPct: "0", notes: null,
+        lines: [{ productId: p2.id, quantity: "1", unitPriceHt: "200", discountPct: "0" }] }, who);
+      const vSf2 = await D.validateDocument(blSf2, who, { override: true });
+      assert.equal((await one<{ n: number }>(sql`select count(*)::int as n from sales where source = 'COMANET_OS' and lvc_ref = ${vSf2.number}`)).n, 1);
+      await db.execute(sql`insert into sales (date, client_id, product_id, quantity, amount, site, line_hash) values (${day}::date, ${client.id}::uuid, ${p2.id}::uuid, 1, 10, 'COMANET', ${"IT-SAGE-" + tag})`);
+      await refused("date qui doublerait des ventes importées", () => CUT.setSalesFromDocuments({ from: day, brandIds: [bB.id] }, who), /doubleraient/);
+      await db.execute(sql`delete from sales where line_hash = ${"IT-SAGE-" + tag}`);
+      const off = await CUT.setSalesFromDocuments({ from: null, brandIds: [] }, who);
+      assert.ok(off.removed >= 1);
+      assert.equal((await one<{ n: number }>(sql`select count(*)::int as n from sales where source = 'COMANET_OS' and lvc_ref = ${vSf2.number}`)).n, 0);
+      console.log(`✓ ventes depuis les pièces : ${vSf.number} (simulation) n'alimente que la marque choisie, recalcul à l'ajout d'une marque, retrait à l'annulation et à la désactivation, date en doublon refusée`);
+    } finally {
+      await saveSettings(saved);
+    }
+  }
+
   const before = await getSettings();
   try {
     await saveSettings({ ...before, gestion: { ...before.gestion, cutover: { mode: "ACTIF", date: day, sites: ["COMANET"] } } });

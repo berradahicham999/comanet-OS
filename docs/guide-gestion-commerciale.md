@@ -178,7 +178,8 @@ Règles :
   contrôlée (pas de facture datée avant la dernière validée).
 - **Ventes (sell-in).** Une pièce n'alimente `sales` (source `COMANET_OS`, clé `COS:<ligne>`) qu'en mode ACTIF,
   hors simulation, après la date de bascule et pour un site basculé (`shouldProject()`) ; avant, Sage fait foi et
-  projeter compterait deux fois. Le BL projette à sa date, l'avoir en négatif, la facture pose son numéro. Seul
+  projeter compterait deux fois — sauf pour les marques de « Ventes depuis les pièces » (ci-dessous). Le BL
+  projette à sa date, l'avoir en négatif, la facture pose son numéro. Seul
   `src/lib/gestion/projection.ts` écrit ces ventes. `ORDER_KEY` compte une vente COMANET OS par BL ; la date de
   référence du cockpit se lit sur les seuls imports.
 - **UG** : imprimées sur le BL seulement (le magasin les livre). Jamais sur une facture ni un avoir, qui vont au
@@ -312,6 +313,16 @@ sur le serveur Next : `/gestion/pieces/<id>/pdf`.
   dernières photos de Cospharma et Pharmafirst.) Le
   passage à ACTIF exige qu'aucun contrôle bloquant ne reste (date, identité, logo et cachet, stock de départ) et la
   saisie de « BASCULER » ; il se fait depuis la page Bascule, jamais depuis les paramètres.
+- **Ventes depuis les pièces (avant la bascule, octobre 2026).** Décision d'Hicham : les ventes des marques que
+  COMANET facture elle-même (CygneLab, Alphascience, Makari, Dulcima) viennent des BL saisis ici dès maintenant,
+  alors que Sage reste la pièce légale ; Gamarde et Auracos restent importées. Réglage `settings.gestion.salesFromDocuments`
+  (date `from` + marques, page Bascule, Administration). À partir de `from`, sur les sites qui basculent, les BL et
+  avoirs validés — **simulation comprise** — alimentent `sales` pour ces marques seulement (`projectedLines()`), et
+  l'import ignore les lignes de ces marques sur ces sites (`importSkippedForDocuments()`, compté en avertissement, pas
+  en erreur). Cospharma et Pharmafirst restent importés pour toutes les marques. Le réglage est refusé si des ventes
+  importées de ces marques existent déjà à cette date ou après (elles doubleraient les BL), et chaque enregistrement
+  recalcule les ventes projetées (`resyncProjection()` : ajoute les BL déjà validés, retire ce qui ne l'est plus,
+  jamais une pièce légale). Conséquence : une vente de ces marques non saisie en BL n'apparaît plus dans Ventes.
 - **Reprise Sage** : état des factures non soldées (code client ou nom, n° pièce, date, échéance, TTC, reste) →
   pièces FACTURE figées, source `SAGE_REPRISE`, `reprise_paid` = TTC − reste, sans ligne ni projection (déjà dans
   les ventes importées). Idempotente.

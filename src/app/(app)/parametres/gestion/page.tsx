@@ -120,7 +120,7 @@ export default async function GestionSettingsPage(props: { searchParams: Promise
           <label className="flex items-center gap-2 pt-5"><input type="checkbox" name="checkCreditLimit" defaultChecked={g.checkCreditLimit} /> Contrôler le plafond d&apos;encours</label>
           <div className="sm:col-span-2 lg:col-span-4 flex flex-wrap items-center gap-3">
             <button className="btn-primary btn-sm" type="submit">Enregistrer</button>
-            <span className="text-[12px] text-muted">Mode actuel : <Badge tone={g.cutover.mode === "OFF" ? "gray" : "purple"}>{g.cutover.mode === "OFF" ? "Sage fait foi" : g.cutover.mode === "PARALLELE" ? "Période parallèle" : "COMANET OS émet"}</Badge> — tant que la bascule n&apos;est pas faite, les pièces saisies sont des simulations sans effet sur les ventes.</span>
+            <span className="text-[12px] text-muted">Mode actuel : <Badge tone={g.cutover.mode === "OFF" ? "gray" : "purple"}>{g.cutover.mode === "OFF" ? "Sage fait foi" : g.cutover.mode === "PARALLELE" ? "Période parallèle" : "COMANET OS émet"}</Badge> — tant que la bascule n&apos;est pas faite, les pièces saisies sont des simulations, sans effet sur les ventes sauf pour les marques réglées dans <a href="/gestion/bascule#ventes-pieces" className="text-accent hover:underline">Ventes depuis les pièces</a>.</span>
           </div>
         </form>
       </Card>

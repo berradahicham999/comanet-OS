@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { sql } from "drizzle-orm";
+import { db } from "@/db";
 import { redirect } from "next/navigation";
 import { can, requireAccessContext } from "@/lib/access";
 import { getSettings } from "@/lib/settings";
@@ -8,7 +10,7 @@ import { fmtMoney } from "@/lib/gestion/money";
 import { fmtDate, iso, today } from "@/lib/format";
 import { PageHeader, Badge, Card } from "@/components/ui";
 import { GestionTabs } from "@/components/gestion/gestion-nav";
-import { importRepriseAction, setModeAction } from "./actions";
+import { importRepriseAction, saveSalesFromDocumentsAction, setModeAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Bascule" };
@@ -23,7 +25,14 @@ export default async function CutoverPage(props: { searchParams: Promise<{ month
   const g = (await getSettings()).gestion;
   const t = iso(today());
   const month = /^\d{4}-\d{2}$/.test(sp.month ?? "") ? sp.month! : t.slice(0, 7);
-  const [checks, report] = await Promise.all([cutoverChecklist(g), controlReport(month)]);
+  const [checks, report, brands, fed] = await Promise.all([
+    cutoverChecklist(g), controlReport(month),
+    db.execute<{ id: string; name: string }>(sql`select id, name from brands where active and merged_into_id is null order by name`),
+    db.execute<{ brand: string | null; n: number; ht: string }>(sql`
+      select b.name as brand, count(*)::int as n, sum(s.amount)::text as ht from sales s left join products p on p.id = s.product_id left join brands b on b.id = p.brand_id
+      where s.source = 'COMANET_OS' group by 1 order by 1`),
+  ]);
+  const sfd = g.salesFromDocuments;
   const blockers = cutoverBlockers(checks);
   const c = g.cutover;
   const prevMonth = (() => { const d = new Date(`${month}-15T12:00:00Z`); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 7); })();
@@ -55,7 +64,7 @@ export default async function CutoverPage(props: { searchParams: Promise<{ month
             <div className="space-y-3 text-[13px]">
               <div className="flex items-center gap-2">Actuel : <Badge tone={MODE[c.mode].tone}>{MODE[c.mode].label}</Badge></div>
               <ul className="text-[12px] text-muted space-y-1">
-                <li><b>Sage fait foi</b> : les pièces saisies ici sont des tests (séries SIM).</li>
+                <li><b>Sage fait foi</b> : les pièces saisies ici sont des simulations (séries SIM) ; seules les marques de « Ventes depuis les pièces » alimentent le module Ventes.</li>
                 <li><b>Période parallèle</b> (décembre) : on saisit tout en double, en simulation, puis on compare avec le rapport de contrôle.</li>
                 <li><b>COMANET OS émet</b> : à partir du {c.date ? fmtDate(c.date) : "jour de bascule"}, pièces légales (BL / FA / AV), ventes alimentées par COMANET OS, import Sage refusé pour ces sites, stock lu dans le journal.</li>
               </ul>
@@ -87,6 +96,38 @@ export default async function CutoverPage(props: { searchParams: Promise<{ month
             </div>
           </Card>
         </div>
+      </div>
+
+      <div id="ventes-pieces" className="scroll-mt-20 mb-4">
+        <Card title="Ventes depuis les pièces (avant la bascule)">
+          <div className="text-[13px] space-y-3">
+            <div className="flex items-center gap-2">
+              État : {sfd.from ? <Badge tone="green">Actif depuis le {fmtDate(sfd.from)}</Badge> : <Badge tone="gray">Désactivé</Badge>}
+            </div>
+            <p className="text-[12.5px] text-muted">
+              Sage reste la pièce légale, mais pour les marques cochées, le module Ventes lit les BL et avoirs validés ici (simulation comprise) à partir de la date choisie, sur les sites {c.sites.join(", ")}.
+              L&apos;import ignore alors ces marques sur ces sites ; les autres marques (et Cospharma, Pharmafirst) restent importées comme aujourd&apos;hui.
+              À partir de cette date, <b>toute vente de ces marques doit être saisie en BL ici</b> : une vente oubliée n&apos;apparaîtra pas.
+            </p>
+            {fed.rows.length > 0 && (
+              <p className="text-[12.5px]">Dans les ventes aujourd&apos;hui : {fed.rows.map((r) => `${r.brand ?? "sans marque"} ${r.n} ligne(s), ${fmtMoney(r.ht)} HT`).join(" · ")}.</p>
+            )}
+            {isAdmin && (
+              <form action={saveSalesFromDocumentsAction} className="space-y-3">
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  {brands.rows.map((b) => (
+                    <label key={b.id} className="flex items-center gap-1.5"><input type="checkbox" name="brandIds" value={b.id} defaultChecked={sfd.brandIds.includes(b.id)} /> {b.name}</label>
+                  ))}
+                </div>
+                <div className="flex flex-wrap items-end gap-2">
+                  <label className="block"><span className="label block mb-1">À partir du</span><input type="date" name="from" defaultValue={sfd.from ?? ""} className="input h-9" /></label>
+                  <button className="btn-primary btn-sm" type="submit">Enregistrer</button>
+                  <span className="text-[11.5px] text-faint">Date vide = désactivé. Refusé si des ventes de ces marques sont déjà importées à cette date ou après.</span>
+                </div>
+              </form>
+            )}
+          </div>
+        </Card>
       </div>
 
       <Card title={`Rapport de contrôle — ${fmtDate(`${month}-01`).replace(/^1 /, "")}`} action={<span className="flex gap-2"><Link href={`/gestion/bascule?month=${prevMonth}`} className="btn-ghost btn-sm">← Mois précédent</Link><Link href={`/gestion/bascule?month=${nextMonth}`} className="btn-ghost btn-sm">Mois suivant →</Link></span>}>

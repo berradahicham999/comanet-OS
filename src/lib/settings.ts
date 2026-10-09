@@ -255,6 +255,12 @@ export type GestionSettings = {
    * émet les pièces des `sites` listés, à partir de `date` ; les autres sites restent importés.
    */
   cutover: { mode: "OFF" | "PARALLELE" | "ACTIF"; date: string | null; sites: string[] };
+  /**
+   * Ventes depuis les pièces, avant la bascule : à partir de `from`, les BL et avoirs validés (simulation
+   * comprise) des sites qui basculent alimentent `sales` pour les marques `brandIds`, et l'import ignore
+   * les lignes de ces marques sur ces sites. Les autres marques restent importées. `from` nul = désactivé.
+   */
+  salesFromDocuments: { from: string | null; brandIds: string[] };
   /** Modèle d'impression de la facture : PPH TTC + remise (modèle 1 de Sage) ou prix net (modèle 2). */
   invoiceModel: "PPH_REMISE" | "NET";
   /** Points de remise tolérés au-delà de la remise autorisée du client avant levée de blocage. */
@@ -317,6 +323,7 @@ export const DEFAULT_GESTION: GestionSettings = {
   expiryAlertDays: 90,
   readinessWindowDays: 365,
   cutover: { mode: "OFF", date: null, sites: ["COMANET", "DESK DIGITAL"] },
+  salesFromDocuments: { from: null, brandIds: [] },
   invoiceModel: "PPH_REMISE",
   discountTolerancePct: 0,
   requireDelivered: false,
@@ -845,6 +852,7 @@ export function mergeGestion(stored: Partial<GestionSettings> | null | undefined
     ...stored,
     company: { ...d.company, ...(stored.company ?? {}) },
     cutover: { ...d.cutover, ...(stored.cutover ?? {}) },
+    salesFromDocuments: { ...d.salesFromDocuments, ...(stored.salesFromDocuments ?? {}) },
     amountWords: { ...d.amountWords, ...(stored.amountWords ?? {}) },
     purchases: { ...d.purchases, ...(stored.purchases ?? {}) },
     inventory: { ...d.inventory, ...(stored.inventory ?? {}) },

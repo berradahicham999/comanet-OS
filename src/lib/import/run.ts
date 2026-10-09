@@ -18,7 +18,7 @@ import { refreshDoctorPotentials } from "@/lib/medical/prescriptions";
 import { cabinetFromHistory } from "@/lib/medical/gps-shared";
 import { pgArray } from "@/lib/sql-array";
 import { getSettings } from "@/lib/settings";
-import { importBlockedByCutover } from "@/lib/gestion/documents-shared";
+import { importBlockedByCutover, importSkippedForDocuments } from "@/lib/gestion/documents-shared";
 import {
   VARIANT_TYPES, normalizeBool, normalizeDocumentType, normalizeObservation,
   normalizePackaging, normalizeSize, normalizeState, normalizeVariantType, regulatoryKey,
@@ -283,7 +283,8 @@ async function importSales(rows: Record<string, unknown>[], mapping: Mapping, op
   });
   const values: (typeof s.sales.$inferInsert)[] = [];
   const seenHash = new Set<string>();
-  const cutover = (await getSettings()).gestion.cutover;
+  const { cutover, salesFromDocuments } = (await getSettings()).gestion;
+  let fromDocuments = 0;
   for (const { r, i } of ordered) {
     const rowNo = i + 2;
     const date = toISODate(get(r, mapping, "date"));
@@ -307,6 +308,9 @@ async function importSales(rows: Record<string, unknown>[], mapping: Mapping, op
     if (!brandId && brandValue && options.createUnknown) brandId = await R.createBrand(brandValue);
     const productId = await R.product(productName, productCode, brandId, options.createUnknown !== false);
     if (!productId) { out.errors.push({ row: rowNo, message: `Produit non résolu : ${productName}` }); continue; }
+    const site = txt(r, mapping, "site")?.toUpperCase() ?? null;
+    // « Ventes depuis les pièces » : cette marque, sur ce site, vient des BL saisis dans COMANET OS.
+    if (importSkippedForDocuments(cutover, salesFromDocuments, date, site, R.products.find((p) => p.id === productId)?.brandId ?? brandId)) { fromDocuments++; continue; }
     const clientName = txt(r, mapping, "clientName");
     const clientRaw = txt(r, mapping, "clientRaw");
     const clientCode = txt(r, mapping, "clientCode");
@@ -315,7 +319,6 @@ async function importSales(rows: Record<string, unknown>[], mapping: Mapping, op
     if (!clientId) { out.errors.push({ row: rowNo, message: `Client non résolu : ${clientName ?? clientRaw ?? "(vide)"}` }); continue; }
     const invoice = txt(r, mapping, "invoice");
     const lvc = txt(r, mapping, "lvc");
-    const site = txt(r, mapping, "site")?.toUpperCase() ?? null;
     const rep = txt(r, mapping, "rep");
     // Dédoublonnage : lignes identiques d'un même document. Sans référence de pièce (facture / BL),
     // on garde chaque ligne du fichier (index de ligne dans la clé) : deux livraisons identiques sont possibles.
@@ -328,6 +331,7 @@ async function importSales(rows: Record<string, unknown>[], mapping: Mapping, op
       unitPrice: unitPrice !== null ? unitPrice.toFixed(4) : null, rawClient: clientRaw ?? clientName, rawProduct: productName, lineHash, importId,
     });
   }
+  if (fromDocuments) out.warnings.push(`${fromDocuments} ligne(s) non importée(s) : depuis le ${salesFromDocuments.from!.split("-").reverse().join("/")}, les ventes de ces marques sur les sites ${cutover.sites.join(", ")} viennent des pièces de vente de COMANET OS (Gestion commerciale → Bascule).`);
   for (let i = 0; i < values.length; i += 500) {
     const chunk = values.slice(i, i + 500);
     const res = await db.insert(s.sales).values(chunk).onConflictDoNothing({ target: s.sales.lineHash }).returning({ id: s.sales.id });
