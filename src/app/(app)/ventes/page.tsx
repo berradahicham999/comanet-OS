@@ -6,7 +6,7 @@ import { resolvePeriod, type PeriodParam } from "@/lib/periods";
 import { PageHeader, Card, Delta, Tabs, BrandDot, Badge } from "@/components/ui";
 import { SalesFilters, selectedSectors, type FilterValues } from "@/components/sales-filters";
 import { MonthlyRevenueChart, SimpleLine } from "@/components/charts";
-import { delta, fmtMAD, fmtNum, fmtPct, fmtDateShort } from "@/lib/format";
+import { delta, fmtMAD, fmtNum, fmtPct, fmtDate, fmtDateShort, iso } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Ventes" };
@@ -24,7 +24,8 @@ const DIMS: { key: Dim; label: string; href: (id: string) => string | null }[] =
 export default async function VentesPage(props: { searchParams: Promise<FilterValues> }) {
   await requireAccess("ventes");
   const sp = await props.searchParams;
-  const { ref } = await getRefDate();
+  // « Mois en cours » se cale sur la vente la plus récente, BL saisis dans COMANET OS compris.
+  const { periodRef: ref, lastSale } = await getRefDate();
   const period = resolvePeriod(sp.period as PeriodParam, ref, { start: sp.start, end: sp.end });
   const [scopeBrands, scopeClients] = await Promise.all([brandFilter(), clientFilter()]);
   const sectors = selectedSectors(sp.sector);
@@ -58,6 +59,11 @@ export default async function VentesPage(props: { searchParams: Promise<FilterVa
       <PageHeader eyebrow="Analytique commerciale" title="Ventes" subtitle={`${period.label} · comparé à ${period.prev.label} et N-1`}>
         <SalesFilters values={{ ...sp, dim }} options={options} action="/ventes" />
       </PageHeader>
+      {lastSale && lastSale < ref && period.end > iso(lastSale) && (
+        <div className="mb-4 rounded-2xl border border-yellow/30 bg-yellow-soft px-4 py-3 text-[13px]">
+          Ventes importées jusqu&apos;au <b>{fmtDate(lastSale)}</b> : après cette date, seules les marques saisies en BL dans COMANET OS sont à jour ; les marques importées (Gamarde, Auracos, ventes Cospharma et Pharmafirst) arriveront au prochain import.
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <Card>
