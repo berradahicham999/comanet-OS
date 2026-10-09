@@ -7,7 +7,7 @@ import { db } from "@/db";
 import { requireAdmin } from "@/lib/access";
 import { getSettings } from "@/lib/settings";
 import { errorParam, str } from "@/lib/gestion/form";
-import { setCutoverMode } from "@/lib/gestion/cutover";
+import { setCutoverMode, setSalesFromDocuments } from "@/lib/gestion/cutover";
 import { importOpeningInvoices, type OpeningInvoice } from "@/lib/gestion/documents";
 import { repriseColumns, repriseMissing } from "@/lib/gestion/receivables-shared";
 import { formatScaled, parseDecimal } from "@/lib/gestion/money";
@@ -27,6 +27,22 @@ export async function setModeAction(fd: FormData) {
   }
   revalidatePath("/", "layout");
   redirect(`/gestion/bascule?done=${mode}`);
+}
+
+/** Ventes depuis les pièces (avant la bascule) : date et marques ; date vide = désactivé. Administration. */
+export async function saveSalesFromDocumentsAction(fd: FormData) {
+  let msg: string;
+  try {
+    const user = await requireAdmin();
+    const from = str(fd, "from");
+    const brandIds = fd.getAll("brandIds").map(String).filter(Boolean);
+    const r = await setSalesFromDocuments({ from, brandIds }, { id: user.id, name: user.name });
+    msg = from ? `Réglage enregistré : ${r.added} ligne(s) de BL / avoirs ajoutée(s) aux ventes, ${r.removed} retirée(s).` : `Désactivé : ${r.removed} ligne(s) retirée(s) des ventes.`;
+  } catch (e) {
+    redirect(`/gestion/bascule?error=${errorParam(e)}#ventes-pieces`);
+  }
+  revalidatePath("/", "layout");
+  redirect(`/gestion/bascule?reprise=${encodeURIComponent(msg)}#ventes-pieces`);
 }
 
 /**

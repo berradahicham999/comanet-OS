@@ -7,6 +7,7 @@ import { getSettings, saveSettings, type GestionSettings } from "@/lib/settings"
 import { pgArray } from "@/lib/sql-array";
 import { SCALE, formatScaled, parseDecimal } from "./money";
 import { listSeries } from "./numbering";
+import { resyncProjection } from "./projection";
 import { buildReadiness } from "./readiness";
 import { controlGap, cutoverBlockers, type CutoverCheck } from "./receivables-shared";
 
@@ -55,6 +56,44 @@ export async function setCutoverMode(mode: "OFF" | "PARALLELE" | "ACTIF", actor:
   const next = { ...cur, gestion: { ...cur.gestion, cutover: { ...cur.gestion.cutover, mode } } };
   await saveSettings(next);
   await audit({ actor, action: "SETTINGS", module: "administration", entity: "settings", label: `Bascule : mode ${mode}`, before: { mode: cur.gestion.cutover.mode }, after: { mode, date: cur.gestion.cutover.date } });
+}
+
+/* ------------------------------------------------------------------ */
+/* Ventes depuis les pièces, avant la bascule                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Règle « Ventes depuis les pièces » : à partir de `from`, les BL et avoirs validés des sites qui basculent
+ * alimentent les ventes pour les marques choisies (et les marques fusionnées dans celles-ci), et l'import
+ * ignore ces marques sur ces sites. Refusé si des ventes importées de ces marques existent déjà à cette
+ * date ou après : elles doubleraient les pièces. Les ventes projetées sont recalculées dans la foulée.
+ */
+export async function setSalesFromDocuments(input: { from: string | null; brandIds: string[] }, actor: AuditActor): Promise<{ added: number; removed: number }> {
+  const cur = await getSettings();
+  const c = cur.gestion.cutover;
+  if (input.from && !/^\d{4}-\d{2}-\d{2}$/.test(input.from)) throw new Error("Date invalide.");
+  if (input.from && !input.brandIds.length) throw new Error("Cochez au moins une marque.");
+  const merged = input.brandIds.length
+    ? (await db.execute<{ id: string }>(sql`select id from brands where merged_into_id = any(${pgArray(input.brandIds)})`)).rows.map((r) => r.id)
+    : [];
+  const brandIds = input.from ? [...new Set([...input.brandIds, ...merged])] : [];
+  if (input.from) {
+    const sites = c.sites.map((x) => x.toUpperCase());
+    const clash = (await db.execute<{ n: number; last: string | null }>(sql`
+      select count(*)::int as n, max(s.date)::text as last from sales s join products p on p.id = s.product_id
+      where s.source <> 'COMANET_OS' and s.date >= ${input.from}::date and upper(s.site) = any(${pgArray(sites, "text")}) and p.brand_id = any(${pgArray(brandIds)})`)).rows[0];
+    if (clash && clash.n > 0) {
+      const next = new Date(`${clash.last}T12:00:00Z`); next.setUTCDate(next.getUTCDate() + 1);
+      throw new Error(`${clash.n} vente(s) de ces marques déjà importée(s) sur les sites ${c.sites.join(", ")} à partir du ${input.from.split("-").reverse().join("/")} (dernière le ${clash.last!.split("-").reverse().join("/")}) : elles doubleraient les BL. Choisissez le ${next.toISOString().slice(0, 10).split("-").reverse().join("/")} ou après, ou annulez d'abord ces imports.`);
+    }
+  }
+  const salesFromDocuments = { from: input.from, brandIds };
+  await saveSettings({ ...cur, gestion: { ...cur.gestion, salesFromDocuments } });
+  return db.transaction(async (tx) => {
+    const r = await resyncProjection(tx, c, salesFromDocuments);
+    await audit({ actor, action: "SETTINGS", module: "administration", entity: "settings", label: input.from ? `Ventes depuis les pièces à partir du ${input.from}` : "Ventes depuis les pièces désactivées", before: cur.gestion.salesFromDocuments, after: { ...salesFromDocuments, ...r } }, tx);
+    return r;
+  });
 }
 
 /* ------------------------------------------------------------------ */

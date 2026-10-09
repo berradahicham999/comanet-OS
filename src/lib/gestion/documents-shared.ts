@@ -236,6 +236,36 @@ export function shouldProject(c: CutoverLike, doc: { isSimulation: boolean; date
   return c.mode === "ACTIF" && !doc.isSimulation && !!c.date && doc.date >= c.date && c.sites.map((s) => s.toUpperCase()).includes(doc.site.toUpperCase());
 }
 
+export type SalesFromDocsLike = { from: string | null; brandIds: string[] };
+
+/**
+ * Avant la bascule (réglage « Ventes depuis les pièces ») : à partir de `from`, une pièce d'un site qui
+ * bascule alimente les ventes pour les marques choisies, simulation comprise. Sage reste la pièce légale.
+ */
+function feedsByBrand(c: CutoverLike, f: SalesFromDocsLike, doc: { date: string; site: string }): boolean {
+  return !!f.from && f.brandIds.length > 0 && doc.date >= f.from && c.sites.map((s) => s.toUpperCase()).includes(doc.site.toUpperCase());
+}
+
+/**
+ * Lignes d'une pièce (BL ou avoir validé) qui alimentent `sales` : toutes après la bascule réelle
+ * (`shouldProject()`), sinon celles des marques choisies dans « Ventes depuis les pièces », sinon aucune.
+ */
+export function projectedLines<L extends { brandId: string | null }>(c: CutoverLike, f: SalesFromDocsLike, doc: { isSimulation: boolean; date: string; site: string }, lines: L[]): L[] {
+  if (shouldProject(c, doc)) return lines;
+  if (!feedsByBrand(c, f, doc)) return [];
+  const brands = new Set(f.brandIds);
+  return lines.filter((l) => l.brandId !== null && brands.has(l.brandId));
+}
+
+/**
+ * Pendant « Ventes depuis les pièces », une ligne importée d'un site qui bascule, d'une marque choisie et
+ * datée de `from` ou après est ignorée : la même vente vient du BL saisi dans COMANET OS. Les autres
+ * marques (Gamarde, Auracos…) et les autres sites (Cospharma, Pharmafirst) restent importés.
+ */
+export function importSkippedForDocuments(c: CutoverLike, f: SalesFromDocsLike, date: string, site: string | null, brandId: string | null): boolean {
+  return !!site && !!brandId && feedsByBrand(c, f, { date, site }) && f.brandIds.includes(brandId);
+}
+
 export type ProjectionDoc = { type: DocType; number: string; date: string; clientId: string; site: string; salesRepName: string | null; legalName: string | null };
 export type ProjectionLine = { id: string; productId: string | null; designation: string; quantity: string; freeQuantity: string; netHt: string };
 

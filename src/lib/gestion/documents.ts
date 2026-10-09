@@ -12,13 +12,13 @@ import { amountInWords, computeDocument, netUnitPriceHt } from "./calc";
 import { billingIdentity, billingReadiness } from "./clients-shared";
 import {
   DOC_TYPE_LABELS, allowedActions, blStatusAfterInvoicing, commercialIssues, defaultDiscount, dueDateOf, effectiveDiscountPct, emitsReal, maxPct, moduleOfType, orderStatusAfterDelivery,
-  remainingQty, shouldProject, type CommercialIssue, type DocStatus, type DocType,
+  projectedLines, remainingQty, type CommercialIssue, type DocStatus, type DocType,
 } from "./documents-shared";
 import { recordStockMovements, type LedgerInput } from "./ledger";
 import { allocateFefo } from "./ledger-shared";
 import { SCALE, formatScaled, fromDb, parseDecimal } from "./money";
 import { allocateNumber } from "./numbering";
-import { attachInvoiceNumber, projectDocument, reassignProjection, removeProjection } from "./projection";
+import { attachInvoiceNumber, productBrands, projectDocument, reassignProjection, removeProjection } from "./projection";
 import { allocateCreditIn } from "./payments";
 
 /**
@@ -623,9 +623,11 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
     // Un avoir solde d'abord sa facture d'origine (jusqu'à son solde) ; le reste est un crédit client à imputer.
     if (type === "AVOIR" && doc.originDocumentId) await allocateCreditIn(tx, id, doc.originDocumentId, parseDecimal(doc.ttc, SCALE.money) ?? 0n, actor.id);
     if (type === "FACTURE") await attachInvoiceNumber(tx, doc.lines.map((l) => l.sourceLineId).filter((x): x is string => !!x), number);
-    if ((type === "BL" || type === "AVOIR") && shouldProject(g.cutover, { isSimulation: simulation, date: doc.date, site: doc.site })) {
-      await projectDocument(tx, { type, number, date: doc.date, clientId: doc.clientId, site: doc.site, salesRepName: doc.salesRepName, legalName: String(clientSnapshot.legalName) },
-        doc.lines.map((l) => ({ id: l.id, productId: l.productId, designation: l.designation, quantity: l.quantity, freeQuantity: l.freeQuantity, netHt: l.netHt })));
+    if (type === "BL" || type === "AVOIR") {
+      const brandOf = await productBrands(tx, doc.lines.map((l) => l.productId));
+      const fed = projectedLines(g.cutover, g.salesFromDocuments, { isSimulation: simulation, date: doc.date, site: doc.site },
+        doc.lines.map((l) => ({ id: l.id, productId: l.productId, designation: l.designation, quantity: l.quantity, freeQuantity: l.freeQuantity, netHt: l.netHt, brandId: l.productId ? brandOf.get(l.productId) ?? null : null })));
+      if (fed.length) await projectDocument(tx, { type, number, date: doc.date, clientId: doc.clientId, site: doc.site, salesRepName: doc.salesRepName, legalName: String(clientSnapshot.legalName) }, fed);
     }
     await audit({ actor, action: "VALIDATE", module: moduleOf(type), entity: "sales_document", entityId: id, label: number, after: { number, ttc: doc.ttc, simulation, approvals: approvals.length ? approvals : undefined, movements: movements.length } }, tx);
     return { number, simulation };
