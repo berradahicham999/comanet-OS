@@ -358,6 +358,13 @@
       "when": 1790000500000,
       "tag": "0050_piece_changer_client",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1790000600000,
+      "tag": "0051_commande_anti_doublon",
+      "breakpoints": true
     }
   ]
 }

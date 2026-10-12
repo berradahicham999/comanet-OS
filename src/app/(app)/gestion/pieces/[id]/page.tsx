@@ -32,7 +32,7 @@ const Banner = ({ tone, children }: { tone: "red" | "green" | "orange"; children
   <div className={`mb-4 rounded-2xl px-4 py-3 text-[13px] border ${tone === "red" ? "bg-red-soft border-red/30 text-red" : tone === "green" ? "bg-green-soft border-green/30 text-green" : "bg-orange-soft border-orange/30 text-orange"}`}>{children}</div>
 );
 
-export default async function DocumentPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; done?: string; blocked?: string; validated?: string; requested?: string }> }) {
+export default async function DocumentPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; done?: string; dup?: string; blocked?: string; validated?: string; requested?: string }> }) {
   const a = await requireAccessContext();
   const { id } = await props.params;
   const sp = await props.searchParams;
@@ -61,6 +61,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
     <>
       {sp.error && <Banner tone="red">{sp.error}</Banner>}
       {sp.done && <Banner tone="green">Enregistré.</Banner>}
+      {sp.dup && <Banner tone="orange">Cette commande était déjà enregistrée : le second clic n&apos;a pas créé de doublon.</Banner>}
       {sp.validated && <Banner tone="green">{type === "COMMANDE" ? "Commande confirmée" : `${label} validé${type === "FACTURE" ? "e" : ""}`} : {doc.number}{doc.isSimulation ? " (simulation)" : ""}.{type === "COMMANDE" && " Envoyez-la au client, puis « Préparer le BL » quand la marchandise part."}</Banner>}
       {sp.requested && <Banner tone="green">Demande de déblocage envoyée aux personnes habilitées.</Banner>}
     </>

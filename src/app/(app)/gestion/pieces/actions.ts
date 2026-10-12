@@ -6,7 +6,7 @@ import { canDo, clientInScope, hasFlag, isOwnOnly, requireAccessContext, require
 import { errorParam, isUuid, str } from "@/lib/gestion/form";
 import { DOC_TYPES, isOwnOrder, moduleOfType as moduleOf, type DocType } from "@/lib/gestion/documents-shared";
 import {
-  CommercialBlockError, cancelBL, cancelOrder, createBLFromOrder, reassignDocumentClient, renameDocumentClient, createCreditNote, createInvoiceFromBLs, deleteDraft, getDocument, markDelivered,
+  CommercialBlockError, DuplicateOrderError, cancelBL, cancelOrder, createBLFromOrder, reassignDocumentClient, renameDocumentClient, createCreditNote, createInvoiceFromBLs, deleteDraft, getDocument, markDelivered,
   requestApproval, saveDraft, validateDocument, type DraftInput,
 } from "@/lib/gestion/documents";
 import { storedPdf } from "@/lib/gestion/pdf";
@@ -77,6 +77,8 @@ export async function saveDocumentAction(fd: FormData) {
       }
     }
   } catch (e) {
+    // Double clic : la commande existe déjà, on y renvoie au lieu d'afficher une erreur.
+    if (e instanceof DuplicateOrderError) redirect(`/gestion/pieces/${e.existingId}?dup=1`);
     redirect(`${id ? `/gestion/pieces/${id}` : back}${id ? "?" : "&"}error=${errorParam(e)}`);
   }
   done(id!);

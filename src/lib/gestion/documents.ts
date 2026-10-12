@@ -35,6 +35,17 @@ type Doc = typeof salesDocuments.$inferSelect;
 type Line = typeof salesDocumentLines.$inferSelect;
 
 export class DocumentError extends Error {}
+/**
+ * Double clic sur « Enregistrer » : la commande vient déjà d'être créée par le même utilisateur pour le même client.
+ * On ne crée rien et on renvoie vers la commande existante (le trigger `prevent_duplicate_commande` reste le filet de sécurité).
+ */
+export class DuplicateOrderError extends Error {
+  constructor(public existingId: string, public existingNumber: string | null) {
+    super(`Commande déjà enregistrée${existingNumber ? ` (${existingNumber})` : ""} il y a quelques secondes — doublon évité.`);
+  }
+}
+/** Fenêtre anti-doublon, alignée sur le trigger de la migration 0051. */
+export const DUPLICATE_ORDER_WINDOW_SECONDS = 20;
 /** Validation refusée faute de levée des blocages : la liste est affichée et peut être soumise à un validateur. */
 export class CommercialBlockError extends Error {
   constructor(public issues: CommercialIssue[]) {
@@ -237,6 +248,16 @@ export async function saveDraft(input: DraftInput, actor: AuditActor): Promise<s
       await tx.update(salesDocuments).set(header).where(eq(salesDocuments.id, id));
       await tx.delete(salesDocumentLines).where(eq(salesDocumentLines.documentId, id));
     } else {
+      if (input.type === "COMMANDE") {
+        // Sérialise les clics répétés (même verrou que le trigger) puis renvoie la commande déjà créée.
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`commande:${input.clientId}:${actor.id ?? ""}`}))`);
+        const dup = (await tx.execute<{ id: string; number: string | null }>(sql`
+          select id, number from sales_documents
+           where type = 'COMMANDE' and client_id = ${input.clientId}::uuid and created_by_id is not distinct from ${actor.id}::uuid
+             and status <> 'ANNULE' and created_at > now() - make_interval(secs => ${DUPLICATE_ORDER_WINDOW_SECONDS})
+           order by created_at desc limit 1`)).rows[0];
+        if (dup) throw new DuplicateOrderError(dup.id, dup.number);
+      }
       const [row] = await tx.insert(salesDocuments).values({ ...header, createdById: actor.id }).returning({ id: salesDocuments.id });
       id = row.id;
     }

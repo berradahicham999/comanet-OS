@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useFormStatus } from "react-dom";
 import { baseUnitPriceHt, computeDocument } from "@/lib/gestion/calc";
 import { defaultDiscount, sourceRef, type DocType } from "@/lib/gestion/documents-shared";
 import type { EditorData, EditorProduct } from "@/lib/gestion/editor";
@@ -358,9 +359,29 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
 
       {/* Actions — collées en bas de l'écran, au-dessus de la barre de navigation du téléphone */}
       <div className="sticky bottom-[calc(4.75rem+env(safe-area-inset-bottom))] lg:bottom-2 z-10 flex gap-2 justify-start lg:justify-end bg-surface/95 backdrop-blur rounded-2xl p-2 lg:pr-36 border border-line">
-        <button type="submit" name="intent" value="save" className="btn-secondary" disabled={!clientId || !lines.length}><span className="lg:hidden">Brouillon</span><span className="hidden lg:inline">Enregistrer le brouillon</span></button>
-        {canValidate && <button type="submit" name="intent" value="validate" className="btn-primary" disabled={!clientId || !lines.length || !calc}><span className="lg:hidden">{type === "COMMANDE" ? "Confirmer" : "Valider"}</span><span className="hidden lg:inline">{type === "COMMANDE" ? "Enregistrer et confirmer" : "Enregistrer et valider"}</span></button>}
+        <SubmitButtons type={type} canValidate={canValidate} canSave={!!clientId && lines.length > 0} canConfirm={!!clientId && lines.length > 0 && !!calc} />
       </div>
     </form>
+  );
+}
+
+/**
+ * Boutons d'enregistrement : bloqués dès le premier clic tant que le serveur n'a pas répondu
+ * (l'enregistrement peut prendre plusieurs secondes ; un second clic créait une seconde pièce).
+ */
+function SubmitButtons({ type, canValidate, canSave, canConfirm }: { type: DocType; canValidate: boolean; canSave: boolean; canConfirm: boolean }) {
+  const { pending } = useFormStatus();
+  const busy = <span>Enregistrement…</span>;
+  return (
+    <>
+      <button type="submit" name="intent" value="save" className="btn-secondary" disabled={pending || !canSave} aria-busy={pending}>
+        {pending ? busy : <><span className="lg:hidden">Brouillon</span><span className="hidden lg:inline">Enregistrer le brouillon</span></>}
+      </button>
+      {canValidate && (
+        <button type="submit" name="intent" value="validate" className="btn-primary" disabled={pending || !canConfirm} aria-busy={pending}>
+          {pending ? busy : <><span className="lg:hidden">{type === "COMMANDE" ? "Confirmer" : "Valider"}</span><span className="hidden lg:inline">{type === "COMMANDE" ? "Enregistrer et confirmer" : "Enregistrer et valider"}</span></>}
+        </button>
+      )}
+    </>
   );
 }
