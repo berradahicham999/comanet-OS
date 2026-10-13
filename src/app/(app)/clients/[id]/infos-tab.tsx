@@ -12,8 +12,9 @@ import { Card, Badge, BrandDot } from "@/components/ui";
 import { ClientLegalForm } from "@/components/gestion/client-legal-form";
 import { AuditTrail } from "@/components/gestion/audit-trail";
 import {
-  saveClientLegalAction, blockClientAction, archiveClientAction, deleteClientAction, addAddressAction, removeAddressAction, brandDiscountAction,
+  saveClientLegalAction, blockClientAction, archiveClientAction, deleteClientAction, addAddressAction, removeAddressAction, brandDiscountAction, internalClientAction,
 } from "../gestion-actions";
+import { outputNatures } from "@/lib/gestion/refs";
 import { LegalEntitiesCard, MergeCard } from "./entities-merge";
 
 /**
@@ -26,13 +27,14 @@ export async function ClientInfosTab({ client, billing, sp }: {
   billing: { ready: boolean; missing: string[]; recommended: string[] };
   sp: { done?: string; error?: string; merge?: string; mergeq?: string };
 }) {
-  const [settings, modes, brands, users, commercial, history, links, canEdit, canValidate, groupName, groups] = await Promise.all([
+  const [settings, modes, brands, users, commercial, history, links, canEdit, canValidate, groupName, groups, natures] = await Promise.all([
     getSettings(), listPaymentModes(), listBrands(),
     db.execute<{ id: string; name: string }>(sql`select id, name from users where active order by name`),
     clientCommercial(client.id), auditTrail("client", client.id), clientLinks(client.id),
     canDo("clients", "edit"), canDo("clients", "validate"),
-    clientGroupName(client.groupId), listClientGroups(),
+    clientGroupName(client.groupId), listClientGroups(), outputNatures(),
   ]);
+  const isBulk = settings.gestion.bulkSales.clientId === client.id;
   const g = settings.gestion;
   const discountBrands = new Set(commercial.discounts.map((d) => d.brand_id));
 
@@ -99,6 +101,27 @@ export async function ClientInfosTab({ client, billing, sp }: {
               )}
             </div>
           </Card>
+
+          {isBulk && (
+            <Card title="Vente en bloc">
+              <p className="text-[13px] text-muted">Client « vente en bloc » (Paramètres → Gestion) : ses factures moins ses avoirs réels font le CA en bloc du P&L ; il est exclu des ventes, segments et classements.</p>
+            </Card>
+          )}
+
+          {!isBulk && (client.isInternal || canValidate) && (
+            <Card title="Sorties marketing">
+              <form action={internalClientAction} className="space-y-1.5 text-[13px]">
+                <input type="hidden" name="id" value={client.id} />
+                <p className="text-muted">Client interne (échantillons animation, médical, digital, commercial) : ses BL ne font jamais de CA ; les produits sortis deviennent une charge marketing de la nature choisie, au coût de revient figé. Il disparaît des ventes, segments et classements.</p>
+                <label className="flex items-center gap-1.5"><input type="checkbox" name="isInternal" value="1" defaultChecked={client.isInternal} disabled={!canValidate} /> Client interne (sorties marketing)</label>
+                <select name="natureKey" defaultValue={client.outputNatureKey ?? ""} className="select h-8 text-[12.5px] w-full" disabled={!canValidate}>
+                  <option value="">Nature de sortie…</option>
+                  {natures.map((n) => <option key={n.key} value={n.key}>{n.label}</option>)}
+                </select>
+                {canValidate && <button className="btn-secondary btn-sm" type="submit">Enregistrer</button>}
+              </form>
+            </Card>
+          )}
 
           {canValidate && <MergeCard client={client} sp={sp} />}
 

@@ -52,3 +52,47 @@ export function categoryFromLabel(label: string): BudgetCategory {
   for (const [re, cat] of RULES) if (re.test(k)) return cat;
   return "AUTRES";
 }
+
+/* ------------------------------------------------------------------ */
+/* Ventilation du marketing réel (P&L)                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Postes du marketing réel dans le P&L — définition unique de la ventilation (`budgetConsumptionByMonth()`).
+ * La somme des postes égale exactement le consommé officiel (`foldConsumption()`) : la ventilation ne change aucun total.
+ *  · ADS : dépense publicitaire officielle (régie, sinon média saisi) ;
+ *  · ECH:<nature> : échantillons, par nature de sortie (BL de sortie marketing, remises en visite = MEDICAL) ;
+ *    une dépense d'échantillons saisie sans nature va dans « ECH:AUTRE » (jamais devinée) ;
+ *  · GOODIES, PLV (dont print) : achats de matériel — la charge du matériel naît à l'achat ;
+ *  · INFLUENCE : influence et UGC ;
+ *  · ACTIVATIONS : autres postes d'une activation ; AUTRES : le reste.
+ */
+export type MarketingBucket = string;
+export const MARKETING_BUCKET_LABELS: Record<string, string> = {
+  ADS: "Publicité (régie, sinon saisie)",
+  GOODIES: "Goodies",
+  PLV: "PLV & print",
+  INFLUENCE: "Influence & UGC",
+  ACTIVATIONS: "Activations (autres postes)",
+  AUTRES: "Autres dépenses marketing",
+};
+/** Ordre d'affichage : publicité, échantillons (par nature), matériel, influence, activations, autres. */
+export function bucketSortKey(b: MarketingBucket): number {
+  if (b === "ADS") return 0;
+  if (b.startsWith("ECH:")) return b === "ECH:AUTRE" ? 19 : 10;
+  return { GOODIES: 20, PLV: 21, INFLUENCE: 30, ACTIVATIONS: 40, AUTRES: 50 }[b] ?? 60;
+}
+export const sampleBucket = (nature: string | null | undefined): MarketingBucket => `ECH:${nature || "AUTRE"}`;
+
+const AD_CATS = new Set(["META", "TIKTOK", "GOOGLE", "DIGITAL"]);
+
+/** Poste d'une dépense `marketing_expenses` (COMMITTED ou SPENT). */
+export function marketingBucketOf(e: { category: string; outputNature?: string | null; activationId?: string | null }): MarketingBucket {
+  if (AD_CATS.has(e.category)) return "ADS";
+  if (e.category === "ECHANTILLONS") return sampleBucket(e.outputNature);
+  if (e.category === "GOODIES") return "GOODIES";
+  if (e.category === "PLV") return "PLV";
+  if (e.category === "INFLUENCE" || e.category === "UGC") return "INFLUENCE";
+  if (e.activationId) return "ACTIVATIONS";
+  return "AUTRES";
+}

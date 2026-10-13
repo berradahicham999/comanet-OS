@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
+import { outputNatures } from "@/lib/gestion/refs";
 import { requireAccess } from "@/lib/access";
 import { getSettings } from "@/lib/settings";
 import { gestionRefs, listCreditReasons } from "@/lib/gestion/refs";
@@ -9,7 +10,7 @@ import { fmtMoney } from "@/lib/gestion/money";
 import { iso, today, fmtDate } from "@/lib/format";
 import { PageHeader, Card, Badge, Tabs } from "@/components/ui";
 import {
-  saveCompanyAction, uploadCompanyFileAction, savePoliciesAction, saveTaxRateAction, savePaymentModeAction, saveWarehouseAction, saveSeriesAction, setNextNumberAction, saveCreditReasonAction, saveGapReasonAction,
+  saveCompanyAction, uploadCompanyFileAction, savePoliciesAction, saveTaxRateAction, savePaymentModeAction, saveWarehouseAction, saveSeriesAction, setNextNumberAction, saveCreditReasonAction, saveGapReasonAction, saveOutputsAction, saveOutputNatureAction,
 } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +21,7 @@ export default async function GestionSettingsPage(props: { searchParams: Promise
   const sp = await props.searchParams;
   const thisYear = Number(iso(today()).slice(0, 4));
   const year = Number(sp.year) >= 2020 && Number(sp.year) <= 2100 ? Number(sp.year) : thisYear;
-  const [settings, refs, series, files, usage, reasons, gapReasonRows] = await Promise.all([
+  const [settings, refs, series, files, usage, reasons, gapReasonRows, natures, bulkCandidates] = await Promise.all([
     getSettings(), gestionRefs(), listSeries(year),
     db.execute<{ slot: string; version: number; created_at: Date }>(sql`select distinct on (company_slot) company_slot as slot, version, created_at from content_assets where company_slot is not null order by company_slot, version desc`),
     db.execute<{ kind: string; key: string; n: number }>(sql`
@@ -29,7 +30,11 @@ export default async function GestionSettingsPage(props: { searchParams: Promise
       union all select 'wh', warehouse_key, count(*)::int from stock_movements group by warehouse_key`),
     listCreditReasons(),
     db.execute<{ key: string; label: string; sort: number; active: boolean }>(sql`select key, label, sort, active from count_gap_reasons order by sort, key`),
+    outputNatures({ includeInactive: true }),
+    db.execute<{ id: string; name: string }>(sql`
+      select id, name from clients where active and not is_internal and (type in ('AUTRE', 'GROSSISTE') or channel ilike '%bloc%') order by name`),
   ]);
+  const internalByNature = new Map((await db.execute<{ k: string; n: number }>(sql`select output_nature_key as k, count(*)::int as n from clients where is_internal group by 1`)).rows.map((r) => [r.k, r.n]));
   const gapReasons = gapReasonRows.rows;
   const g = settings.gestion;
   const used = new Map(usage.rows.map((u) => [`${u.kind}:${u.key}`, u.n]));
@@ -195,6 +200,45 @@ export default async function GestionSettingsPage(props: { searchParams: Promise
             <button className="btn-primary btn-sm text-[11px]" type="submit">Ajouter</button>
           </form>
           <p className="text-[11px] text-faint pt-1">Un motif « retour en stock » fait rentrer la marchandise au dépôt choisi sur chaque ligne de l&apos;avoir.</p>
+        </div>
+      </Card>
+
+      <Card title="Ventes en bloc et sorties marketing" className="mb-4">
+        <form id="sorties" action={saveOutputsAction} className="grid sm:grid-cols-3 gap-3 text-[13px] scroll-mt-20">
+          <label className="block"><span className="label block mb-1">Client « vente en bloc »</span>
+            <select name="bulkClientId" defaultValue={g.bulkSales.clientId ?? ""} className="select h-9">
+              <option value="">Aucun</option>
+              {bulkCandidates.rows.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <span className="text-[11px] text-faint">Ses factures − avoirs réels font le CA en bloc du P&L ; il sort des ventes, segments et classements.</span>
+          </label>
+          <label className="block"><span className="label block mb-1">Sorties marketing par BL depuis le</span><input type="date" name="outputsFrom" defaultValue={g.marketingOutputs.from ?? ""} className="input h-9" />
+            <span className="text-[11px] text-faint">À partir de cette date, la charge d&apos;un échantillon médical naît au BL de dotation : les remises en visite ne sont plus valorisées (jamais deux fois).</span>
+          </label>
+          <label className="block"><span className="label block mb-1">Stock de matériel insuffisant</span>
+            <select name="outputsInsufficientStock" defaultValue={g.marketingOutputs.insufficientStock} className="select h-9"><option value="BLOCK">Bloquer le BL</option><option value="WARN">Alerter seulement</option></select>
+          </label>
+          <div className="sm:col-span-3"><button className="btn-primary btn-sm" type="submit">Enregistrer</button></div>
+        </form>
+        <div id="natures" className="mt-4 pt-4 border-t border-line space-y-1 text-[12.5px] scroll-mt-20">
+          <div className="label mb-1">Natures de sortie (clients internes)</div>
+          {natures.map((r) => (
+            <form key={r.key} action={saveOutputNatureAction} className="grid grid-cols-[50px_1fr_90px_40px_44px] items-center gap-1">
+              <input type="hidden" name="key" value={r.key} />
+              <input name="sort" defaultValue={r.sort} className="input h-8 text-[12px]" />
+              <input name="label" defaultValue={r.label} className="input h-8 text-[12px]" />
+              <span className="text-[11px] text-faint">{internalByNature.get(r.key) ?? 0} client(s)</span>
+              <label className="text-center" title="Active"><input type="checkbox" name="active" defaultChecked={r.active} /></label>
+              <button className="btn-ghost btn-sm text-[11px]" type="submit">OK</button>
+            </form>
+          ))}
+          <form action={saveOutputNatureAction} className="grid grid-cols-[50px_1fr_40px_auto] items-center gap-1 pt-1">
+            <input name="sort" defaultValue={natures.length + 1} className="input h-8 text-[12px]" />
+            <input name="label" placeholder="Nouvelle nature (ex. Congrès)" className="input h-8 text-[12px]" required />
+            <label className="text-center"><input type="checkbox" name="active" defaultChecked /></label>
+            <button className="btn-primary btn-sm text-[11px]" type="submit">Ajouter</button>
+          </form>
+          <p className="text-[11px] text-faint pt-1">Un client devient interne depuis sa fiche (Identité &amp; conditions → Sorties marketing). Un goodie ou une PLV offert à un vrai client est tracé en « Commercial / trade ».</p>
         </div>
       </Card>
 

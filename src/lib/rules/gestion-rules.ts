@@ -23,6 +23,7 @@ export const uninvoicedBLRule: Rule = {
         string_agg(d.number, ', ' order by d.date) as numbers, bool_and(d.is_simulation) as simulation
       from sales_documents d join clients c on c.id = d.client_id
       where d.type = 'BL' and d.status in ('VALIDE', 'LIVRE', 'FACTURE_PARTIEL') and d.date <= ${limit}::date
+        and not c.is_internal -- une sortie marketing ne se facture jamais
       group by d.client_id, c.name order by min(d.date) limit 20`)).rows;
     return rows.map((r): Recommendation => ({
       key: `gestion-bl-non-factures:${r.client_id}`,

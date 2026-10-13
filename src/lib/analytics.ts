@@ -3,6 +3,7 @@ import { pgArray } from "@/lib/sql-array";
 import { db } from "@/db";
 import { addMonths, iso, startOfMonth, today } from "./format";
 import { NO_SECTOR, SECTORS } from "./sectors";
+import { SETTINGS_KEY } from "./settings";
 
 /* ------------------------------------------------------------------ */
 /* Filtres                                                             */
@@ -22,8 +23,37 @@ export type SalesFilter = {
   clientType?: string;
 };
 
+/* ------------------------------------------------------------------ */
+/* Clients non commerciaux                                             */
+/* ------------------------------------------------------------------ */
+
+/** Client « vente en bloc » du réglage `gestion.bulkSales` (NULL si aucun), lu en SQL : aucun id en dur. */
+export const BULK_CLIENT_SQL = sql`(select nullif(st.value->'gestion'->'bulkSales'->>'clientId', '')::uuid from settings st where st.key = ${SETTINGS_KEY})`;
+
+/**
+ * CLIENTS NON COMMERCIAUX — définition officielle et unique.
+ *
+ * Un client interne « sorties marketing » (`clients.is_internal` : échantillons animation, digital…) et le client
+ * facturé en bloc à l'arrivage (`settings.gestion.bulkSales`, COSPHARMA STE) ne sont pas des clients : ils sont
+ * exclus du CA des ventes, des segments, des classements, du CRM et des outils du copilote. Le CA en bloc vit dans
+ * le P&L (`src/lib/pnl.ts`), les sorties marketing dans le budget (`src/lib/gestion/marketing-outputs.ts`).
+ * Le grossiste COSPHARMA (fiche distincte) reste un client.
+ *
+ * `isCommercialClientSql(col)` : condition « le client de cette colonne est commercial ». Écrite en `not exists`
+ * (jamais `not in`, qu'un NULL rendrait toujours faux).
+ */
+export function isCommercialClientSql(clientIdCol: SQL): SQL {
+  return sql`not exists (select 1 from clients nc where nc.id = ${clientIdCol} and (nc.is_internal or nc.id = ${BULK_CLIENT_SQL}))`;
+}
+
+/** Les mêmes clients, en liste d'ids (pour les filtres côté serveur). */
+export async function nonCommercialClientIds(): Promise<string[]> {
+  const r = await db.execute<{ id: string }>(sql`select c.id from clients c where not ${isCommercialClientSql(sql`c.id`)}`);
+  return r.rows.map((x) => x.id);
+}
+
 function whereClause(start: string, end: string, f: SalesFilter = {}): SQL {
-  const parts: SQL[] = [sql`s.date >= ${start}::date`, sql`s.date < ${end}::date`];
+  const parts: SQL[] = [sql`s.date >= ${start}::date`, sql`s.date < ${end}::date`, isCommercialClientSql(sql`s.client_id`)];
   if (f.brandId) parts.push(sql`p.brand_id = ${f.brandId}::uuid`);
   if (f.brandIds) parts.push(f.brandIds.length ? sql`p.brand_id = any(${pgArray(f.brandIds)})` : sql`false`);
   if (f.clientIds && f.clientIds.length) parts.push(sql`s.client_id = any(${pgArray(f.clientIds)})`);

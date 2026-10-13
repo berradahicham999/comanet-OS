@@ -11,9 +11,9 @@ import { refreshAfterWrite } from "@/lib/analytics-marketing/refresh";
  * Budget d'une activation et son reflet dans les budgets marketing existants.
  *
  * Le Command Center lit `marketing_expenses` via `budgetConsumption()` (src/lib/budget.ts) :
- * ce module y écrit une ligne par poste (`activation_ref = 'LINE:<id>'`) et une par catégorie
- * de matériel consommé (`'MATERIAL:<catégorie>:<marque>'`), de façon idempotente. Aucune autre
- * table de dépenses n'existe pour les activations.
+ * ce module y écrit une ligne par poste (`activation_ref = 'LINE:<id>'`), de façon idempotente. Le matériel
+ * consommé n'y est pas reflété : il est passé en charge à l'achat. Les échantillons sortis par un BL rattaché
+ * à l'activation y sont écrits par `src/lib/gestion/marketing-outputs.ts` (`activation_ref` NULL, jamais touchés ici).
  */
 
 export type BudgetLineRow = {

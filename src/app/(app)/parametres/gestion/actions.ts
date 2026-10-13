@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { countGapReasons, creditReasons, paymentModes, taxRates, warehouses } from "@/db/schema";
+import { countGapReasons, creditReasons, marketingOutputNatures, paymentModes, taxRates, warehouses } from "@/db/schema";
 import { requireAdmin } from "@/lib/access";
 import { audit } from "@/lib/audit";
 import { getSettings, saveSettings, type CompanyIdentity, type GestionSettings } from "@/lib/settings";
@@ -112,6 +112,53 @@ export async function savePoliciesAction(fd: FormData) {
   await audit({ actor: actorOf(user), action: "SETTINGS", module: "administration", entity: "settings", label: "Gestion commerciale", before: { ...cur.gestion, company: undefined }, after: { ...next!, company: undefined } });
   revalidatePath("/", "layout");
   back("politiques");
+}
+
+/**
+ * Ventes en bloc et sorties marketing : client facturé en bloc (son CA = factures − avoirs réels, exclu des analyses),
+ * date de démarrage des sorties par BL (fin de la valorisation des remises en visite), stock de matériel insuffisant.
+ */
+export async function saveOutputsAction(fd: FormData) {
+  const user = await requireAdmin();
+  const cur = await getSettings();
+  let next: GestionSettings;
+  try {
+    const clientId = str(fd, "bulkClientId");
+    if (clientId) {
+      const c = (await db.execute<{ is_internal: boolean }>(sql`select is_internal from clients where id = ${clientId}::uuid`)).rows[0];
+      if (!c) throw new Error("Client « vente en bloc » introuvable.");
+      if (c.is_internal) throw new Error("Un client interne (sorties marketing) ne peut pas être le client « vente en bloc ».");
+    }
+    const from = str(fd, "outputsFrom");
+    if (from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) throw new Error("Date de démarrage invalide.");
+    next = {
+      ...cur.gestion,
+      bulkSales: { clientId: clientId ?? null },
+      marketingOutputs: { from: from ?? null, insufficientStock: str(fd, "outputsInsufficientStock") === "WARN" ? "WARN" : "BLOCK" },
+    };
+  } catch (e) {
+    back("sorties", `error=${errorParam(e)}`);
+  }
+  await saveSettings({ ...cur, gestion: next! });
+  await audit({ actor: actorOf(user), action: "SETTINGS", module: "administration", entity: "settings", label: "Ventes en bloc et sorties marketing", before: { bulkSales: cur.gestion.bulkSales, marketingOutputs: cur.gestion.marketingOutputs }, after: { bulkSales: next!.bulkSales, marketingOutputs: next!.marketingOutputs } });
+  revalidatePath("/", "layout");
+  back("sorties");
+}
+
+export async function saveOutputNatureAction(fd: FormData) {
+  const user = await requireAdmin();
+  try {
+    const label = str(fd, "label");
+    const key = str(fd, "key") ?? (label ? refKey(label) : null);
+    if (!key || !label) throw new Error("Libellé obligatoire.");
+    const values = { label, sort: intOrNull(fd, "sort", "Ordre", 0, 999) ?? 0, active: bool(fd, "active") };
+    await db.insert(marketingOutputNatures).values({ key, ...values }).onConflictDoUpdate({ target: marketingOutputNatures.key, set: values });
+    await audit({ actor: actorOf(user), action: "SETTINGS", module: "administration", entity: "marketing_output_nature", label: key, after: values });
+  } catch (e) {
+    back("natures", `error=${errorParam(e)}`);
+  }
+  revalidatePath(PAGE);
+  back("natures");
 }
 
 /* ------------------------------ Référentiels ------------------------------ */

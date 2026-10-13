@@ -2,6 +2,7 @@ import "server-only";
 import { sql } from "drizzle-orm";
 import { sales } from "@/db/schema";
 import type { DbLike } from "@/lib/events/emit";
+import { isCommercialClientSql } from "@/lib/analytics";
 import { pgArray } from "@/lib/sql-array";
 import { projectedLines, projectionRows, type CutoverLike, type DocType, type ProjectionDoc, type ProjectionLine, type SalesFromDocsLike } from "./documents-shared";
 
@@ -14,9 +15,13 @@ import { projectedLines, projectionRows, type CutoverLike, type DocType, type Pr
  * et, avant la bascule, les seules marques choisies dans « Ventes depuis les pièces » (`projectedLines()`) ;
  * l'import ignore alors ces marques sur les sites qui basculent, sinon la même vente serait comptée deux fois.
  * Clé stable `COS:<ligne>` : reprojeter une pièce ne duplique rien.
+ * Un client non commercial (`isCommercialClientSql()` : client interne « sorties marketing », client « vente en bloc »)
+ * n'est jamais projeté : ses BL ne sont pas des ventes (charges marketing, ou CA en bloc lu sur ses factures par le P&L).
  */
 
 export async function projectDocument(tx: DbLike, doc: ProjectionDoc, lines: ProjectionLine[]): Promise<number> {
+  const ok = (await tx.execute<{ ok: boolean }>(sql`select ${isCommercialClientSql(sql`${doc.clientId}::uuid`)} as ok`)).rows[0]?.ok;
+  if (!ok) return 0;
   const rows = projectionRows(doc, lines);
   if (!rows.length) return 0;
   await tx.insert(sales).values(rows).onConflictDoNothing({ target: sales.lineHash });
@@ -39,6 +44,8 @@ export async function removeProjection(tx: DbLike, lineIds: string[]): Promise<n
 /** Une pièce qui change de client (`reassignDocumentClient()`) emporte ses ventes projetées : même ligne, autre client. */
 export async function reassignProjection(tx: DbLike, lineIds: string[], clientId: string, legalName: string): Promise<number> {
   if (!lineIds.length) return 0;
+  const ok = (await tx.execute<{ ok: boolean }>(sql`select ${isCommercialClientSql(sql`${clientId}::uuid`)} as ok`)).rows[0]?.ok;
+  if (!ok) return removeProjection(tx, lineIds);
   const r = await tx.execute(sql`update sales set client_id = ${clientId}::uuid, raw_client = ${legalName} where source = 'COMANET_OS' and document_line_id = any(${pgArray(lineIds)})`);
   return r.rowCount ?? 0;
 }
@@ -65,6 +72,7 @@ export async function resyncProjection(tx: DbLike, c: CutoverLike, f: SalesFromD
       l.id as line_id, l.product_id, l.designation, l.quantity::text as quantity, l.free_quantity::text as free_quantity, l.net_ht::text as net_ht, p.brand_id
     from sales_documents d join sales_document_lines l on l.document_id = d.id left join products p on p.id = l.product_id
     where d.type in ('BL', 'AVOIR') and d.status not in ('BROUILLON', 'ANNULE') and d.source = 'COMANET_OS' and d.number is not null
+      and ${isCommercialClientSql(sql`d.client_id`)}
     order by d.date, d.number, l.position`)).rows;
   const byDoc = new Map<string, typeof rows>();
   for (const r of rows) byDoc.set(r.doc_id, [...(byDoc.get(r.doc_id) ?? []), r]);

@@ -411,3 +411,23 @@ describe("Bibliothèque d'actions — une seule écriture des modèles et de « 
     assert.deepEqual(found, [], `Génération sur les seuls modèles livrés : ${found.join(", ")}`);
   });
 });
+
+describe("Sorties marketing et ventes en bloc — une seule définition", () => {
+  test("seul `gestion/marketing-outputs.ts` écrit les charges et les sorties de matériel nées d'un BL", () => {
+    const found = codeHits(/insert into marketing_expenses[^;]*document_line_id|delete from marketing_expenses where document_line_id|recordMovement\(\{[^}]*documentLineId/i, ["lib/gestion/marketing-outputs.ts"]);
+    assert.deepEqual(found, [], `Écriture de sortie marketing hors de marketing-outputs.ts : ${found.join(", ")}`);
+    assert.deepEqual(hits(/export function outputCharges\(/), ["src/lib/gestion/marketing-outputs-shared.ts"]);
+  });
+  test("les clients non commerciaux (internes, vente en bloc) n'ont qu'une définition", () => {
+    assert.deepEqual(hits(/export function isCommercialClientSql\(/), ["src/lib/analytics.ts"]);
+    assert.deepEqual(codeHits(/'bulkSales'->>'clientId'/), ["src/lib/analytics.ts"]);
+  });
+  test("le P&L ne lit plus `pnl_bulk_sales` pour le CA en bloc", () => {
+    const pnl = FILES.find((f) => f.path === "src/lib/pnl.ts")!.code;
+    const bulk = pnl.slice(pnl.indexOf("async function bulkAgg"), pnl.indexOf("async function chargeInputs"));
+    assert.ok(bulk.length > 0 && !/pnl_bulk_sales/.test(bulk), "bulkAgg lit encore pnl_bulk_sales");
+  });
+  test("la ventilation du marketing réel n'a qu'une définition", () => {
+    assert.deepEqual(hits(/export function marketingBucketOf\(/), ["src/lib/budget-categories.ts"]);
+  });
+});

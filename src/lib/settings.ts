@@ -198,7 +198,7 @@ export function mergeForecast(stored: Partial<ForecastSettings> | null | undefin
  *  · ventes DIRECTES de COMANET (CA HT, coût d'achat = quantité × prix d'achat) ;
  *  · ventes d'un PRESTATAIRE (Pharmafirst pour Auracos) : COMANET touche un % de ce CA HT remisé ;
  *  · revente d'un DISTRIBUTEUR (Cospharma pour Gamarde / Ainhoa) : hors CA COMANET — COMANET a déjà
- *    facturé le stock en bloc à l'arrivage (`pnl_bulk_sales`). Affichée pour information seulement.
+ *    facturé le stock en bloc à l'arrivage (factures du client `gestion.bulkSales`). Affichée pour information seulement.
  * Un site absent des trois listes est signalé, jamais classé d'office.
  */
 export type PnlPrestation = { site: string; label: string; ratePct: number };
@@ -261,6 +261,17 @@ export type GestionSettings = {
    * les lignes de ces marques sur ces sites. Les autres marques restent importées. `from` nul = désactivé.
    */
   salesFromDocuments: { from: string | null; brandIds: string[] };
+  /**
+   * Ventes en bloc (P&L) : le client facturé en bloc à l'arrivage (COSPHARMA STE). Son CA = factures − avoirs
+   * réels ; il est exclu des analyses clients. NULL = aucune vente en bloc. Jamais un id en dur dans le code.
+   */
+  bulkSales: { clientId: string | null };
+  /**
+   * Sorties marketing par BL (clients internes). `from` : date de démarrage — à partir de cette date, les
+   * échantillons remis en visite (`sample_movements`) ne sont plus valorisés dans le budget, la charge naît au BL
+   * de dotation. `insufficientStock` : stock de matériel insuffisant à la validation d'un BL.
+   */
+  marketingOutputs: { from: string | null; insufficientStock: "BLOCK" | "WARN" };
   /** Modèle d'impression de la facture : PPH TTC + remise (modèle 1 de Sage) ou prix net (modèle 2). */
   invoiceModel: "PPH_REMISE" | "NET";
   /** Points de remise tolérés au-delà de la remise autorisée du client avant levée de blocage. */
@@ -324,6 +335,8 @@ export const DEFAULT_GESTION: GestionSettings = {
   readinessWindowDays: 365,
   cutover: { mode: "OFF", date: null, sites: ["COMANET", "DESK DIGITAL"] },
   salesFromDocuments: { from: null, brandIds: [] },
+  bulkSales: { clientId: null },
+  marketingOutputs: { from: null, insufficientStock: "BLOCK" },
   invoiceModel: "PPH_REMISE",
   discountTolerancePct: 0,
   requireDelivered: false,
@@ -853,6 +866,8 @@ export function mergeGestion(stored: Partial<GestionSettings> | null | undefined
     company: { ...d.company, ...(stored.company ?? {}) },
     cutover: { ...d.cutover, ...(stored.cutover ?? {}) },
     salesFromDocuments: { ...d.salesFromDocuments, ...(stored.salesFromDocuments ?? {}) },
+    bulkSales: { ...d.bulkSales, ...(stored.bulkSales ?? {}) },
+    marketingOutputs: { ...d.marketingOutputs, ...(stored.marketingOutputs ?? {}) },
     amountWords: { ...d.amountWords, ...(stored.amountWords ?? {}) },
     purchases: { ...d.purchases, ...(stored.purchases ?? {}) },
     inventory: { ...d.inventory, ...(stored.inventory ?? {}) },

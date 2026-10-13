@@ -53,7 +53,8 @@ describe("P&L — compte de résultat", () => {
       { month: 1, brandId: "G", site: "ZZZ", amount: 700, cogs: 0, missingCostAmount: 0 },
       { month: 5, brandId: "C", site: "COMANET", amount: 99999, cogs: 0, missingCostAmount: 0 }, // après le dernier mois : ignoré
     ],
-    bulk: [{ month: 2, brandId: "G", amount: 60000, cost: 30000 }, { month: 3, brandId: "G", amount: 1000, cost: null }],
+    // Ventes en bloc depuis les pièces : factures − avoirs ; 1 000 MAD sans prix d'achat en mars.
+    bulk: [{ month: 2, brandId: "G", amount: 60000, cogs: 30000, missingCostAmount: 0 }, { month: 3, brandId: "G", amount: 1000, cogs: 0, missingCostAmount: 1000 }],
     marketing: [{ month: 1, brandId: "G", consumed: 8000 }, { month: 3, brandId: "A", consumed: 2000 }],
     charges: [
       { id: "1", categoryKey: "SALAIRES", amount: 20000, recurrence: "MENSUELLE", startMonth: "2026-01-01", endMonth: null, brandId: null },
@@ -79,14 +80,23 @@ describe("P&L — compte de résultat", () => {
     assert.deepEqual(s.quality.missingCost, [{ brandId: "C", amount: 5000 }]);
     assert.deepEqual(s.quality.unknownSites, [{ site: "ZZZ", amount: 700 }]);
   });
-  test("soldes en cascade", () => {
+  test("soldes en cascade : contribution marketing → personnel → frais → EBITDA → résultat net", () => {
     assert.equal(line(s, "marketing").total, 10000);
-    assert.equal(line(s, "contribution").total, 77000 - 10000 - 3000);
+    assert.equal(line(s, "contribution").total, 77000 - 10000);
+    assert.equal(s.kpis.marketingContribution, 67000);
     assert.equal(line(s, "grp_PERSONNEL").total, 60000);
-    assert.equal(line(s, "grp_STRUCTURE").total, 10000);
-    assert.equal(line(s, "resultat_exploitation").total, 64000 - 70000);
+    assert.equal(line(s, "frais").total, 3000 + 10000);
+    assert.deepEqual(s.lines.filter((l) => l.parent === "frais").map((l) => l.key), ["cat_REMISES_OPERATIONS", "cat_LOYER"]);
+    assert.equal(line(s, "ebitda").total, 67000 - 60000 - 13000);
+    assert.equal(s.kpis.operatingResult, -6000);
     assert.equal(line(s, "resultat_net").total, -6000 - 1000);
     assert.equal(s.kpis.netResult, -7000);
+    const order = s.lines.filter((l) => l.depth === 0).map((l) => l.key);
+    assert.deepEqual(order.slice(0, 8), ["ca", "cogs", "marge_brute", "marketing", "contribution", "grp_PERSONNEL", "frais", "ebitda"]);
+  });
+  test("chaque ligne de détail mène à ses pièces sources", () => {
+    for (const k of ["ca_direct", "ca_bulk", "ca_presta_PHARMAFIRST", "cogs_direct", "cogs_bulk", "cat_SALAIRES", "cat_LOYER"]) assert.ok(line(s, k).drill, k);
+    assert.equal(line(s, "ebitda").drill, undefined);
   });
   test("point mort sur charges fixes récurrentes du dernier mois", () => {
     assert.equal(s.kpis.monthlyFixed, 25000);
@@ -111,5 +121,39 @@ describe("P&L — compte de résultat", () => {
   test("mois sans charges repérés", () => {
     const f = buildPnl({ ...input, charges: [] });
     assert.deepEqual(f.quality.monthsWithoutCharges, [1, 2, 3]);
+  });
+});
+
+describe("P&L — marketing réel détaillé", () => {
+  const s = buildPnl(base({
+    natureLabels: { DIGITAL: "digital (influence, ugc)", ANIMATION: "animation" },
+    marketing: [
+      { month: 1, brandId: "G", consumed: 8000, breakdown: { ADS: 5000, "ECH:DIGITAL": 2000 } },
+      { month: 2, brandId: "G", consumed: 1500, breakdown: { "ECH:ANIMATION": 500, GOODIES: 1000 } },
+      { month: 2, brandId: "A", consumed: 300 },
+    ],
+  }));
+  test("la ventilation reprend exactement le total ; un écart va dans « Autres »", () => {
+    assert.equal(line(s, "marketing").total, 9800);
+    const kids = s.lines.filter((l) => l.parent === "marketing");
+    assert.equal(kids.reduce((a, l) => a + l.total, 0), 9800);
+    assert.deepEqual(kids.map((l) => [l.key, l.total]), [["mkt_ADS", 5000], ["mkt_ECH:ANIMATION", 500], ["mkt_ECH:DIGITAL", 2000], ["mkt_GOODIES", 1000], ["mkt_AUTRES", 1300]]);
+    assert.equal(line(s, "mkt_ECH:DIGITAL").label, "Échantillons — digital (influence, ugc)");
+    assert.equal(line(s, "mkt_ECH:DIGITAL").drill, "mkt:ECH:DIGITAL");
+  });
+  test("détail marketing par marque", () => {
+    const g = s.brands.find((b) => b.brandId === "G")!;
+    assert.deepEqual(g.marketingBreakdown, { ADS: 5000, "ECH:DIGITAL": 2000, AUTRES: 1000, "ECH:ANIMATION": 500, GOODIES: 1000 });
+  });
+});
+
+describe("P&L — ventes en bloc depuis les pièces", () => {
+  test("facture − avoir : CA et coût nets, aucun double comptage", () => {
+    // Facture 100 000 (coût 60 000) puis avoir avec retour 10 000 (coût −6 000) : l'agrégat arrive déjà net.
+    const s = buildPnl(base({ bulk: [{ month: 2, brandId: "G", amount: 90000, cogs: 54000, missingCostAmount: 0 }] }));
+    assert.equal(line(s, "ca_bulk").total, 90000);
+    assert.equal(line(s, "cogs_bulk").total, 54000);
+    assert.equal(line(s, "ca").total, 90000);
+    assert.equal(s.quality.bulkWithoutCost, 0);
   });
 });

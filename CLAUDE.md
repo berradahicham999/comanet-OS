@@ -30,6 +30,8 @@ npm run db:studio
 npm run agent:tool -- <outil> '<json>'   # pont CLI de l'Agent marketing (lecture seule, données réelles)
 GESTION_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/gestion-integration.ts
                                          # intégration gestion commerciale (journal, numérotation, ventes, achats, inventaires, règlements, bascule) — jamais sur la prod
+GESTION_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/sorties-marketing-integration.ts
+                                         # intégration ventes en bloc depuis les pièces, sorties marketing par BL, P&L réel — jamais sur la prod
 MEDICAL_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/medical-integration.ts
                                          # intégration Médical v2 (chrono, GPS, hors connexion, corrections, ordonnances) — jamais sur la prod
 CRM_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/crm-integration.ts
@@ -123,7 +125,10 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Pièce d'achat (montants en devise et en MAD, frais d'approche, coût de revient, rapprochement, cycle) | `src/lib/gestion/purchases-shared.ts` + `purchases.ts` | `computePurchase()`, `allocateLandedCosts()`, `unitCostMad()`, `invoiceGaps()`, `validatePurchase()` (seule validation, seule entrée d'achat en stock) |
 | Inventaire (théorique figé, compté, écart, fiabilité, pistes d'explication) | `src/lib/gestion/counts-shared.ts` + `counts.ts` | `countedByLine()`, `lineGap()`, `countStats()`, `gapLeads()`, `recurringGaps()`, `validateCount()` (seule validation, seuls ajustements d'inventaire) |
 | Règlement, solde d'une facture, balance âgée, relance, bascule (réel ou simulation) | `src/lib/gestion/receivables-shared.ts` + `payments.ts` + `documents-shared.ts` + `cutover.ts` | `invoiceBalance()`, `agingBucket()`, `agedBalance()`, `reminderLevel()`, `planAllocation()`, `createPayment()` (seule écriture des règlements), `emitsReal()`, `importBlockedByCutover()`, `setCutoverMode()` |
-| P&L de gestion (nature des sites, CA direct / en bloc / commissions, coût des ventes, charges récurrentes, soldes, contribution par marque, point mort) | `src/lib/pnl-shared.ts` + `src/lib/pnl.ts` (+ `budgetConsumptionByMonth()` dans `budget.ts`) | `classifySite()`, `chargeMonths()`, `buildPnl()` (seule définition du compte de résultat), `pnlStatement()`, `createCharge()`, `reviseCharge()`, `createBulkSale()` |
+| P&L de gestion (nature des sites, CA direct / en bloc depuis les factures − avoirs / commissions, coût des ventes, marketing réel ventilé, contribution marketing, EBITDA, charges récurrentes, contribution par marque, point mort, détail jusqu'aux pièces) | `src/lib/pnl-shared.ts` + `src/lib/pnl.ts` (+ `budgetConsumptionByMonth()` dans `budget.ts`) | `classifySite()`, `chargeMonths()`, `buildPnl()` (seule définition du compte de résultat), `pnlStatement()`, `pnlLineSources()`, `createCharge()`, `reviseCharge()` |
+| Clients non commerciaux (clients internes « sorties marketing » + client « vente en bloc » du réglage) : exclus des ventes, segments, classements, CRM, copilote | `src/lib/analytics.ts` | `isCommercialClientSql()`, `nonCommercialClientIds()`, `BULK_CLIENT_SQL` |
+| Sorties marketing par BL (charge d'échantillons au coût figé par nature, matériel tracé sans charge, alertes de coût, annulation) | `src/lib/gestion/marketing-outputs-shared.ts` + `marketing-outputs.ts` | `outputCharges()`, `costIssues()`, `recordOutputCharges()` / `removeOutputCharges()` (seules écritures de `marketing_expenses.document_line_id`), `recordMaterialOutputs()` / `reverseMaterialOutputs()`, `activationOutputs()`, `setClientInternal()` (fiche) |
+| Ventilation du marketing réel (publicité, échantillons par nature, goodies, PLV, influence, activations, autres) | `src/lib/budget-categories.ts` | `marketingBucketOf()`, `MARKETING_BUCKET_LABELS` ; somme = consommé (`budgetConsumptionByMonth().breakdown`) |
 | Contrôle de présence d'une visite (distance, heure retenue, durée, vitesse implicite, statut et motifs) | `src/lib/medical/gps-shared.ts` | `haversineM()`, `eventTime()`, `visitDurationMinutes()`, `impliedSpeedKmh()`, `verifyVisit()` |
 | Chrono de visite (Démarrer / Terminer / non effectuée, clôture auto, correction, cabinet) | `src/lib/medical/chrono.ts` | `recordAction()` (seule écriture de `visit_events` et des heures de visite), `autoCloseStale()`, `correctVisit()`, `validateCabinet()`, `refreshVerification()` |
 | Qui voit les heures et positions des visites | `src/lib/medical/field-access.ts` | `fieldScope()`, `inFieldScope()`, `requireFieldControl()` |
@@ -275,6 +280,15 @@ même point de vente se fusionnent (`mergeClients()`, « Valider » sur Clients)
 gardée, le nom absorbé devient un libellé d'import, son identité une raison sociale ; refusée si la fiche absorbée porte
 des pièces numérotées ou des règlements. Le **groupe** reste pour les enseignes à plusieurs magasins distincts.
 
+**Ventes en bloc et sorties marketing par BL** (`docs/plan-sorties-marketing-pnl.md`, guide : section P&L de
+`docs/guide-gestion-commerciale.md`, migration 0052). Client interne = `clients.is_internal` + `output_nature_key`
+(`marketing_output_natures` : ANIMATION, MEDICAL, DIGITAL, COMMERCIAL, extensible) ; ses BL ne font jamais de CA, ne se facturent
+pas, ne sont pas projetés. Ligne de pièce : `product_id` OU `inventory_item_id` (contrainte en base), `unit_cost` figé à la
+validation et protégé par le trigger de gel. Décisions d'Hicham (12/10/2026) : charge d'échantillon produit à la sortie (simulation
+comprise) ; matériel = charge à l'ACHAT, sa sortie (BL ou activation) est tracée et valorisée sans nouvelle dépense ; échantillon
+médical = charge au BL de dotation, remises en visite non valorisées à partir de `settings.gestion.marketingOutputs.from`.
+Réglages : `settings.gestion.bulkSales.clientId`, `settings.gestion.marketingOutputs` (Paramètres → Gestion).
+
 **Médical v2 : chrono, GPS, ordonnances** (`docs/guide-visites-gps.md` pour les déléguées, migrations 0036-0038).
 La déléguée travaille dans `/medical/journee` (mobile) : Démarrer → Terminer → compte rendu, ou « non effectuée ».
 Chaque action passe par `/api/medical/visit-events` (route, pas server action : la file IndexedDB hors connexion la
@@ -311,10 +325,14 @@ contrôle portées par `crmUserId`). Copilote : `get_client_portfolio`, `get_cli
 
 **P&L** (`/gestion/pnl`, section du `docs/guide-gestion-commerciale.md`, migration 0031). Réservé aux administrateurs
 (`requireAdmin()` : salaires). Compte de résultat mensuel HT : CA = ventes directes (sites de `settings.pnl.directSites`)
-+ ventes en bloc aux distributeurs (`pnl_bulk_sales`, saisies à l'arrivage : Cospharma achète tout le stock Gamarde / Ainhoa)
++ ventes en bloc = FACTURES − AVOIRS réels du client `settings.gestion.bulkSales` (COSPHARMA STE ; ni brouillon, ni annulé, ni
+simulation ; coût = (qté + UG) × `cost_price`, avoir avec retour déduit ; ventes Sage 2026 reprises par `importBulkInvoices()` ;
+`pnl_bulk_sales` gardée en lecture seule, hors calcul, saisie masquée)
 + commissions de prestation (taux × CA HT remisé du prestataire : PHARMAFIRST × 35 %). La revente des distributeurs (COS,
 CAS…) est hors CA, affichée pour info. Coût des ventes : (quantité + UG) × `products.cost_price` ; sans prix d'achat, CA
-signalé, jamais estimé. Marketing : `budgetConsumptionByMonth()` (même définition que le budget consommé). Charges :
+signalé, jamais estimé. Marketing réel : `budgetConsumptionByMonth()` (même définition que le budget consommé) ventilé par
+`marketingBucketOf()`. Soldes : marge brute → contribution marketing → personnel → frais (commercial + structure) → EBITDA →
+résultat net ; chaque ligne de détail mène à ses pièces (`pnlLineSources()`, `/gestion/pnl/detail`). Charges :
 `pnl_charges` PONCTUELLE ou MENSUELLE (début → fin), révision par clôture + nouvelle ligne ; postes dans
 `pnl_charge_categories` (familles COMMERCIAL, PERSONNEL, STRUCTURE, FINANCIER, IMPOTS). Vue marque : frais communs non
 répartis. N-1 des charges affiché seulement si des charges N-1 existent.

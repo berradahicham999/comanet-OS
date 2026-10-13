@@ -25,6 +25,9 @@
  *  · **Échantillons médicaux** remis en visite (`sample_movements` SORTIE_VISITE) : valorisés au
  *    prix d'achat, sinon au prix COMANET, et comptés dans le consommé de la marque du produit
  *    (`samplesValue`). Une unité sans prix n'est pas estimée : elle n'entre pas dans le total.
+ *    À partir de `settings.gestion.marketingOutputs.from`, plus valorisés : la charge naît au BL de dotation.
+ *  · **Sorties marketing par BL** (client interne) : charges ÉCHANTILLONS SPENT écrites par
+ *    `src/lib/gestion/marketing-outputs.ts`, comptées comme toute dépense (nature dans `output_nature`).
  *  · **Dépenses annulées / remboursées** : le modèle ne connaît que PLANNED / COMMITTED /
  *    SPENT. Une annulation se traduit aujourd'hui par la suppression de la ligne ou par un
  *    montant négatif, qui est alors compté tel quel (il diminue le consommé). Aucun statut
@@ -48,6 +51,15 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { pgArray } from "@/lib/sql-array";
 import { AD_EXPENSE_CATEGORIES, AD_SPEND_SOURCE_LABEL, type AdSpendSource } from "./ad-spend";
+import { marketingBucketOf, sampleBucket, type MarketingBucket } from "./budget-categories";
+import { SETTINGS_KEY } from "./settings";
+
+/**
+ * Fin de la valorisation des remises en visite : à partir de `settings.gestion.marketingOutputs.from`, la charge
+ * d'un échantillon médical naît au BL de dotation (`src/lib/gestion/marketing-outputs.ts`) ; la remise au médecin
+ * reste suivie mais ne compte plus (sinon la même boîte compterait deux fois). Sans date : toujours valorisée.
+ */
+export const SAMPLES_VALUED_UNTIL = sql`coalesce((select nullif(st.value->'gestion'->'marketingOutputs'->>'from', '')::date from settings st where st.key = ${SETTINGS_KEY}), 'infinity'::date)`;
 
 export type BudgetConsumption = {
   /** `null` = tous périmètres confondus. */
@@ -114,7 +126,7 @@ async function rawByBrand(year: number, brandId?: string | null): Promise<Raw[]>
       select p.brand_id,
         coalesce(sum(case when coalesce(p.cost_price, p.price_wholesale) is not null then -sm.quantity * coalesce(p.cost_price, p.price_wholesale) else 0 end), 0)::float8 as samples_value
       from sample_movements sm join products p on p.id = sm.product_id
-      where sm.type = 'SORTIE_VISITE' and extract(year from sm.date) = ${year} and p.brand_id is not null
+      where sm.type = 'SORTIE_VISITE' and extract(year from sm.date) = ${year} and p.brand_id is not null and sm.date < ${SAMPLES_VALUED_UNTIL}
       group by p.brand_id
     ),
     regie as (
@@ -215,7 +227,11 @@ export async function budgetConsumption(year: number, brandId?: string | null): 
 
 /* ------------------------------- Consommation par mois ------------------------------- */
 
-export type MonthlyConsumption = { brandId: string; month: number; consumed: number; adSpend: number; committed: number; samplesValue: number };
+export type MonthlyConsumption = {
+  brandId: string; month: number; consumed: number; adSpend: number; committed: number; samplesValue: number;
+  /** Ventilation du consommé par poste (`marketingBucketOf()`) ; somme = `consumed`. */
+  breakdown: Record<MarketingBucket, number>;
+};
 
 /**
  * Consommation marque × mois d'une année, pour le P&L. Même définition que `foldConsumption()`, appliquée
@@ -224,6 +240,19 @@ export type MonthlyConsumption = { brandId: string; month: number; consumed: num
  */
 export async function budgetConsumptionByMonth(year: number): Promise<MonthlyConsumption[]> {
   const adCats = sql.join(AD_EXPENSE_CATEGORIES.map((c) => sql`${c}`), sql`, `);
+  // Dépenses hors média, par poste : la publicité vient de la règle régie / saisie, les échantillons de visite à part.
+  const parts = await db.execute<{ brand_id: string; m: number; category: string; output_nature: string | null; act: boolean; amount: number }>(sql`
+    select brand_id, extract(month from date)::int as m, category::text as category, output_nature, (activation_id is not null) as act, coalesce(sum(amount), 0)::float8 as amount
+    from marketing_expenses where extract(year from date) = ${year} and status in ('COMMITTED','SPENT') and category not in (${adCats})
+    group by 1, 2, 3, 4, 5`);
+  const partsOf = new Map<string, Record<MarketingBucket, number>>();
+  for (const p of parts.rows) {
+    const key = `${p.brand_id}|${p.m}`;
+    const b = partsOf.get(key) ?? {};
+    const bucket = marketingBucketOf({ category: p.category, outputNature: p.output_nature, activationId: p.act ? "x" : null });
+    b[bucket] = (b[bucket] ?? 0) + Number(p.amount);
+    partsOf.set(key, b);
+  }
   const r = await db.execute(sql`
     with exp as (
       select brand_id, extract(month from date)::int as m,
@@ -237,7 +266,7 @@ export async function budgetConsumptionByMonth(year: number): Promise<MonthlyCon
       select p.brand_id, extract(month from sm.date)::int as m,
         coalesce(sum(case when coalesce(p.cost_price, p.price_wholesale) is not null then -sm.quantity * coalesce(p.cost_price, p.price_wholesale) else 0 end), 0)::float8 as samples_value
       from sample_movements sm join products p on p.id = sm.product_id
-      where sm.type = 'SORTIE_VISITE' and extract(year from sm.date) = ${year} and p.brand_id is not null
+      where sm.type = 'SORTIE_VISITE' and extract(year from sm.date) = ${year} and p.brand_id is not null and sm.date < ${SAMPLES_VALUED_UNTIL}
       group by 1, 2
     ),
     regie as (
@@ -266,7 +295,10 @@ export async function budgetConsumptionByMonth(year: number): Promise<MonthlyCon
       manualAdCommitted: Number(x.manual_ad_committed), manualAdSpent: Number(x.manual_ad_spent),
       regieSpend: Number(x.regie_spend), regieRows: Number(x.regie_rows), samplesValue: Number(x.samples_value),
     });
-    return { brandId: String(x.brand_id), month: Number(x.m), consumed: c.consumed, adSpend: c.adSpend, committed: c.committed, samplesValue: c.samplesValue };
+    const breakdown: Record<MarketingBucket, number> = { ...(partsOf.get(`${x.brand_id}|${x.m}`) ?? {}) };
+    if (c.adSpend) breakdown.ADS = c.adSpend;
+    if (c.samplesValue) breakdown[sampleBucket("MEDICAL")] = (breakdown[sampleBucket("MEDICAL")] ?? 0) + c.samplesValue;
+    return { brandId: String(x.brand_id), month: Number(x.m), consumed: c.consumed, adSpend: c.adSpend, committed: c.committed, samplesValue: c.samplesValue, breakdown };
   });
 }
 

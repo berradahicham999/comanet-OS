@@ -365,6 +365,13 @@
       "when": 1790000600000,
       "tag": "0051_commande_anti_doublon",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1790000700000,
+      "tag": "0052_sorties_marketing",
+      "breakpoints": true
     }
   ]
 }

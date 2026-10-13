@@ -1,18 +1,24 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import clsx from "clsx";
 import { ChevronRight } from "lucide-react";
 import { fmtMAD } from "@/lib/format";
 import { MONTHS_SHORT, type PnlLine } from "@/lib/pnl-shared";
 
-/** Tableau du compte de résultat : mois en colonnes, familles repliables, cumul, % du CA et N-1. */
-export function PnlTable({ lines, lastMonth, previous, revenueTotal }: {
+/**
+ * Tableau du compte de résultat : mois en colonnes, familles repliables, cumul, % du CA et N-1. Une ligne de détail
+ * (`drill`) est cliquable jusqu'à ses pièces sources (`/gestion/pnl/detail`).
+ */
+export function PnlTable({ lines, lastMonth, previous, revenueTotal, drillBase }: {
   lines: PnlLine[];
   lastMonth: number;
   /** Cumul N-1 sur la même période, par clé de ligne ; absent = non comparable. */
   previous: Record<string, number | undefined>;
   revenueTotal: number;
+  /** Début de l'adresse du détail (année, marque) ; absent = cellules non cliquables. */
+  drillBase?: string;
 }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const parents = new Set(lines.filter((l) => l.parent).map((l) => l.parent!));
@@ -24,6 +30,11 @@ export function PnlTable({ lines, lastMonth, previous, revenueTotal }: {
   const pct = (v: number) => `${v.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %`;
   const cell = (l: PnlLine, v: number) => (l.pct ? (v ? pct(v) : "—") : money(v));
   const tone = (l: PnlLine, v: number) => ((l.kind === "subtotal" || l.kind === "total") && v < -0.5 ? "text-red" : undefined);
+  const href = (l: PnlLine, month?: number) => (drillBase && l.drill ? `${drillBase}&ligne=${encodeURIComponent(l.drill)}${month ? `&mois=${month}` : ""}` : null);
+  const linked = (l: PnlLine, v: number, month?: number) => {
+    const h = href(l, month);
+    return h && Math.abs(v) >= 0.5 ? <Link href={h} className="hover:underline decoration-dotted" title="Voir les pièces sources">{cell(l, v)}</Link> : cell(l, v);
+  };
 
   return (
     <div className="card overflow-hidden">
@@ -65,9 +76,9 @@ export function PnlTable({ lines, lastMonth, previous, revenueTotal }: {
                     )}
                   </td>
                   {l.months.slice(0, lastMonth).map((v, i) => (
-                    <td key={i} className={clsx("text-right px-2 py-2 whitespace-nowrap", strong && "font-medium", tone(l, v))}>{cell(l, v)}</td>
+                    <td key={i} className={clsx("text-right px-2 py-2 whitespace-nowrap", strong && "font-medium", tone(l, v))}>{linked(l, v, i + 1)}</td>
                   ))}
-                  <td className={clsx("text-right px-3 py-2 bg-surface-2 whitespace-nowrap font-semibold", tone(l, l.total))}>{cell(l, l.total)}</td>
+                  <td className={clsx("text-right px-3 py-2 bg-surface-2 whitespace-nowrap font-semibold", tone(l, l.total))}>{linked(l, l.total)}</td>
                   <td className="text-right px-2 py-2 text-muted whitespace-nowrap">{l.pct || l.key === "revente_distributeur" || !revenueTotal ? "" : pct((l.total / revenueTotal) * 100)}</td>
                   <td className="text-right px-3 py-2 text-muted whitespace-nowrap">{prev === undefined ? "—" : cell(l, prev)}</td>
                 </tr>

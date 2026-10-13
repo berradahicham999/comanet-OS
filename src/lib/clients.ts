@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { pgArray } from "@/lib/sql-array";
 import { db } from "@/db";
 import { getSettings, type ComanetSettings } from "./settings";
-import { ORDER_KEY } from "./analytics";
+import { isCommercialClientSql, ORDER_KEY } from "./analytics";
 import { addDays, addMonths, daysBetween, iso, startOfMonth, today } from "./format";
 
 export type Segment = "CROISSANCE" | "STABLE" | "A_RISQUE" | "INACTIF" | "NOUVEAU";
@@ -54,6 +54,10 @@ export type ClientIntel = {
   recommendation: { title: string; detail: string; kind: "RELANCE" | "REACTIVATION" | "ANALYSE" | "DEVELOPPEMENT" | "ANIMATION" | "NONE" };
 };
 
+/**
+ * Intelligence client (segments, rythme, recommandation). Sans `clientId`, la liste écarte les clients non commerciaux
+ * (`isCommercialClientSql()` : clients internes, vente en bloc) ; une fiche demandée par son id reste lisible.
+ */
 export async function clientIntel(opts: { clientId?: string; clientIds?: string[] | null; brandIds?: string[] | null; includeArchived?: boolean } = {}, ref?: Date): Promise<ClientIntel[]> {
   const s = await getSettings();
   const t = ref ?? today();
@@ -114,7 +118,7 @@ export async function clientIntel(opts: { clientId?: string; clientIds?: string[
     left join field_stock fs on fs.client_id = c.id
     left join field_sellout fso on fso.client_id = c.id
     left join last_anim la on la.client_id = c.id
-    where ${opts.includeArchived ? sql`true` : sql`c.active`} ${opts.clientId ? sql`and c.id = ${opts.clientId}::uuid` : sql``}
+    where ${opts.includeArchived ? sql`true` : sql`c.active`} ${opts.clientId ? sql`and c.id = ${opts.clientId}::uuid` : sql`and ${isCommercialClientSql(sql`c.id`)}`}
       ${opts.clientIds && opts.clientIds.length ? sql`and c.id = any(${pgArray(opts.clientIds)})` : sql``}
       ${opts.brandIds && !(opts.clientIds && opts.clientIds.length) ? (opts.brandIds.length ? sql`and exists (select 1 from sales s2 join products p2 on p2.id = s2.product_id where s2.client_id = c.id and p2.brand_id = any(${pgArray(opts.brandIds)}))` : sql`and false`) : sql``}
     order by revenue12 desc`);

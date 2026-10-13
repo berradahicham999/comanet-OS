@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { activationOutputs } from "@/lib/gestion/marketing-outputs";
 import { notFound } from "next/navigation";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
@@ -50,12 +51,12 @@ export default async function ActivationPage(props: { params: Promise<{ id: stri
   const a = await getActivation(id, scope, refs, settings.activations, todayIso);
   if (!a) notFound();
 
-  const [budget, assets, options, cities, brands, users, templates, canEdit, canValidatePerm, isValidator, comments, history, axes] = await Promise.all([
+  const [budget, assets, options, cities, brands, users, templates, canEdit, canValidatePerm, isValidator, comments, history, axes, blOutputs] = await Promise.all([
     activationBudget(id), listAssets({ activationId: id }), pickerOptions(), knownCities(), listBrands(), listUsers(), listActivationTemplates(),
     canDoActivation("edit"), canDoActivation("validate"), canValidateActivation(a.brandId),
     db.execute<{ id: string; body: string; created_at: string; user: string | null }>(sql`select c.id, c.body, c.created_at::text as created_at, u.name as "user" from activation_comments c left join users u on u.id = c.user_id where c.activation_id = ${id}::uuid order by c.created_at`),
     db.execute<{ from_status: string | null; to_status: string; comment: string | null; created_at: string; user: string | null }>(sql`select h.from_status, h.to_status, h.comment, h.created_at::text as created_at, u.name as "user" from activation_status_history h left join users u on u.id = h.user_id where h.activation_id = ${id}::uuid order by h.created_at desc`),
-    axisOptions(a.brandId),
+    axisOptions(a.brandId), activationOutputs(id),
   ]);
   const inventory = canEdit ? await listInventory({}, todayIso, settings.activations.inventoryDormantDays) : [];
   const impact = await salesImpact(a, settings.activations, todayIso);
@@ -183,7 +184,7 @@ export default async function ActivationPage(props: { params: Promise<{ id: stri
                   <li key={m.id} className="flex items-center gap-2"><span>{m.item} <span className="text-muted">× {m.quantity} {m.unit} · {m.category}</span></span><span className="tabular-nums ml-auto">{fmtMAD(m.total)}</span>
                     {canEdit && <form action={returnFromActivation}><input type="hidden" name="activationId" value={a.id} /><input type="hidden" name="materialId" value={m.id} /><button className="text-faint hover:text-red" type="submit" title="Retour en stock">×</button></form>}</li>
                 ))}</ul>
-              ) : <p className="mt-1 text-[12.5px] text-muted">Rien de sorti. Une sortie décrémente l&apos;inventaire et compte dans le coût complet.</p>}
+              ) : <p className="mt-1 text-[12.5px] text-muted">Rien de sorti. Une sortie décrémente l&apos;inventaire et compte dans le coût complet (le matériel est passé en charge à l&apos;achat : sa sortie n&apos;est pas une nouvelle dépense).</p>}
               {canEdit && inventory.length > 0 && (
                 <form action={consumeForActivation} className="mt-2 flex flex-wrap gap-1.5 text-[12.5px]">
                   <input type="hidden" name="activationId" value={a.id} />
@@ -195,6 +196,18 @@ export default async function ActivationPage(props: { params: Promise<{ id: stri
               )}
               {canEdit && inventory.length === 0 && <p className="mt-1 text-[11.5px] text-muted">L&apos;inventaire est vide : <Link href="/marketing/materiel" className="text-accent">créer ou importer des articles</Link>.</p>}
             </div>
+            {blOutputs.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-line">
+                <div className="label">Sorties par BL (échantillons et matériel)</div>
+                <ul className="mt-1.5 text-[12.5px] space-y-0.5">{blOutputs.map((o, k) => (
+                  <li key={k} className="flex items-center gap-2">
+                    <span><Link href={`/gestion/pieces/${o.documentId}`} className="font-mono hover:underline">{o.number}</Link> · {o.designation} <span className="text-muted">× {o.quantity} · {o.kind === "MATERIEL" ? "matériel (charge à l'achat)" : "échantillon"}</span></span>
+                    <span className="tabular-nums ml-auto">{o.kind === "PRODUIT" ? (o.charged ? fmtMAD(o.charged) : "non valorisé") : o.value !== null ? <span className="text-muted">{fmtMAD(o.value)}</span> : "—"}</span>
+                  </li>
+                ))}</ul>
+                <p className="mt-1 text-[11.5px] text-faint">Les échantillons sortis par un BL rattaché à cette activation sont des dépenses réelles (budget, P&L) ; le matériel est tracé pour information.</p>
+              </div>
+            )}
           </Card>
 
           {/* ------------------------------ Checklist ------------------------------ */}

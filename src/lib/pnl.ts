@@ -1,23 +1,31 @@
 import "server-only";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { pnlBulkSales, pnlCharges } from "@/db/schema";
+import { pnlCharges } from "@/db/schema";
 import { audit, changedFields, type AuditActor } from "@/lib/audit";
-import { budgetConsumptionByMonth } from "@/lib/budget";
+import { BULK_CLIENT_SQL, isCommercialClientSql } from "@/lib/analytics";
+import { budgetConsumptionByMonth, engagedSql, SAMPLES_VALUED_UNTIL } from "@/lib/budget";
+import { pgArray } from "@/lib/sql-array";
+import { outputNatures } from "@/lib/gestion/refs";
+import { marketingBucketOf } from "@/lib/budget-categories";
 import { getSettings, saveSettings, type PnlSettings } from "@/lib/settings";
 import {
-  buildPnl, chargeMonths, firstOfMonth, monthOf, previousMonth, RECURRENCES,
+  buildPnl, chargeMonths, firstOfMonth, previousMonth, RECURRENCES,
   type BulkAgg, type CategoryInput, type ChargeGroup, type ChargeInput, type MarketingAgg, type PnlStatement, type Recurrence, type SalesAgg,
 } from "./pnl-shared";
 
 /**
- * P&L de gestion — lecture des sources et écritures des saisies (charges, ventes en bloc).
+ * P&L de gestion — lecture des sources et écritures des saisies (charges ; l'ancienne saisie des ventes en bloc
+ * reste lisible mais n'entre plus dans le calcul : le CA en bloc vient des factures et avoirs).
  * Les calculs sont dans `pnl-shared.ts` (`buildPnl()`), seule définition du compte de résultat.
  */
 
 /* ------------------------------------------------------------------ lecture */
 
-/** Ventes de l'année agrégées mois × marque × site, avec coût d'achat et CA sans prix d'achat. */
+/**
+ * Ventes de l'année agrégées mois × marque × site, avec coût d'achat et CA sans prix d'achat. Les clients non
+ * commerciaux (`isCommercialClientSql()` : clients internes, client « vente en bloc ») n'en font pas partie.
+ */
 async function salesAgg(year: number): Promise<SalesAgg[]> {
   const r = await db.execute<{ m: number; brand_id: string | null; site: string; amount: number; cogs: number; missing: number }>(sql`
     select extract(month from s.date)::int as m,
@@ -29,17 +37,33 @@ async function salesAgg(year: number): Promise<SalesAgg[]> {
     from sales s
     left join products p on p.id = s.product_id
     left join brands b on b.id = p.brand_id
-    where s.date >= ${`${year}-01-01`}::date and s.date < ${`${year + 1}-01-01`}::date
+    where s.date >= ${`${year}-01-01`}::date and s.date < ${`${year + 1}-01-01`}::date and ${isCommercialClientSql(sql`s.client_id`)}
     group by 1, 2, 3`);
   return r.rows.map((x) => ({ month: Number(x.m), brandId: x.brand_id, site: x.site, amount: Number(x.amount), cogs: Number(x.cogs), missingCostAmount: Number(x.missing) }));
 }
 
+/**
+ * Lignes des pièces de vente en bloc : FACTURES (+) et AVOIRS (−) réels du client `gestion.bulkSales`, ni brouillon,
+ * ni annulés, ni en simulation. Coût = (quantité + UG) × prix d'achat de la fiche ; un avoir ne retire le coût que
+ * s'il fait revenir la marchandise (motif avec retour). Le BL n'est jamais lu : seule la facture fait le CA.
+ */
+const BULK_LINES = (from: string, to: string) => sql`
+  from sales_documents d join sales_document_lines l on l.document_id = d.id
+  left join products p on p.id = l.product_id left join brands b on b.id = p.brand_id left join credit_reasons cr on cr.key = d.reason_key
+  where d.client_id = ${BULK_CLIENT_SQL} and d.type in ('FACTURE', 'AVOIR') and d.status not in ('BROUILLON', 'ANNULE') and not d.is_simulation
+    and d.date >= ${from}::date and d.date < ${to}::date`;
+const BULK_SIGN = sql`(case when d.type = 'AVOIR' then -1 else 1 end)`;
+const BULK_COSTED = sql`(l.product_id is not null and (d.type = 'FACTURE' or coalesce(cr.with_return, false)))`;
+
 async function bulkAgg(year: number): Promise<BulkAgg[]> {
-  const r = await db.execute<{ date: string; brand_id: string; amount: number; cost: number | null }>(sql`
-    select bs.date::text as date, coalesce(b.merged_into_id, b.id) as brand_id, bs.amount_ht::float8 as amount, bs.cost_amount::float8 as cost
-    from pnl_bulk_sales bs join brands b on b.id = bs.brand_id
-    where bs.date >= ${`${year}-01-01`}::date and bs.date < ${`${year + 1}-01-01`}::date`);
-  return r.rows.map((x) => ({ month: monthOf(x.date, year) ?? 0, brandId: x.brand_id, amount: Number(x.amount), cost: x.cost === null ? null : Number(x.cost) }));
+  const r = await db.execute<{ m: number; brand_id: string | null; amount: number; cogs: number; missing: number }>(sql`
+    select extract(month from d.date)::int as m, coalesce(b.merged_into_id, b.id) as brand_id,
+      coalesce(sum(${BULK_SIGN} * l.net_ht), 0)::float8 as amount,
+      coalesce(sum(case when ${BULK_COSTED} and p.cost_price is not null then ${BULK_SIGN} * (l.quantity + l.free_quantity) * p.cost_price else 0 end), 0)::float8 as cogs,
+      coalesce(sum(case when ${BULK_COSTED} and p.cost_price is null then ${BULK_SIGN} * l.net_ht else 0 end), 0)::float8 as missing
+    ${BULK_LINES(`${year}-01-01`, `${year + 1}-01-01`)}
+    group by 1, 2`);
+  return r.rows.map((x) => ({ month: Number(x.m), brandId: x.brand_id, amount: Number(x.amount), cogs: Number(x.cogs), missingCostAmount: Number(x.missing) }));
 }
 
 async function chargeInputs(year: number): Promise<ChargeInput[]> {
@@ -62,8 +86,9 @@ async function marketingAgg(year: number): Promise<MarketingAgg[]> {
     db.execute<{ id: string; target: string }>(sql`select id, merged_into_id as target from brands where merged_into_id is not null`),
   ]);
   const map = new Map(merged.rows.map((m) => [m.id, m.target]));
-  return rows.map((r) => ({ month: r.month, brandId: map.get(r.brandId) ?? r.brandId, consumed: r.consumed }));
+  return rows.map((r) => ({ month: r.month, brandId: map.get(r.brandId) ?? r.brandId, consumed: r.consumed, breakdown: r.breakdown }));
 }
+
 
 async function pnlBrands() {
   const r = await db.execute<{ id: string; name: string; color: string }>(sql`select id, name, color from brands where merged_into_id is null order by name`);
@@ -102,8 +127,9 @@ export async function pnlStatement(year: number, lastMonth: number, brandId?: st
     const [sales, bulk, charges, marketing] = await Promise.all([salesAgg(y), bulkAgg(y), chargeInputs(y), marketingAgg(y)]);
     return { sales, bulk, charges, marketing };
   };
-  const [cur, prev, categories, brands, fresh] = await Promise.all([load(year), load(year - 1), listChargeCategories({ includeInactive: true }), pnlBrands(), freshness(year, rules)]);
-  const base = { rules, categories, brands, brandId: brandId ?? null, lastMonth };
+  const [cur, prev, categories, brands, fresh, natures] = await Promise.all([load(year), load(year - 1), listChargeCategories({ includeInactive: true }), pnlBrands(), freshness(year, rules), outputNatures({ includeInactive: true })]);
+  const natureLabels = Object.fromEntries(natures.map((n) => [n.key, n.label.toLowerCase()]));
+  const base = { rules, categories, brands, brandId: brandId ?? null, lastMonth, natureLabels };
   return {
     ...buildPnl({ ...base, year, ...cur }),
     previous: buildPnl({ ...base, year: year - 1, ...prev }),
@@ -111,6 +137,125 @@ export async function pnlStatement(year: number, lastMonth: number, brandId?: st
     freshness: fresh,
     brandList: brands,
   };
+}
+
+/* ------------------------------------------------- détail jusqu'aux pièces */
+
+export type PnlSourceRow = {
+  date: string; label: string; detail: string | null; ref: string | null; href: string | null;
+  /** Montant qui entre dans la ligne du P&L (signé : un avoir est négatif). */
+  amount: number;
+  /** Coût d'achat associé (lignes de CA), null si sans objet. */
+  cost: number | null;
+};
+export type PnlSources = { title: string; note: string | null; rows: PnlSourceRow[]; total: number; truncated: boolean };
+
+const LIMIT = 500;
+const brandCond = (brandId: string | null, col = sql`coalesce(b.merged_into_id, b.id)`) => (brandId ? sql`and ${col} = ${brandId}::uuid` : sql``);
+const docHref = (id: string | null) => (id ? `/gestion/pieces/${id}` : null);
+
+/**
+ * Pièces et écritures qui composent une ligne du P&L (`PnlLine.drill`) sur un mois (ou l'année), pour une marque ou
+ * toute la société. Mêmes filtres que le calcul : la somme des lignes rendues égale la cellule du P&L (hors troncature).
+ */
+export async function pnlLineSources(drill: string, year: number, month: number | null, brandId: string | null): Promise<PnlSources> {
+  const from = month ? `${year}-${String(month).padStart(2, "0")}-01` : `${year}-01-01`;
+  const to = month ? (month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, "0")}-01`) : `${year + 1}-01-01`;
+  const rules = (await getSettings()).pnl;
+  const finish = (title: string, note: string | null, rows: PnlSourceRow[]): PnlSources =>
+    ({ title, note, rows: rows.slice(0, LIMIT), total: rows.reduce((a, r) => a + r.amount, 0), truncated: rows.length > LIMIT });
+
+  // Ventes (directes ou d'un prestataire) : regroupées par pièce COMANET OS, sinon par facture importée.
+  const salesRows = async (sites: string[], rate: number | null) => {
+    const r = await db.execute<{ date: string; doc_id: string | null; number: string | null; invoice_ref: string | null; client: string; amount: number; cost: number; missing: number }>(sql`
+      select min(s.date)::text as date, max(d.id::text) as doc_id, max(d.number) as number, max(s.invoice_ref) as invoice_ref, max(c.name) as client,
+        sum(s.amount)::float8 as amount,
+        sum(case when p.cost_price is not null then (coalesce(s.quantity, 0) + coalesce(s.free_quantity, 0)) * p.cost_price else 0 end)::float8 as cost,
+        sum(case when p.cost_price is null then s.amount else 0 end)::float8 as missing
+      from sales s join clients c on c.id = s.client_id left join products p on p.id = s.product_id left join brands b on b.id = p.brand_id
+        left join sales_document_lines dl on dl.id = s.document_line_id left join sales_documents d on d.id = dl.document_id
+      where s.date >= ${from}::date and s.date < ${to}::date and upper(trim(coalesce(s.site, ''))) = any(${pgArray(sites.map((x) => x.trim().toUpperCase()), "text")})
+        and ${isCommercialClientSql(sql`s.client_id`)} ${brandCond(brandId)}
+      group by coalesce(d.id::text, s.invoice_ref, s.client_id::text || ':' || s.date::text)
+      order by 1, 3`);
+    return r.rows.map((x): PnlSourceRow => ({
+      date: x.date, label: x.client, ref: x.number ?? x.invoice_ref ?? null, href: docHref(x.doc_id),
+      detail: rate === null ? (x.missing ? `dont ${Math.round(x.missing).toLocaleString("fr-FR")} MAD sans prix d'achat` : x.doc_id ? "Pièce COMANET OS" : "Import") : `CA du prestataire ${Math.round(x.amount).toLocaleString("fr-FR")} MAD × ${rate} %`,
+      amount: rate === null ? Number(x.amount) : (Number(x.amount) * rate) / 100, cost: rate === null ? Number(x.cost) : null,
+    }));
+  };
+
+  if (drill === "ca_direct") return finish("Ventes directes COMANET", "Coût = (quantité + UG) × prix d'achat de la fiche ; une vente sans prix d'achat n'a pas de coût (signalée).", await salesRows(rules.directSites, null));
+  if (drill.startsWith("presta:")) {
+    const site = drill.slice(7);
+    const p = rules.prestations.find((x) => x.site.trim().toUpperCase() === site);
+    return finish(p ? `${p.label} (${p.ratePct} %)` : site, "Commission = taux × CA HT remisé du prestataire.", await salesRows([site], p?.ratePct ?? 0));
+  }
+  if (drill === "ca_bulk") {
+    const r = await db.execute<{ id: string; number: string; date: string; type: string; client: string; source: string; amount: number; cost: number; missing: number }>(sql`
+      select d.id, d.number, d.date::text as date, d.type, coalesce(d.client_snapshot->>'legalName', '') as client, d.source,
+        coalesce(sum(${BULK_SIGN} * l.net_ht), 0)::float8 as amount,
+        coalesce(sum(case when ${BULK_COSTED} and p.cost_price is not null then ${BULK_SIGN} * (l.quantity + l.free_quantity) * p.cost_price else 0 end), 0)::float8 as cost,
+        coalesce(sum(case when ${BULK_COSTED} and p.cost_price is null then ${BULK_SIGN} * l.net_ht else 0 end), 0)::float8 as missing
+      ${BULK_LINES(from, to)} ${brandCond(brandId)}
+      group by d.id order by d.date, d.number`);
+    return finish("Ventes en bloc (factures − avoirs)", "Factures et avoirs réels du client « vente en bloc » (Paramètres → Gestion) ; les pièces en simulation n'y entrent pas.", r.rows.map((x) => ({
+      date: x.date, label: x.client, ref: x.number, href: docHref(x.id), amount: Number(x.amount), cost: Number(x.cost),
+      detail: `${x.type === "AVOIR" ? "Avoir" : "Facture"}${x.source === "SAGE_REPRISE" ? " reprise de Sage" : ""}${x.missing ? ` · dont ${Math.round(x.missing).toLocaleString("fr-FR")} MAD sans prix d'achat` : ""}`,
+    })));
+  }
+  if (drill.startsWith("cat:")) {
+    const key = drill.slice(4);
+    const r = await db.execute<{ id: string; label: string; amount: number; recurrence: string; start_month: string; end_month: string | null; brand: string | null; brand_id: string | null }>(sql`
+      select c.id, c.label, c.amount::float8 as amount, c.recurrence, c.start_month::text, c.end_month::text, b.name as brand, coalesce(b.merged_into_id, b.id) as brand_id
+      from pnl_charges c left join brands b on b.id = c.brand_id where c.category_key = ${key} ${brandCond(brandId)} order by c.start_month`);
+    const rows: PnlSourceRow[] = [];
+    for (const c of r.rows) {
+      const months = chargeMonths({ recurrence: c.recurrence, startMonth: c.start_month, endMonth: c.end_month }, year).filter((m) => !month || m === month);
+      if (!months.length) continue;
+      rows.push({ date: c.start_month, label: c.label, detail: `${c.recurrence === "MENSUELLE" ? `${months.length} mois × ${Math.round(c.amount).toLocaleString("fr-FR")} MAD` : "Ponctuelle"}${c.brand ? ` · ${c.brand}` : ""}`, ref: null, href: `/gestion/pnl/charges?year=${year}&edit=${c.id}`, amount: months.length * c.amount, cost: null });
+    }
+    return finish("Charges saisies", null, rows);
+  }
+  if (drill.startsWith("mkt:")) {
+    const bucket = drill.slice(4);
+    const rows: PnlSourceRow[] = [];
+    if (bucket === "ADS") {
+      const ads = await db.execute<{ date: string; campaign: string; campaign_id: string | null; spend: number }>(sql`
+        select min(m.date)::text as date, m.campaign_name as campaign, max(m.campaign_id::text) as campaign_id, sum(m.spend)::float8 as spend
+        from ad_metrics m left join brands b on b.id = m.brand_id
+        where m.date >= ${from}::date and m.date < ${to}::date and not m.is_partial and m.brand_id is not null ${brandCond(brandId)}
+        group by m.campaign_name order by 1`);
+      for (const a of ads.rows) rows.push({ date: a.date, label: a.campaign, detail: "Dépense régie (Meta)", ref: null, href: a.campaign_id ? `/marketing/campagnes/${a.campaign_id}` : null, amount: Number(a.spend), cost: null });
+    }
+    const exp = await db.execute<{ id: string; date: string; label: string; category: string; output_nature: string | null; activation_id: string | null; activation: string | null; campaign_id: string | null; collaboration_id: string | null; doc_id: string | null; number: string | null; client: string | null; amount: number }>(sql`
+      select e.id, e.date::text as date, e.label, e.category::text as category, e.output_nature, e.activation_id, a.name as activation, e.campaign_id, e.collaboration_id,
+        d.id as doc_id, d.number, c.name as client, e.amount::float8 as amount
+      from marketing_expenses e left join brands b on b.id = e.brand_id left join activations a on a.id = e.activation_id
+        left join sales_document_lines dl on dl.id = e.document_line_id left join sales_documents d on d.id = dl.document_id left join clients c on c.id = e.client_id
+      where e.date >= ${from}::date and e.date < ${to}::date and ${engagedSql("e")} ${brandCond(brandId)}
+      order by e.date`);
+    for (const e of exp.rows) {
+      if (marketingBucketOf({ category: e.category, outputNature: e.output_nature, activationId: e.activation_id }) !== bucket) continue;
+      const href = e.doc_id ? docHref(e.doc_id) : e.activation_id ? `/marketing/activations/${e.activation_id}` : e.collaboration_id ? `/marketing/influence/${e.collaboration_id}` : e.campaign_id ? `/marketing/campagnes/${e.campaign_id}` : null;
+      const detail = e.doc_id ? `Sortie par BL${e.client ? ` · ${e.client}` : ""}` : e.activation ? `Activation « ${e.activation} »` : null;
+      rows.push({ date: e.date, label: e.label, detail: bucket === "ADS" ? `${detail ?? "Média saisi"} — compté seulement sans donnée de régie sur l'année de la marque` : detail, ref: e.number, href, amount: Number(e.amount), cost: null });
+    }
+    if (bucket === "ECH:MEDICAL") {
+      const sm = await db.execute<{ date: string; delegate: string; product: string; qty: number; value: number }>(sql`
+        select min(sm.date)::text as date, u.name as delegate, p.name as product, -sum(sm.quantity)::float8 as qty,
+          -sum(sm.quantity * coalesce(p.cost_price, p.price_wholesale))::float8 as value
+        from sample_movements sm join products p on p.id = sm.product_id join users u on u.id = sm.delegate_id left join brands b on b.id = p.brand_id
+        where sm.type = 'SORTIE_VISITE' and sm.date >= ${from}::date and sm.date < ${to}::date and coalesce(p.cost_price, p.price_wholesale) is not null
+          and sm.date < ${SAMPLES_VALUED_UNTIL}
+          ${brandCond(brandId)}
+        group by u.name, p.name order by 1`);
+      for (const x of sm.rows) rows.push({ date: x.date, label: `${x.product} — ${x.qty} remis en visite`, detail: `Déléguée : ${x.delegate}`, ref: null, href: "/medical", amount: Number(x.value), cost: null });
+    }
+    const note = bucket === "ADS" ? "La régie fait foi dès qu'elle a des données sur l'année de la marque ; sinon, le média saisi à la main." : bucket.startsWith("ECH:") ? "Échantillons sortis par BL au coût de revient figé, et dépenses d'échantillons saisies." : null;
+    return finish("Marketing réel", note, rows.sort((a, b) => a.date.localeCompare(b.date)));
+  }
+  return finish("Ligne inconnue", null, []);
 }
 
 /* ---------------------------------------------------------------- charges */
@@ -229,6 +374,7 @@ export async function deleteCharge(id: string, actor: AuditActor) {
 
 /* ------------------------------------------------------------ ventes en bloc */
 
+/** Ancienne saisie manuelle des ventes en bloc (`pnl_bulk_sales`) : lecture seule, hors du calcul du P&L. */
 export type BulkRow = {
   id: string; date: string; brandId: string; brandName: string; brandColor: string; clientId: string | null; clientName: string | null;
   label: string; quantity: number | null; amountHt: number; costAmount: number | null; discountPct: number | null; notes: string | null;
@@ -246,62 +392,6 @@ export async function listBulkSales(year: number): Promise<BulkRow[]> {
     quantity: x.quantity === null ? null : Number(x.quantity), amountHt: Number(x.amount_ht), costAmount: x.cost_amount === null ? null : Number(x.cost_amount),
     discountPct: x.discount_pct === null ? null : Number(x.discount_pct), notes: x.notes,
   }));
-}
-
-export async function getBulkSale(id: string) {
-  const [b] = await db.select().from(pnlBulkSales).where(eq(pnlBulkSales.id, id));
-  return b ?? null;
-}
-
-export type BulkInputForm = {
-  date: string; brandId: string; clientId: string | null; label: string; quantity: string | null; amountHt: string; costAmount: string | null; discountPct: string | null; notes: string | null;
-};
-
-const DEC2 = /^-?\d+(\.\d{1,2})?$/;
-function checkBulk(i: BulkInputForm) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(i.date)) throw new Error("Date invalide.");
-  if (!i.brandId) throw new Error("La marque est obligatoire.");
-  if (!DEC2.test(i.amountHt)) throw new Error("Montant HT facturé invalide.");
-  if (i.costAmount !== null && !DEC2.test(i.costAmount)) throw new Error("Coût d'achat invalide.");
-  if (i.discountPct !== null && (!DEC2.test(i.discountPct) || Number(i.discountPct) < 0 || Number(i.discountPct) > 100)) throw new Error("Remise : entre 0 et 100 %.");
-  if (i.quantity !== null && !/^\d+(\.\d{1,3})?$/.test(i.quantity)) throw new Error("Quantité invalide.");
-  return { ...i, label: i.label.trim() || "Vente en bloc" };
-}
-
-export async function createBulkSale(i: BulkInputForm, actor: AuditActor): Promise<string> {
-  const v = checkBulk(i);
-  return db.transaction(async (tx) => {
-    const [row] = await tx.insert(pnlBulkSales).values({ ...v, createdById: actor.id }).returning({ id: pnlBulkSales.id });
-    await audit({ actor, action: "PNL_BULK_CREATE", module: "administration", entity: "pnl_bulk_sale", entityId: row.id, label: v.label, after: v }, tx);
-    return row.id;
-  });
-}
-
-export async function updateBulkSale(id: string, i: BulkInputForm, actor: AuditActor) {
-  const v = checkBulk(i);
-  const before = await getBulkSale(id);
-  if (!before) throw new Error("Vente introuvable.");
-  await db.transaction(async (tx) => {
-    await tx.update(pnlBulkSales).set({ ...v, updatedAt: new Date() }).where(eq(pnlBulkSales.id, id));
-    const diff = changedFields(before as unknown as Record<string, unknown>, v as unknown as Record<string, unknown>);
-    if (diff) await audit({ actor, action: "PNL_BULK_UPDATE", module: "administration", entity: "pnl_bulk_sale", entityId: id, label: v.label, before: diff.before, after: diff.after }, tx);
-  });
-}
-
-export async function deleteBulkSale(id: string, actor: AuditActor) {
-  const b = await getBulkSale(id);
-  if (!b) return;
-  await db.transaction(async (tx) => {
-    await tx.delete(pnlBulkSales).where(eq(pnlBulkSales.id, id));
-    await audit({ actor, action: "PNL_BULK_DELETE", module: "administration", entity: "pnl_bulk_sale", entityId: id, label: b.label, before: b }, tx);
-  });
-}
-
-/** Clients proposés pour une vente en bloc : grossistes / distributeurs en tête. */
-export async function distributorClients() {
-  const r = await db.execute<{ id: string; name: string }>(sql`
-    select id, name from clients where name ilike any (array['%cospharma%', '%pharmafirst%']) or type::text = 'GROSSISTE' order by name limit 50`);
-  return r.rows;
 }
 
 /* ------------------------------------------------------------------ règles */

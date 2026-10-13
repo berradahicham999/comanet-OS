@@ -14,18 +14,24 @@ import { stockState } from "./ledger";
  */
 export type EditorClient = { id: string; name: string; legalName: string | null; city: string | null; blocked: boolean; defaultDiscountPct: string | null; paymentModeKey: string | null; brandDiscounts: Record<string, string>;
   /** Raisons sociales supplémentaires actives (l'identité de la fiche reste proposée en premier). */
-  legalEntities: { id: string; legalName: string; ice: string | null }[] };
-export type EditorProduct = { id: string; name: string; ref: string | null; ean: string | null; kind: string; brandId: string | null; brand: string | null; publicPriceTtc: string | null; taxRate: string; available: string | null; trackLots: boolean };
+  legalEntities: { id: string; legalName: string; ice: string | null }[];
+  /** Client interne « sorties marketing » : ses BL ne font pas de CA (nature : ANIMATION, MEDICAL…). */
+  isInternal: boolean; outputNatureKey: string | null };
+export type EditorProduct = { id: string; name: string; ref: string | null; ean: string | null; kind: string; brandId: string | null; brand: string | null; publicPriceTtc: string | null; taxRate: string; available: string | null; trackLots: boolean;
+  /** Coût de revient de la fiche (valorise une sortie d'échantillon) ; null = inconnu. */
+  costPrice: string | null };
+/** Article de matériel marketing (goodie, PLV, print) qu'un BL peut sortir, offert. */
+export type EditorMaterial = { id: string; name: string; sku: string | null; category: string; categoryLabel: string; brandId: string | null; brand: string | null; unit: string; unitCost: string; stock: number };
 
 export async function editorData(opts: { clientIds?: string[] | null } = {}) {
   const g = (await getSettings()).gestion;
   const scope = opts.clientIds ? (opts.clientIds.length ? sql`and c.id = any(${pgArray(opts.clientIds)})` : sql`and false`) : sql``;
-  const [clients, discounts, products, modes, reps, stock, defaultRate, brands, entities] = await Promise.all([
-    db.execute<{ id: string; name: string; legal_name: string | null; city: string | null; blocked: boolean; default_discount_pct: string | null; payment_mode_key: string | null }>(sql`
-      select c.id, c.name, c.legal_name, c.city, c.blocked, c.default_discount_pct::text, c.payment_mode_key from clients c where c.active ${scope} order by c.name`),
+  const [clients, discounts, products, modes, reps, stock, defaultRate, brands, entities, materials, activations, natures] = await Promise.all([
+    db.execute<{ id: string; name: string; legal_name: string | null; city: string | null; blocked: boolean; default_discount_pct: string | null; payment_mode_key: string | null; is_internal: boolean; output_nature_key: string | null }>(sql`
+      select c.id, c.name, c.legal_name, c.city, c.blocked, c.default_discount_pct::text, c.payment_mode_key, c.is_internal, c.output_nature_key from clients c where c.active ${scope} order by c.name`),
     db.execute<{ client_id: string; brand_id: string; pct: string }>(sql`select client_id, brand_id, discount_pct::text as pct from client_brand_discounts`),
-    db.execute<{ id: string; name: string; ref: string | null; ean: string | null; kind: string; brand_id: string | null; brand: string | null; price_retail: string | null; rate: string | null; track_lots: boolean }>(sql`
-      select p.id, p.name, coalesce(p.code, p.sku) as ref, p.ean, p.kind, p.brand_id, b.name as brand, coalesce(p.price_retail, p.price_wholesale)::text as price_retail, tr.rate::text as rate, p.track_lots
+    db.execute<{ id: string; name: string; ref: string | null; ean: string | null; kind: string; brand_id: string | null; brand: string | null; price_retail: string | null; rate: string | null; track_lots: boolean; cost_price: string | null }>(sql`
+      select p.id, p.name, coalesce(p.code, p.sku) as ref, p.ean, p.kind, p.brand_id, b.name as brand, coalesce(p.price_retail, p.price_wholesale)::text as price_retail, tr.rate::text as rate, p.track_lots, p.cost_price::text as cost_price
       from products p left join brands b on b.id = p.brand_id left join tax_rates tr on tr.key = p.tax_rate_key where p.active order by b.name nulls last, p.name`),
     listPaymentModes(),
     db.execute<{ id: string; name: string }>(sql`select id, name from users where active order by name`),
@@ -33,6 +39,13 @@ export async function editorData(opts: { clientIds?: string[] | null } = {}) {
     db.execute<{ rate: string }>(sql`select rate::text as rate from tax_rates where key = ${g.defaultTaxRateKey}`),
     db.execute<{ id: string; name: string }>(sql`select id, name from brands where active and merged_into_id is null order by name`),
     db.execute<{ id: string; client_id: string; legal_name: string; ice: string | null }>(sql`select id, client_id, legal_name, ice from client_legal_entities where active order by legal_name`),
+    db.execute<{ id: string; name: string; sku: string | null; category_key: string; category: string; brand_id: string | null; brand: string | null; unit: string; unit_cost: string; stock: number }>(sql`
+      select i.id, i.name, i.sku, i.category_key, c.label as category, i.brand_id, b.name as brand, i.unit, i.unit_cost::text, i.stock
+      from inventory_items i join inventory_categories c on c.key = i.category_key left join brands b on b.id = i.brand_id where i.active order by b.name nulls last, i.name`),
+    db.execute<{ id: string; name: string; date: string }>(sql`
+      select a.id, a.name, a.date::text as date from activations a join activation_statuses s on s.key = a.status
+      where not s.is_archived and not s.is_cancelled and a.date >= current_date - 365 order by a.date desc limit 300`),
+    db.execute<{ key: string; label: string }>(sql`select key, label from marketing_output_natures order by sort, label`),
   ]);
   const entitiesByClient = new Map<string, EditorClient["legalEntities"]>();
   for (const e of entities.rows) entitiesByClient.set(e.client_id, [...(entitiesByClient.get(e.client_id) ?? []), { id: e.id, legalName: e.legal_name, ice: e.ice }]);
@@ -45,8 +58,11 @@ export async function editorData(opts: { clientIds?: string[] | null } = {}) {
   const available = new Map(stock.map((s) => [s.productId, s.byWarehouse.PRINCIPAL ?? "0"]));
   const rate = defaultRate.rows[0]?.rate ?? "20.00";
   return {
-    clients: clients.rows.map((c): EditorClient => ({ id: c.id, name: c.name, legalName: c.legal_name, city: c.city, blocked: c.blocked, defaultDiscountPct: c.default_discount_pct, paymentModeKey: c.payment_mode_key, brandDiscounts: byClient.get(c.id) ?? {}, legalEntities: entitiesByClient.get(c.id) ?? [] })),
-    products: products.rows.map((p): EditorProduct => ({ id: p.id, name: p.name, ref: p.ref, ean: p.ean, kind: p.kind, brandId: p.brand_id, brand: p.brand, publicPriceTtc: p.price_retail, taxRate: p.rate ?? rate, available: p.kind === "PRODUIT" ? available.get(p.id) ?? "0" : null, trackLots: p.track_lots })),
+    clients: clients.rows.map((c): EditorClient => ({ id: c.id, name: c.name, legalName: c.legal_name, city: c.city, blocked: c.blocked, defaultDiscountPct: c.default_discount_pct, paymentModeKey: c.payment_mode_key, brandDiscounts: byClient.get(c.id) ?? {}, legalEntities: entitiesByClient.get(c.id) ?? [], isInternal: c.is_internal, outputNatureKey: c.output_nature_key })),
+    products: products.rows.map((p): EditorProduct => ({ id: p.id, name: p.name, ref: p.ref, ean: p.ean, kind: p.kind, brandId: p.brand_id, brand: p.brand, publicPriceTtc: p.price_retail, taxRate: p.rate ?? rate, available: p.kind === "PRODUIT" ? available.get(p.id) ?? "0" : null, trackLots: p.track_lots, costPrice: p.cost_price })),
+    materials: materials.rows.map((m): EditorMaterial => ({ id: m.id, name: m.name, sku: m.sku, category: m.category_key, categoryLabel: m.category, brandId: m.brand_id, brand: m.brand, unit: m.unit, unitCost: m.unit_cost, stock: Number(m.stock) })),
+    activations: activations.rows,
+    natures: Object.fromEntries(natures.rows.map((n) => [n.key, n.label])) as Record<string, string>,
     paymentModes: modes.filter((m) => m.active).map((m) => ({ key: m.key, label: m.label })),
     reps: reps.rows,
     sites: g.cutover.sites.length ? g.cutover.sites : ["COMANET"],
