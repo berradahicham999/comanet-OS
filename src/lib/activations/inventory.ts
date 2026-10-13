@@ -104,7 +104,8 @@ export async function listInventory(f: { brand?: string | null; category?: strin
       (i.stock * i.unit_cost)::float8 as value,
       (select max(m.date)::text from inventory_movements m where m.item_id = i.id and m.type = 'SORTIE') as "lastOutAt",
       (select max(m.date)::text from inventory_movements m where m.item_id = i.id and m.type = 'ENTREE') as "lastInAt",
-      coalesce((select -sum(m.quantity) from inventory_movements m where m.item_id = i.id and m.type = 'SORTIE' and m.date >= ${todayIso}::date - 90), 0)::int as "outQty90",
+      coalesce((select -sum(m.quantity) from inventory_movements m where m.item_id = i.id and m.type = 'SORTIE' and m.date >= ${todayIso}::date - 90
+        and not exists (select 1 from inventory_movements x where x.reversal_of = m.id)), 0)::int as "outQty90",
       (select x.id from content_assets x where x.inventory_item_id = i.id and x.kind = 'PHOTO' order by x.version desc limit 1) as "photoId",
       i.created_at::text as "createdAt"
     from inventory_items i join inventory_categories c on c.key = i.category_key

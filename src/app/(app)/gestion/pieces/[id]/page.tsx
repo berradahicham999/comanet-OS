@@ -152,6 +152,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
   const fromOrder = type === "BL" && doc.origin?.type === "COMMANDE" ? doc.origin : null;
   const cancelledFixed = status === "ANNULE" && type !== "COMMANDE";
   const reassignBlock = !canFixClient || cancelledFixed ? null
+    : doc.client.isInternal ? "Une sortie marketing (client interne) ne change pas de client : annulez le BL et refaites-le au bon client."
     : type === "FACTURE" || type === "AVOIR" ? "Une facture ou un avoir ne change pas de client : faites un avoir sur la pièce, puis refacturez au bon client."
     : type === "BL" && anyInvoiced ? "Ce BL est (en partie) facturé : il ne change plus de client. Faites un avoir sur la facture, puis refacturez."
     : fromOrder ? `Ce BL vient de la commande ${fromOrder.number} : changez le client sur la commande, ses BL suivent.`
@@ -230,7 +231,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
                 <thead><tr className="text-left text-faint border-b border-line">
                   <th className="px-3 py-2 font-medium">Article</th><th className="px-3 py-2 font-medium text-right">Qté</th><th className="px-3 py-2 font-medium text-right">UG</th>
                   <th className="px-3 py-2 font-medium text-right">P.U. HT</th><th className="px-3 py-2 font-medium text-right">Remise</th><th className="px-3 py-2 font-medium text-right">Net HT</th>
-                  {type === "BL" && <th className="px-3 py-2 font-medium text-right">Facturé</th>}
+                  {type === "BL" && !doc.client.isInternal && <th className="px-3 py-2 font-medium text-right">Facturé</th>}
                   {type === "COMMANDE" && !draft && <th className="px-3 py-2 font-medium text-right">Livré</th>}
                 </tr></thead>
                 <tbody>
@@ -246,7 +247,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
                       <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(l.unitPriceHt)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted">{Number(l.discountPct) ? `${Number(l.discountPct).toLocaleString("fr-FR")} %` : ""}</td>
                       <td className="px-3 py-2 text-right tabular-nums font-medium">{fmtMoney(l.netHt)}</td>
-                      {type === "BL" && <td className="px-3 py-2 text-right tabular-nums text-muted">{fmtNum(Number(l.invoicedQty))} / {fmtNum(Number(l.quantity))}</td>}
+                      {type === "BL" && !doc.client.isInternal && <td className="px-3 py-2 text-right tabular-nums text-muted">{fmtNum(Number(l.invoicedQty))} / {fmtNum(Number(l.quantity))}</td>}
                       {type === "COMMANDE" && !draft && <td className={`px-3 py-2 text-right tabular-nums ${Number(l.deliveredQty) >= Number(l.quantity) ? "text-green" : "text-muted"}`}>{fmtNum(Number(l.deliveredQty))} / {fmtNum(Number(l.quantity))}</td>}
                     </tr>
                   ))}
@@ -323,7 +324,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
                 {actions.deliver && can(a.perms, "livraisons", "edit") && (
                   <form action={deliverAction}><input type="hidden" name="id" value={id} /><button className="btn-secondary btn-sm" type="submit">Marquer livré</button></form>
                 )}
-                {actions.invoice && can(a.perms, "facturation", "create") && (
+                {actions.invoice && !doc.client.isInternal && can(a.perms, "facturation", "create") && (
                   <Link href={`/gestion/pieces/facturer?client=${doc.clientId}`} className="btn-primary btn-sm inline-flex">Facturer ce client</Link>
                 )}
                 {actions.credit && can(a.perms, "facturation", "create") && (

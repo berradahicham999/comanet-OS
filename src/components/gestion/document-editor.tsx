@@ -153,6 +153,12 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
     const c = data.clients.find((x) => x.id === id);
     if (c?.paymentModeKey && !paymentModeKey) setPaymentModeKey(c.paymentModeKey);
     // Les remises par défaut suivent le client choisi (lignes saisies, pas les lignes reprises).
+    // Client interne (sortie marketing) : ni prix ni remise.
+    if (c?.isInternal && type === "BL") {
+      setGlobal("0");
+      setLines((ls) => ls.map((l) => (l.productId ? { ...l, unitPriceHt: "0", discountPct: "0" } : l)));
+      return;
+    }
     if (c) setLines((ls) => ls.map((l) => {
       if (l.sourceLineId || !l.productId) return l;
       const p = data.products.find((x) => x.id === l.productId);
@@ -169,7 +175,7 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
     }
     setLines((ls) => [...ls, {
       key: newKey(), productId: p.id, designation: p.name, ref: p.ref, quantity: String(qty), freeQuantity: "0",
-      unitPriceHt: baseUnitPriceHt(p.publicPriceTtc, p.taxRate) ?? "", discountPct: client ? defaultDiscount(client.defaultDiscountPct, p.brandId ? client.brandDiscounts[p.brandId] ?? null : null) : "0",
+      unitPriceHt: internal ? "0" : baseUnitPriceHt(p.publicPriceTtc, p.taxRate) ?? "", discountPct: internal ? "0" : client ? defaultDiscount(client.defaultDiscountPct, p.brandId ? client.brandDiscounts[p.brandId] ?? null : null) : "0",
       taxRate: p.taxRate, sourceLineId: null, sourceNumber: null, returnWarehouseKey: null, maxQty: null,
     }]);
   };
@@ -396,10 +402,14 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
                       <input className="input h-9 text-right" inputMode="decimal" value={l.quantity} onChange={(e) => update(l.key, { quantity: e.target.value.replace(",", ".") })} /></label>
                     {type !== "AVOIR" && <label className="block"><span className="label block mb-0.5">UG</span>
                       <input className="input h-9 text-right" inputMode="decimal" value={l.freeQuantity} disabled={frozen} onChange={(e) => update(l.key, { freeQuantity: e.target.value.replace(",", ".") })} /></label>}
+                    {internal ? (
+                      <div className="block col-span-2"><span className="label block mb-0.5">Prix</span><div className="h-9 flex items-center text-muted text-[12px]">sortie marketing : sans prix</div></div>
+                    ) : (<>
                     <label className="block"><span className="label block mb-0.5">P.U. HT</span>
                       <input className="input h-9 text-right" inputMode="decimal" value={l.unitPriceHt} disabled={frozen} onChange={(e) => update(l.key, { unitPriceHt: e.target.value.replace(",", ".") })} /></label>
                     <label className="block"><span className="label block mb-0.5">Remise %</span>
                       <input className="input h-9 text-right" inputMode="decimal" value={l.discountPct} disabled={frozen} onChange={(e) => update(l.key, { discountPct: e.target.value.replace(",", ".") })} /></label>
+                    </>)}
                     {!l.productId && !l.sourceLineId ? (
                       <label className="block"><span className="label block mb-0.5">TVA %</span>
                         <input className="input h-9 text-right" inputMode="decimal" value={l.taxRate} onChange={(e) => update(l.key, { taxRate: e.target.value.replace(",", ".") })} /></label>
@@ -421,7 +431,7 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
       {/* Pied */}
       <div className="grid lg:grid-cols-[1fr_320px] gap-4">
         <div className="card p-4 space-y-3">
-          {!locked && (
+          {!locked && !internal && (
             <label className="block max-w-40"><span className="label block mb-1">Remise globale %</span>
               <input className="input h-9 text-right" inputMode="decimal" value={globalDiscountPct} onChange={(e) => setGlobal(e.target.value.replace(",", "."))} /></label>
           )}

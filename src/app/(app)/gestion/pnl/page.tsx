@@ -73,7 +73,7 @@ export default async function PnlPage(props: { searchParams: Promise<{ year?: st
 
       {brandId && <div className="mb-4 rounded-2xl bg-surface-2 border border-line px-4 py-2.5 text-[12.5px] text-muted">Vue marque : CA, coût, marketing et charges <b>affectées à la marque</b>. Les frais communs (loyer, salaires non affectés…) ne sont pas répartis d’office — la contribution de la marque est ce qu’elle apporte pour les couvrir.</div>}
 
-      <div className="grid grid-cols-2 lg:grid-cols-7 gap-3 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-3 mb-4">
         <Kpi label="CA HT" value={fmtMAD(k.revenue, { compact: true })} delta={delta(k.revenue, p.revenue)} deltaLabel="vs N-1" />
         <Kpi label="Marge brute" value={fmtMAD(k.grossMargin, { compact: true })} sub={k.grossMarginPct !== null ? `${fmtPct(k.grossMarginPct, 1)} du CA` : "—"} />
         <Kpi label="Marketing réel" value={fmtMAD(k.marketing, { compact: true })} sub={k.revenue ? `${fmtPct((k.marketing / k.revenue) * 100, 1)} du CA` : "—"} invert delta={delta(k.marketing, p.marketing)} />

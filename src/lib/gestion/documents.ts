@@ -265,17 +265,18 @@ export async function saveDraft(input: DraftInput, actor: AuditActor): Promise<s
       if (qty === null || qty <= 0n) throw new DocumentError(`Ligne ${i + 1} (${designation}) : quantité positive attendue.`);
       const free = parseDecimal(l.freeQuantity ?? "0", SCALE.qty) ?? 0n;
       if (free < 0n) throw new DocumentError(`Ligne ${i + 1} : UG négatives.`);
-      const pu = parseDecimal(l.unitPriceHt, SCALE.money);
+      // Sortie marketing (client interne) : aucun prix, aucune remise — la valeur est le coût de revient figé à la validation.
+      const pu = client.is_internal ? 0n : parseDecimal(l.unitPriceHt, SCALE.money);
       if (pu === null || pu < 0n) throw new DocumentError(`Ligne ${i + 1} (${designation}) : prix unitaire HT manquant.`);
       return {
         position: i, productId: p?.id ?? null, inventoryItemId: null as string | null, lotId: l.lotId ?? null, warehouseKey: l.warehouseKey ?? "PRINCIPAL",
         ref: p ? (p.code ?? p.sku) : null, designation, unit: p?.unit ?? null,
         quantity: formatScaled(qty, SCALE.qty), freeQuantity: formatScaled(free, SCALE.qty), unitPriceHt: formatScaled(pu, SCALE.money),
-        publicPriceTtc: p?.price_retail ?? null, discountPct: formatScaled(parseDecimal(l.discountPct || "0", SCALE.pct) ?? 0n, SCALE.pct),
+        publicPriceTtc: p?.price_retail ?? null, discountPct: client.is_internal ? "0.00" : formatScaled(parseDecimal(l.discountPct || "0", SCALE.pct) ?? 0n, SCALE.pct),
         taxRate: p?.rate ?? l.taxRate ?? rate, sourceLineId: l.sourceLineId ?? null, returnWarehouseKey: l.returnWarehouseKey ?? null,
       };
     });
-    const globalDiscountPct = formatScaled(parseDecimal(input.globalDiscountPct || "0", SCALE.pct) ?? 0n, SCALE.pct);
+    const globalDiscountPct = client.is_internal ? "0.00" : formatScaled(parseDecimal(input.globalDiscountPct || "0", SCALE.pct) ?? 0n, SCALE.pct);
     const calc = computeDocument(lines.map((l) => ({ quantity: l.quantity, unitPriceHt: l.unitPriceHt, discountPct: l.discountPct, taxRate: l.taxRate })), globalDiscountPct);
     // Numéro et date d'origine des BL facturés, imprimés sur la facture.
     const sourceIds = lines.map((l) => l.sourceLineId).filter((x): x is string => !!x);

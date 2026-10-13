@@ -7,7 +7,7 @@ import { BULK_CLIENT_SQL, isCommercialClientSql } from "@/lib/analytics";
 import { budgetConsumptionByMonth, engagedSql, SAMPLES_VALUED_UNTIL } from "@/lib/budget";
 import { pgArray } from "@/lib/sql-array";
 import { outputNatures } from "@/lib/gestion/refs";
-import { marketingBucketOf } from "@/lib/budget-categories";
+import { MARKETING_BUCKET_LABELS, marketingBucketOf } from "@/lib/budget-categories";
 import { getSettings, saveSettings, type PnlSettings } from "@/lib/settings";
 import {
   buildPnl, chargeMonths, firstOfMonth, previousMonth, RECURRENCES,
@@ -253,7 +253,10 @@ export async function pnlLineSources(drill: string, year: number, month: number 
       for (const x of sm.rows) rows.push({ date: x.date, label: `${x.product} — ${x.qty} remis en visite`, detail: `Déléguée : ${x.delegate}`, ref: null, href: "/medical", amount: Number(x.value), cost: null });
     }
     const note = bucket === "ADS" ? "La régie fait foi dès qu'elle a des données sur l'année de la marque ; sinon, le média saisi à la main." : bucket.startsWith("ECH:") ? "Échantillons sortis par BL au coût de revient figé, et dépenses d'échantillons saisies." : null;
-    return finish("Marketing réel", note, rows.sort((a, b) => a.date.localeCompare(b.date)));
+    const natures = bucket.startsWith("ECH:") ? await outputNatures({ includeInactive: true }) : [];
+    const nat = bucket.slice(4);
+    const title = bucket.startsWith("ECH:") ? `Échantillons — ${nat === "AUTRE" ? "nature non renseignée" : natures.find((n) => n.key === nat)?.label.toLowerCase() ?? nat}` : MARKETING_BUCKET_LABELS[bucket] ?? "Marketing réel";
+    return finish(title, note, rows.sort((a, b) => a.date.localeCompare(b.date)));
   }
   return finish("Ligne inconnue", null, []);
 }
