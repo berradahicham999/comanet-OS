@@ -373,22 +373,47 @@ Le module est complet. Calendrier retenu : période parallèle en décembre 2026
 | Source | D'où vient la donnée | Coût des ventes |
 |---|---|---|
 | Ventes directes (sites `COMANET`, `DESK DIGITAL`) | fichier de ventes / pièces COMANET OS | (quantité + UG) × prix d'achat de l'article |
-| Ventes en bloc aux distributeurs (Gamarde, Ainhoa → Cospharma à l'arrivage) | **saisie** : P&L → Ventes en bloc | coût d'achat saisi sur la vente |
+| Ventes en bloc (Gamarde, Ainhoa → COSPHARMA STE à l'arrivage) | **factures − avoirs réels** du client « vente en bloc » (Paramètres → Gestion), HT net, à la date de la pièce ; ni brouillon, ni annulé, ni simulation ; le BL n'est jamais lu | (quantité + UG) × prix d'achat de la fiche ; un avoir avec retour le retire |
 | Commission de prestation (Auracos via Pharmafirst) | 35 % × ventes HT remisées du site `PHARMAFIRST` | aucun |
 | Revente des distributeurs (sites `COS`, `CAS`, `CAG`, `DAG`, `CMR`) | fichier de ventes | **hors CA** — affichée pour information |
 
 Les sites se classent dans P&L → Règles. Un site non classé est exclu et signalé.
 
-**Charges.** Marketing : repris du module Marketing (dépenses engagées + dépense de régie + échantillons), rien à ressaisir.
+Les ventes en bloc 2026 émises dans Sage sont reprises en factures `SAGE_REPRISE` avec leurs lignes (`scripts/reprise-ventes-bloc.ts`,
+contrôle puis `--apply`) ; l'ancienne saisie (`pnl_bulk_sales`) reste consultable en lecture seule (`/gestion/pnl/ventes-bloc`) mais
+n'entre plus dans le calcul. Le client « vente en bloc » est exclu des ventes, segments et classements ; COSPHARMA le grossiste ne
+l'est pas.
+
+**Marketing réel, détaillé.** Repris du module Marketing (dépenses engagées + dépense de régie + échantillons), rien à ressaisir,
+et ventilé : publicité (régie, sinon saisie) · échantillons par nature (animation, médical, digital, commercial ; nature non
+renseignée pour les saisies anciennes) · goodies · PLV & print · influence & UGC · activations (autres postes) · autres. La somme
+des postes est exactement le consommé du budget.
+
+**Sorties marketing par BL.** Un client **interne** (fiche client → Identité & conditions → Sorties marketing, droit « Valider ») porte
+une nature (Paramètres → Gestion → Natures de sortie). Son BL ne fait jamais de CA, ne se facture pas et n'apparaît dans aucune
+analyse client. À la validation : les **produits** sortent du stock et deviennent une **charge d'échantillons** = (quantité + UG) ×
+coût de revient de la fiche, **figé** sur la ligne, de la nature du client, rattachée à la marque du produit (simulation comprise :
+la marchandise est sortie) ; le **matériel** (goodie, PLV, print — badge « Matériel » dans la saisie) sort de l'inventaire au coût de
+l'article, **sans charge** : il est passé en charge à l'achat. Un goodie offert à une vraie pharmacie se met sur son BL : prix 0, aucun
+CA, sortie tracée sur ce client (nature commercial / trade). Coût à 0 ou inconnu : alerte, jamais estimé. Annuler le BL remet produits
+et matériel en stock et retire la charge. Un BL peut alimenter une activation (bloc « Sorties par BL » sur sa fiche). À partir de la date
+« Sorties marketing par BL depuis le » (Paramètres → Gestion), les échantillons remis en visite par les déléguées ne sont plus valorisés :
+la charge naît au BL de dotation « Échantillons médical ».
+
+**Charges.**
 Le reste se saisit dans P&L → Charges : une charge **mensuelle** (salaire, loyer, internet) se déclare une fois ; « Réviser à
 partir de » change le montant sans toucher aux mois passés ; « Arrêter » la clôt. Une charge **ponctuelle** tombe sur son
 mois. Une charge peut être affectée à une marque (animatrice dédiée) : elle entre alors dans la contribution de la marque.
 Les remises exceptionnelles supportées sur les opérations Pharmafirst (3 %) et les gratuités passées en avoir chez Cospharma
 (au coût d'achat) sont des charges commerciales.
 
-**Soldes.** Marge brute → contribution après marketing et charges commerciales → résultat d'exploitation (après
-personnel et structure) → résultat net (après financier et impôts). Point mort mensuel = charges fixes récurrentes du
-dernier mois ÷ taux de contribution observé.
+**Soldes.** CA net → coût d'achat → marge brute → marketing réel → **contribution marketing** → personnel → frais
+(charges commerciales + structure) → **EBITDA** → financier, impôts → résultat net. Point mort mensuel = charges fixes
+récurrentes du dernier mois ÷ taux de marge variable ((contribution − charges commerciales) ÷ CA).
+
+**Jusqu'aux pièces.** Chaque montant d'une ligne de détail est cliquable (`/gestion/pnl/detail`) : BL et factures
+importées, factures et avoirs en bloc, dépenses (BL, activation, campagne, collaboration), dépense régie par campagne,
+échantillons de visite, charges saisies. La somme des lignes est la cellule.
 
 **Ce qui n'est jamais estimé :** un article sans prix d'achat, une vente en bloc sans coût, un mois sans charges. Le
 bandeau « À compléter » les liste avec leur montant.

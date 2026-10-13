@@ -8,6 +8,7 @@ import { requireAccessContext, can, clientFilter, clientInScope, hasFlag } from 
 import { getSettings } from "@/lib/settings";
 import { auditTrail } from "@/lib/audit";
 import { documentIssues, getDocument, orderRemaining } from "@/lib/gestion/documents";
+import { costIssueLabel, costIssues } from "@/lib/gestion/marketing-outputs-shared";
 import { allowedActions, DOC_TYPE_LABELS, STATUS_META, isOwnOrder, moduleOfType, sourceRef, statusLabel, waPhone, type DocStatus, type DocType } from "@/lib/gestion/documents-shared";
 import { editorData } from "@/lib/gestion/editor";
 import { listCreditReasons, listWarehouses } from "@/lib/gestion/refs";
@@ -112,9 +113,9 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
             warehouses={whs.filter((w) => w.active && w.kind === "INTERNE").map((w) => ({ key: w.key, label: w.label }))}
             initial={{
               id, clientId: doc.clientId, legalEntityId: doc.legalEntityId, date: doc.date, site: doc.site, salesRepId: doc.salesRepId, paymentModeKey: doc.paymentModeKey,
-              globalDiscountPct: doc.globalDiscountPct, notes: doc.notes ?? "", reasonKey: doc.reasonKey, originDocumentId: doc.originDocumentId,
+              globalDiscountPct: doc.globalDiscountPct, notes: doc.notes ?? "", reasonKey: doc.reasonKey, originDocumentId: doc.originDocumentId, activationId: doc.activationId,
               lines: doc.lines.map((l) => ({
-                key: l.id, productId: l.productId, designation: l.designation, ref: l.ref, quantity: String(Number(l.quantity)), freeQuantity: String(Number(l.freeQuantity)),
+                key: l.id, productId: l.productId, inventoryItemId: l.inventoryItemId, designation: l.designation, ref: l.ref, quantity: String(Number(l.quantity)), freeQuantity: String(Number(l.freeQuantity)),
                 unitPriceHt: l.unitPriceHt, discountPct: String(Number(l.discountPct)), taxRate: l.taxRate, sourceLineId: l.sourceLineId, sourceNumber: l.sourceNumber,
                 returnWarehouseKey: l.returnWarehouseKey, maxQty: l.sourceLineId ? sources.get(l.sourceLineId) ?? null : null,
               })),
@@ -151,6 +152,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
   const fromOrder = type === "BL" && doc.origin?.type === "COMMANDE" ? doc.origin : null;
   const cancelledFixed = status === "ANNULE" && type !== "COMMANDE";
   const reassignBlock = !canFixClient || cancelledFixed ? null
+    : doc.client.isInternal ? "Une sortie marketing (client interne) ne change pas de client : annulez le BL et refaites-le au bon client."
     : type === "FACTURE" || type === "AVOIR" ? "Une facture ou un avoir ne change pas de client : faites un avoir sur la pièce, puis refacturez au bon client."
     : type === "BL" && anyInvoiced ? "Ce BL est (en partie) facturé : il ne change plus de client. Faites un avoir sur la facture, puis refacturez."
     : fromOrder ? `Ce BL vient de la commande ${fromOrder.number} : changez le client sur la commande, ses BL suivent.`
@@ -169,6 +171,26 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
     for (const c of cs.rows) reassignClients.push({ id: c.id, name: c.name, legalName: c.legal_name, city: c.city, ice: c.ice, entities: byClient.get(c.id) ?? [] });
   }
   const followingBLs = type === "COMMANDE" ? doc.children.filter((c) => c.type === "BL" && c.status !== "ANNULE") : [];
+
+  // Sortie marketing : charges d'échantillons écrites à la validation, matériel tracé, alertes de coût.
+  const hasOutputs = type === "BL" && (doc.client.isInternal || doc.lines.some((l) => l.inventoryItemId));
+  const outputs = hasOutputs && !draft ? (await db.execute<{ amount: string; nature: string | null; label: string | null }>(sql`
+    select e.amount::text, e.output_nature as nature, n.label from marketing_expenses e left join marketing_output_natures n on n.key = e.output_nature
+    where e.document_line_id = any(${pgArray(doc.lines.map((l) => l.id))})`)).rows : [];
+  const activation = doc.activationId ? (await db.execute<{ name: string }>(sql`select name from activations where id = ${doc.activationId}::uuid`)).rows[0] ?? null : null;
+  const alerts = hasOutputs ? costIssues({ isInternal: doc.client.isInternal, outputNatureKey: doc.client.outputNatureKey }, doc.lines.map((l) => ({ id: l.id, productId: l.productId, inventoryItemId: l.inventoryItemId, brandId: l.brandId, designation: l.designation, quantity: l.quantity, freeQuantity: l.freeQuantity, unitCost: l.unitCost }))) : [];
+  const charged = outputs.reduce((a, o) => a + Number(o.amount), 0);
+  const outputsCard = hasOutputs && (
+    <Card title={doc.client.isInternal ? "Sortie marketing" : "Matériel offert"}>
+      <div className="text-[13px] space-y-1.5">
+        {doc.client.isInternal
+          ? <p>Aucun CA. {draft ? "À la validation, les produits deviendront une charge marketing au coût de revient figé." : status === "ANNULE" ? "BL annulé : charges retirées, matériel remis en stock." : <>Charge marketing : <b>{fmtMoney(String(charged))} MAD</b>{outputs[0]?.label ? ` (${outputs[0].label})` : ""}, comptée dans le budget et le P&L.</>}</p>
+          : <p>Le matériel offert ne fait pas de CA ; il est déjà passé en charge à l&apos;achat. La sortie est tracée sur ce client (nature « commercial / trade »).</p>}
+        {activation && <p>Activation : <Link href={`/marketing/activations/${doc.activationId}`} className="hover:underline">{activation.name}</Link></p>}
+        {alerts.map((x) => <p key={x.lineId} className="text-orange">{costIssueLabel(x)}</p>)}
+      </div>
+    </Card>
+  );
 
   return (
     <>
@@ -209,14 +231,15 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
                 <thead><tr className="text-left text-faint border-b border-line">
                   <th className="px-3 py-2 font-medium">Article</th><th className="px-3 py-2 font-medium text-right">Qté</th><th className="px-3 py-2 font-medium text-right">UG</th>
                   <th className="px-3 py-2 font-medium text-right">P.U. HT</th><th className="px-3 py-2 font-medium text-right">Remise</th><th className="px-3 py-2 font-medium text-right">Net HT</th>
-                  {type === "BL" && <th className="px-3 py-2 font-medium text-right">Facturé</th>}
+                  {type === "BL" && !doc.client.isInternal && <th className="px-3 py-2 font-medium text-right">Facturé</th>}
                   {type === "COMMANDE" && !draft && <th className="px-3 py-2 font-medium text-right">Livré</th>}
                 </tr></thead>
                 <tbody>
                   {doc.lines.map((l) => (
                     <tr key={l.id} className="border-b border-line last:border-0 align-top">
                       <td className="px-3 py-2">
-                        <div className="font-medium">{l.designation}</div>
+                        <div className="font-medium">{l.inventoryItemId && <Badge tone="purple" className="mr-1 text-[10.5px]">Matériel</Badge>}{l.designation}</div>
+                        {l.unitCost !== null && <div className="text-faint text-[11px]">Coût figé {fmtMoney(l.unitCost)} / u.{l.inventoryItemId ? " · offert, déjà passé en charge à l'achat" : doc.client.isInternal ? " · charge d'échantillon" : ""}</div>}
                         <div className="text-faint text-[11px]">{[l.ref, sourceRef(type, l.sourceNumber), ...(l.lotAllocations ?? []).map((x) => `lot ${x.lotNumber}${x.expiryDate ? ` (${fmtDate(x.expiryDate)})` : ""} × ${fmtNum(Number(x.qty))}`)].filter(Boolean).join(" · ")}</div>
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">{fmtNum(Number(l.quantity), 0)}</td>
@@ -224,7 +247,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
                       <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(l.unitPriceHt)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted">{Number(l.discountPct) ? `${Number(l.discountPct).toLocaleString("fr-FR")} %` : ""}</td>
                       <td className="px-3 py-2 text-right tabular-nums font-medium">{fmtMoney(l.netHt)}</td>
-                      {type === "BL" && <td className="px-3 py-2 text-right tabular-nums text-muted">{fmtNum(Number(l.invoicedQty))} / {fmtNum(Number(l.quantity))}</td>}
+                      {type === "BL" && !doc.client.isInternal && <td className="px-3 py-2 text-right tabular-nums text-muted">{fmtNum(Number(l.invoicedQty))} / {fmtNum(Number(l.quantity))}</td>}
                       {type === "COMMANDE" && !draft && <td className={`px-3 py-2 text-right tabular-nums ${Number(l.deliveredQty) >= Number(l.quantity) ? "text-green" : "text-muted"}`}>{fmtNum(Number(l.deliveredQty))} / {fmtNum(Number(l.quantity))}</td>}
                     </tr>
                   ))}
@@ -240,6 +263,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
               {doc.amountInWords && <div className="text-[11.5px] text-muted pt-1">{doc.amountInWords}</div>}
             </div>
           </Card>
+          {outputsCard}
           {doc.notes && <Card title="Note"><p className="text-[13px] whitespace-pre-wrap">{doc.notes}</p></Card>}
         </div>
 
@@ -300,7 +324,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
                 {actions.deliver && can(a.perms, "livraisons", "edit") && (
                   <form action={deliverAction}><input type="hidden" name="id" value={id} /><button className="btn-secondary btn-sm" type="submit">Marquer livré</button></form>
                 )}
-                {actions.invoice && can(a.perms, "facturation", "create") && (
+                {actions.invoice && !doc.client.isInternal && can(a.perms, "facturation", "create") && (
                   <Link href={`/gestion/pieces/facturer?client=${doc.clientId}`} className="btn-primary btn-sm inline-flex">Facturer ce client</Link>
                 )}
                 {actions.credit && can(a.perms, "facturation", "create") && (

@@ -19,6 +19,8 @@ import { allocateFefo } from "./ledger-shared";
 import { SCALE, formatScaled, fromDb, parseDecimal } from "./money";
 import { allocateNumber } from "./numbering";
 import { attachInvoiceNumber, productBrands, projectDocument, reassignProjection, removeProjection } from "./projection";
+import { OutputError, recordMaterialOutputs, recordOutputCharges, removeOutputCharges, reverseMaterialOutputs } from "./marketing-outputs";
+import { refreshAfterWrite } from "@/lib/analytics-marketing/refresh";
 import { allocateCreditIn } from "./payments";
 
 /**
@@ -55,6 +57,8 @@ export class CommercialBlockError extends Error {
 
 export type DraftLineInput = {
   productId: string | null;
+  /** Article de matériel marketing (goodie, PLV, print) : BL seulement, prix 0 ; jamais avec un produit. */
+  inventoryItemId?: string | null;
   designation?: string | null;
   quantity: string;
   freeQuantity?: string | null;
@@ -82,6 +86,8 @@ export type DraftInput = {
   notes: string | null;
   reasonKey?: string | null;
   originDocumentId?: string | null;
+  /** Activation alimentée par ce BL (sorties marketing). */
+  activationId?: string | null;
   lines: DraftLineInput[];
 };
 
@@ -89,9 +95,14 @@ export type DraftInput = {
 /* Lecture                                                             */
 /* ------------------------------------------------------------------ */
 
+export type DocumentLine = Line & {
+  brandId: string | null; productKind: string | null; trackLots: boolean;
+  /** Catégorie d'inventaire (PLV, GOODIE…) d'une ligne de matériel. */
+  itemCategory: string | null;
+};
 export type DocumentView = Doc & {
-  lines: (Line & { brandId: string | null; productKind: string | null; trackLots: boolean })[];
-  client: { id: string; name: string; legalName: string | null; city: string | null; blocked: boolean; accountCode: string | null };
+  lines: DocumentLine[];
+  client: { id: string; name: string; legalName: string | null; city: string | null; blocked: boolean; accountCode: string | null; isInternal: boolean; outputNatureKey: string | null };
   origin: { id: string; number: string | null; type: string } | null;
   children: { id: string; number: string | null; type: string; status: string; ttc: string }[];
   sources: { id: string; number: string | null; date: string; type: string }[];
@@ -101,11 +112,12 @@ export async function getDocument(id: string): Promise<DocumentView | null> {
   const [doc] = await db.select().from(salesDocuments).where(eq(salesDocuments.id, id));
   if (!doc) return null;
   const [lines, client, origin, children, sources] = await Promise.all([
-    db.execute<Line & { brand_id: string | null; product_kind: string | null; track_lots: boolean }>(sql`
-      select l.*, p.brand_id, p.kind as product_kind, coalesce(p.track_lots, false) as track_lots
-      from sales_document_lines l left join products p on p.id = l.product_id where l.document_id = ${id}::uuid order by l.position`),
-    db.execute<{ id: string; name: string; legal_name: string | null; city: string | null; blocked: boolean; account_code: string | null }>(sql`
-      select id, name, legal_name, city, blocked, account_code from clients where id = ${doc.clientId}::uuid`),
+    db.execute<Line & { brand_id: string | null; product_kind: string | null; track_lots: boolean; item_category: string | null }>(sql`
+      select l.*, coalesce(p.brand_id, i.brand_id) as brand_id, p.kind as product_kind, coalesce(p.track_lots, false) as track_lots, i.category_key as item_category
+      from sales_document_lines l left join products p on p.id = l.product_id left join inventory_items i on i.id = l.inventory_item_id
+      where l.document_id = ${id}::uuid order by l.position`),
+    db.execute<{ id: string; name: string; legal_name: string | null; city: string | null; blocked: boolean; account_code: string | null; is_internal: boolean; output_nature_key: string | null }>(sql`
+      select id, name, legal_name, city, blocked, account_code, is_internal, output_nature_key from clients where id = ${doc.clientId}::uuid`),
     doc.originDocumentId ? db.execute<{ id: string; number: string | null; type: string }>(sql`select id, number, type from sales_documents where id = ${doc.originDocumentId}::uuid`) : null,
     db.execute<{ id: string; number: string | null; type: string; status: string; ttc: string }>(sql`
       select distinct d.id, d.number, d.type, d.status, d.ttc::text as ttc from sales_documents d
@@ -124,15 +136,16 @@ export async function getDocument(id: string): Promise<DocumentView | null> {
     lines: lines.rows.map((l) => {
       const r = l as unknown as Record<string, unknown>;
       return {
-        id: r.id, documentId: r.document_id, position: r.position, productId: r.product_id, lotId: r.lot_id, warehouseKey: r.warehouse_key, ref: r.ref,
+        id: r.id, documentId: r.document_id, position: r.position, productId: r.product_id, inventoryItemId: r.inventory_item_id, unitCost: r.unit_cost,
+        lotId: r.lot_id, warehouseKey: r.warehouse_key, ref: r.ref,
         designation: r.designation, unit: r.unit, quantity: r.quantity, freeQuantity: r.free_quantity, unitPriceHt: r.unit_price_ht,
         publicPriceTtc: r.public_price_ttc, discountPct: r.discount_pct, grossHt: r.gross_ht, netHt: r.net_ht, taxRate: r.tax_rate,
         vatAmount: r.vat_amount, ttc: r.ttc, sourceLineId: r.source_line_id, sourceNumber: r.source_number, sourceDate: r.source_date,
         invoicedQty: r.invoiced_qty, creditedQty: r.credited_qty, deliveredQty: r.delivered_qty, returnWarehouseKey: r.return_warehouse_key, lotAllocations: r.lot_allocations,
-        brandId: r.brand_id, productKind: r.product_kind, trackLots: !!r.track_lots,
-      } as Line & { brandId: string | null; productKind: string | null; trackLots: boolean };
+        brandId: r.brand_id, productKind: r.product_kind, trackLots: !!r.track_lots, itemCategory: r.item_category,
+      } as DocumentLine;
     }),
-    client: { id: c.id, name: c.name, legalName: c.legal_name, city: c.city, blocked: c.blocked, accountCode: c.account_code },
+    client: { id: c.id, name: c.name, legalName: c.legal_name, city: c.city, blocked: c.blocked, accountCode: c.account_code, isInternal: c.is_internal, outputNatureKey: c.output_nature_key },
     origin: origin?.rows[0] ?? null,
     children: children.rows,
     sources: sources.rows,
@@ -188,15 +201,48 @@ async function defaultRate(t: Tx | typeof db, g: GestionSettings): Promise<strin
   return r.rows[0]?.rate ?? "20.00";
 }
 
+type ItemInfo = { id: string; name: string; sku: string | null; unit: string; active: boolean };
+
+async function itemInfos(t: Tx | typeof db, ids: string[]): Promise<Map<string, ItemInfo>> {
+  if (!ids.length) return new Map();
+  const r = await t.execute<ItemInfo>(sql`select id, name, sku, unit, active from inventory_items where id = any(${pgArray(ids)})`);
+  return new Map(r.rows.map((x) => [x.id, x]));
+}
+
+type DraftLineRow = {
+  position: number; productId: string | null; inventoryItemId: string | null; lotId: string | null; warehouseKey: string; ref: string | null; designation: string; unit: string | null;
+  quantity: string; freeQuantity: string; unitPriceHt: string; publicPriceTtc: string | null; discountPct: string; taxRate: string; sourceLineId: string | null; returnWarehouseKey: string | null;
+};
+
+/**
+ * Ligne de matériel marketing (goodie, PLV, print) : sur un BL, ou reprise de son BL sur la facture ; offerte (prix 0,
+ * ni remise ni UG), à l'unité. Elle ne fait jamais de CA ; sa sortie de stock passe par `marketing-outputs.ts`.
+ */
+function materialLine(type: DocType, l: DraftLineInput, i: number, items: Map<string, ItemInfo>, rate: string): DraftLineRow {
+  const it = items.get(l.inventoryItemId!);
+  if (!it) throw new DocumentError(`Ligne ${i + 1} : article de matériel introuvable.`);
+  if (type !== "BL" && !(type === "FACTURE" && l.sourceLineId)) throw new DocumentError(`Ligne ${i + 1} (${it.name}) : le matériel marketing ne sort que par un bon de livraison.`);
+  if (type === "BL" && !it.active) throw new DocumentError(`Ligne ${i + 1} : « ${it.name} » est archivé.`);
+  const qty = parseDecimal(l.quantity, SCALE.qty);
+  if (qty === null || qty <= 0n || qty % 1000n !== 0n) throw new DocumentError(`Ligne ${i + 1} (${it.name}) : quantité entière positive attendue (le matériel se sort à l'unité).`);
+  return {
+    position: i, productId: null, inventoryItemId: it.id, lotId: null, warehouseKey: "PRINCIPAL", ref: it.sku, designation: it.name, unit: it.unit,
+    quantity: formatScaled(qty, SCALE.qty), freeQuantity: "0.000", unitPriceHt: "0.00", publicPriceTtc: null, discountPct: "0.00",
+    taxRate: rate, sourceLineId: l.sourceLineId ?? null, returnWarehouseKey: null,
+  };
+}
+
 /** Crée ou remplace un brouillon (en-tête et lignes). Les montants sont toujours recalculés ici. */
 export async function saveDraft(input: DraftInput, actor: AuditActor): Promise<string> {
   const g = (await getSettings()).gestion;
   if (!DOC_TYPE_LABELS[input.type]) throw new DocumentError("Type de pièce inconnu.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) throw new DocumentError("Date invalide.");
   return db.transaction(async (tx) => {
-    const client = (await tx.execute<{ active: boolean }>(sql`select active from clients where id = ${input.clientId}::uuid`)).rows[0];
+    const client = (await tx.execute<{ active: boolean; is_internal: boolean }>(sql`select active, is_internal from clients where id = ${input.clientId}::uuid`)).rows[0];
     if (!client) throw new DocumentError("Client introuvable.");
     if (!client.active) throw new DocumentError("Ce client est archivé : restaurez-le avant de lui établir une pièce.");
+    if (client.is_internal && input.type !== "BL") throw new DocumentError("Un client interne (sorties marketing) ne reçoit que des bons de livraison : ni commande, ni facture, ni avoir.");
+    const activationId = input.type === "BL" ? input.activationId || null : null;
     const legalEntityId = input.legalEntityId || null;
     if (legalEntityId) {
       const e = (await tx.execute<{ active: boolean }>(sql`select active from client_legal_entities where id = ${legalEntityId}::uuid and client_id = ${input.clientId}::uuid`)).rows[0];
@@ -204,11 +250,14 @@ export async function saveDraft(input: DraftInput, actor: AuditActor): Promise<s
       if (!e.active) throw new DocumentError("Cette raison sociale est archivée : choisissez-en une autre.");
     }
     const products = await productInfos(tx, input.lines.map((l) => l.productId).filter((x): x is string => !!x));
+    const items = await itemInfos(tx, input.lines.map((l) => l.inventoryItemId).filter((x): x is string => !!x));
     const rate = await defaultRate(tx, g);
-    const lines = input.lines.map((l, i) => {
+    const lines = input.lines.map((l, i): DraftLineRow => {
+      if (l.productId && l.inventoryItemId) throw new DocumentError(`Ligne ${i + 1} : une ligne porte un produit OU un article de matériel, jamais les deux.`);
+      if (l.inventoryItemId) return materialLine(input.type, l, i, items, rate);
       const p = l.productId ? products.get(l.productId) : null;
       if (l.productId && !p) throw new DocumentError(`Ligne ${i + 1} : article introuvable.`);
-      if ((input.type === "BL" || input.type === "COMMANDE") && (!p || p.kind !== "PRODUIT")) throw new DocumentError(`Ligne ${i + 1} : ${input.type === "BL" ? "un bon de livraison" : "une commande client"} ne porte que des articles stockés.`);
+      if ((input.type === "BL" || input.type === "COMMANDE") && (!p || p.kind !== "PRODUIT")) throw new DocumentError(`Ligne ${i + 1} : ${input.type === "BL" ? "un bon de livraison" : "une commande client"} ne porte que des articles stockés ou du matériel.`);
       if (input.type === "FACTURE" && p && p.kind === "PRODUIT" && !l.sourceLineId) throw new DocumentError(`Ligne ${i + 1} : un article stocké se facture depuis son bon de livraison (sortie de stock).`);
       const designation = p?.name ?? l.designation?.trim();
       if (!designation) throw new DocumentError(`Ligne ${i + 1} : désignation manquante.`);
@@ -216,17 +265,18 @@ export async function saveDraft(input: DraftInput, actor: AuditActor): Promise<s
       if (qty === null || qty <= 0n) throw new DocumentError(`Ligne ${i + 1} (${designation}) : quantité positive attendue.`);
       const free = parseDecimal(l.freeQuantity ?? "0", SCALE.qty) ?? 0n;
       if (free < 0n) throw new DocumentError(`Ligne ${i + 1} : UG négatives.`);
-      const pu = parseDecimal(l.unitPriceHt, SCALE.money);
+      // Sortie marketing (client interne) : aucun prix, aucune remise — la valeur est le coût de revient figé à la validation.
+      const pu = client.is_internal ? 0n : parseDecimal(l.unitPriceHt, SCALE.money);
       if (pu === null || pu < 0n) throw new DocumentError(`Ligne ${i + 1} (${designation}) : prix unitaire HT manquant.`);
       return {
-        position: i, productId: p?.id ?? null, lotId: l.lotId ?? null, warehouseKey: l.warehouseKey ?? "PRINCIPAL",
+        position: i, productId: p?.id ?? null, inventoryItemId: null as string | null, lotId: l.lotId ?? null, warehouseKey: l.warehouseKey ?? "PRINCIPAL",
         ref: p ? (p.code ?? p.sku) : null, designation, unit: p?.unit ?? null,
         quantity: formatScaled(qty, SCALE.qty), freeQuantity: formatScaled(free, SCALE.qty), unitPriceHt: formatScaled(pu, SCALE.money),
-        publicPriceTtc: p?.price_retail ?? null, discountPct: formatScaled(parseDecimal(l.discountPct || "0", SCALE.pct) ?? 0n, SCALE.pct),
+        publicPriceTtc: p?.price_retail ?? null, discountPct: client.is_internal ? "0.00" : formatScaled(parseDecimal(l.discountPct || "0", SCALE.pct) ?? 0n, SCALE.pct),
         taxRate: p?.rate ?? l.taxRate ?? rate, sourceLineId: l.sourceLineId ?? null, returnWarehouseKey: l.returnWarehouseKey ?? null,
       };
     });
-    const globalDiscountPct = formatScaled(parseDecimal(input.globalDiscountPct || "0", SCALE.pct) ?? 0n, SCALE.pct);
+    const globalDiscountPct = client.is_internal ? "0.00" : formatScaled(parseDecimal(input.globalDiscountPct || "0", SCALE.pct) ?? 0n, SCALE.pct);
     const calc = computeDocument(lines.map((l) => ({ quantity: l.quantity, unitPriceHt: l.unitPriceHt, discountPct: l.discountPct, taxRate: l.taxRate })), globalDiscountPct);
     // Numéro et date d'origine des BL facturés, imprimés sur la facture.
     const sourceIds = lines.map((l) => l.sourceLineId).filter((x): x is string => !!x);
@@ -236,7 +286,7 @@ export async function saveDraft(input: DraftInput, actor: AuditActor): Promise<s
     const header = {
       type: input.type, date: input.date, clientId: input.clientId, legalEntityId, site: input.site.toUpperCase(), deliveryAddress: input.deliveryAddress,
       salesRepId: input.salesRepId, salesRepName: rep, paymentModeKey: input.paymentModeKey, globalDiscountPct, notes: input.notes,
-      reasonKey: input.reasonKey ?? null, originDocumentId: input.originDocumentId ?? null,
+      reasonKey: input.reasonKey ?? null, originDocumentId: input.originDocumentId ?? null, activationId,
       grossHt: calc.grossHt, netHt: calc.netHt, vatTotal: calc.vatTotal, ttc: calc.ttc, vatBreakdown: calc.vatBreakdown, updatedAt: new Date(),
     };
     let id = input.id ?? null;
@@ -297,8 +347,10 @@ export async function createInvoiceFromBLs(blIds: string[], actor: AuditActor): 
   if (new Set(docs.map((d) => d.is_simulation)).size > 1) throw new DocumentError("On ne mélange pas BL de simulation et BL réels sur une facture.");
   if (new Set(docs.map((d) => d.global_discount_pct)).size > 1) throw new DocumentError("Ces BL n'ont pas la même remise globale : facturez-les séparément.");
   for (const d of docs) if (!allowedActions("BL", d.status, { requireDelivered: g.requireDelivered }).invoice) throw new DocumentError(`${d.number} n'est pas facturable (statut ${d.status}).`);
+  const internal = (await db.execute<{ is_internal: boolean }>(sql`select is_internal from clients where id = ${docs[0].client_id}::uuid`)).rows[0]?.is_internal;
+  if (internal) throw new DocumentError("Une sortie marketing (client interne) ne se facture pas.");
   const lines = (await db.execute<Line & Record<string, string>>(sql`
-    select l.id, l.product_id, l.quantity::text, l.invoiced_qty::text, l.free_quantity::text, l.unit_price_ht::text, l.discount_pct::text, l.tax_rate::text, l.designation
+    select l.id, l.product_id, l.inventory_item_id, l.quantity::text, l.invoiced_qty::text, l.free_quantity::text, l.unit_price_ht::text, l.discount_pct::text, l.tax_rate::text, l.designation
     from sales_document_lines l join sales_documents d on d.id = l.document_id
     where l.document_id = any(${pgArray(blIds)}) and l.invoiced_qty < l.quantity order by d.date, d.number, l.position`)).rows as unknown as Record<string, string>[];
   if (!lines.length) throw new DocumentError("Ces BL sont déjà entièrement facturés.");
@@ -307,7 +359,7 @@ export async function createInvoiceFromBLs(blIds: string[], actor: AuditActor): 
     type: "FACTURE", clientId: first.client_id, legalEntityId: first.legal_entity_id, date: iso(today()), site: first.site, deliveryAddress: null,
     salesRepId: first.sales_rep_id, paymentModeKey: first.payment_mode_key, globalDiscountPct: first.global_discount_pct, notes: null,
     lines: lines.map((l) => ({
-      productId: l.product_id, quantity: remainingQty(l.quantity, l.invoiced_qty),
+      productId: l.product_id, inventoryItemId: l.inventory_item_id, quantity: remainingQty(l.quantity, l.invoiced_qty),
       // Les UG suivent la première facturation de la ligne seulement.
       freeQuantity: l.invoiced_qty === "0.000" ? l.free_quantity : "0", unitPriceHt: l.unit_price_ht, discountPct: l.discount_pct, taxRate: l.tax_rate, sourceLineId: l.id,
     })),
@@ -319,7 +371,8 @@ export async function createCreditNote(invoiceId: string, actor: AuditActor): Pr
   const inv = await getDocument(invoiceId);
   if (!inv || inv.type !== "FACTURE") throw new DocumentError("Facture introuvable.");
   if (inv.status !== "VALIDE") throw new DocumentError("Un avoir se fait sur une facture validée.");
-  const lines = inv.lines.filter((l) => (parseDecimal(l.creditedQty, SCALE.qty) ?? 0n) < (parseDecimal(l.quantity, SCALE.qty) ?? 0n));
+  // Le matériel offert (prix 0) ne se crédite pas.
+  const lines = inv.lines.filter((l) => !l.inventoryItemId && (parseDecimal(l.creditedQty, SCALE.qty) ?? 0n) < (parseDecimal(l.quantity, SCALE.qty) ?? 0n));
   if (!lines.length) throw new DocumentError("Toutes les lignes de cette facture ont déjà fait l'objet d'un avoir avec retour.");
   const open = (await db.execute<{ id: string }>(sql`select id from sales_documents where origin_document_id = ${invoiceId}::uuid and type = 'AVOIR' and status = 'BROUILLON' limit 1`)).rows[0];
   if (open) throw new DocumentError("Un avoir brouillon existe déjà sur cette facture : terminez-le ou supprimez-le.");
@@ -402,6 +455,8 @@ export async function clientOutstanding(t: Tx | typeof db, clientId: string, sim
 /** Dépassements d'une pièce (BL ou facture directe) à lever avant validation. */
 export async function documentIssues(doc: DocumentView, t: Tx | typeof db = db): Promise<CommercialIssue[]> {
   if (doc.type === "AVOIR" || (doc.type === "FACTURE" && doc.lines.some((l) => l.sourceLineId))) return [];
+  // Sortie marketing (client interne) : ni prix, ni remise, ni encours — aucun blocage commercial.
+  if (doc.client.isInternal) return [];
   const g = (await getSettings()).gestion;
   const client = (await t.execute<{ blocked: boolean; blocked_reason: string | null; credit_limit: string | null; default_discount_pct: string | null }>(sql`
     select blocked, blocked_reason, credit_limit::text, default_discount_pct::text from clients where id = ${doc.clientId}::uuid`)).rows[0];
@@ -421,7 +476,8 @@ export async function documentIssues(doc: DocumentView, t: Tx | typeof db = db):
     creditLimit: g.checkCreditLimit ? client.credit_limit : null,
     outstanding: g.checkCreditLimit && client.credit_limit ? await clientOutstanding(t, doc.clientId, simulation) : "0",
     documentTtc: doc.ttc, tolerancePct: g.discountTolerancePct, globalDiscountPct: doc.globalDiscountPct,
-    lines: doc.lines.map((l) => ({
+    // Le matériel offert (prix 0) n'est ni une remise ni une vente à perte.
+    lines: doc.lines.filter((l) => !l.inventoryItemId).map((l) => ({
       designation: l.designation, discountPct: l.discountPct,
       allowedDiscountPct: maxPct(defaultDiscount(client.default_discount_pct, l.brandId ? brandDiscounts.get(l.brandId) ?? null : null), l.sourceLineId ? orderDiscounts.get(l.sourceLineId) ?? null : null),
       netUnitHt: netUnitPriceHt({ quantity: l.quantity, unitPriceHt: l.unitPriceHt, discountPct: l.discountPct, taxRate: l.taxRate }, doc.globalDiscountPct),
@@ -495,7 +551,7 @@ async function clientIdentitySnapshot(tx: Tx, clientId: string, legalEntityId: s
 export async function validateDocument(id: string, actor: AuditActor, opts: { override?: boolean } = {}): Promise<{ number: string; simulation: boolean }> {
   const settings = await getSettings();
   const g = settings.gestion;
-  return db.transaction(async (tx) => {
+  const res = await db.transaction(async (tx) => {
     const [locked] = await tx.select().from(salesDocuments).where(eq(salesDocuments.id, id)).for("update");
     if (!locked) throw new DocumentError("Pièce introuvable.");
     if (locked.status !== "BROUILLON") throw new DocumentError("Cette pièce est déjà validée.");
@@ -534,7 +590,7 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
       const productIds = [...new Set(doc.lines.map((l) => l.productId!).filter(Boolean))].sort();
       await tx.execute(sql`select id from products where id = any(${pgArray(productIds)}) order by id for update`);
       const lotStock = new Map<string, { lotId: string; lotNumber: string; expiryDate: string | null; available: bigint }[]>();
-      for (const l of doc.lines) {
+      for (const l of doc.lines.filter((x) => x.productId)) {
         const out = (parseDecimal(l.quantity, SCALE.qty) ?? 0n) + (parseDecimal(l.freeQuantity, SCALE.qty) ?? 0n);
         if (out <= 0n) continue;
         if (l.trackLots && !l.lotId) {
@@ -576,6 +632,32 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
     }
     for (const [lineId, alloc] of lineAllocations) await tx.update(salesDocumentLines).set({ lotAllocations: alloc }).where(eq(salesDocumentLines.id, lineId));
     if (movements.length) await recordStockMovements(movements, { id: actor.id }, { tx, allowNegative: g.insufficientStock === "WARN" });
+
+    // Sorties marketing (`marketing-outputs.ts`) : coût unitaire figé — matériel au coût de l'article, échantillon d'un
+    // client interne au coût de revient de la fiche produit (NULL si inconnu : signalé, jamais estimé) ; puis sortie du matériel.
+    const frozen = new Map<string, string | null>();
+    if (type === "BL") {
+      const itemIds = doc.lines.map((l) => l.inventoryItemId).filter((x): x is string => !!x);
+      const itemCosts = itemIds.length ? new Map((await tx.execute<{ id: string; c: string }>(sql`select id, unit_cost::text as c from inventory_items where id = any(${pgArray(itemIds)})`)).rows.map((r) => [r.id, r.c])) : new Map<string, string>();
+      const sampleIds = doc.client.isInternal ? doc.lines.map((l) => l.productId).filter((x): x is string => !!x) : [];
+      const productCosts = sampleIds.length ? new Map((await tx.execute<{ id: string; c: string | null }>(sql`select id, cost_price::text as c from products where id = any(${pgArray(sampleIds)})`)).rows.map((r) => [r.id, r.c])) : new Map<string, string | null>();
+      for (const l of doc.lines) {
+        if (l.inventoryItemId) frozen.set(l.id, itemCosts.get(l.inventoryItemId) ?? null);
+        else if (l.productId && doc.client.isInternal) frozen.set(l.id, productCosts.get(l.productId) ?? null);
+      }
+      for (const [lineId, c] of frozen) await tx.update(salesDocumentLines).set({ unitCost: c }).where(eq(salesDocumentLines.id, lineId));
+      const material = doc.lines.filter((l) => l.inventoryItemId);
+      if (material.length) {
+        try {
+          await recordMaterialOutputs(tx, { id, date: doc.date, clientId: doc.clientId, activationId: doc.activationId },
+            material.map((l) => ({ id: l.id, inventoryItemId: l.inventoryItemId!, quantity: String(Number(l.quantity)), unitCost: frozen.get(l.id) ?? null, designation: l.designation })),
+            { allowNegative: g.marketingOutputs.insufficientStock === "WARN", userId: actor.id });
+        } catch (e) {
+          if (e instanceof OutputError) throw new DocumentError(e.message);
+          throw e;
+        }
+      }
+    }
 
     // BL préparé depuis une commande : la quantité livrée de la commande avance (sans plafond : on peut
     // livrer plus que commandé) et son statut suit. Une commande annulée ne se livre plus.
@@ -644,15 +726,28 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
     // Un avoir solde d'abord sa facture d'origine (jusqu'à son solde) ; le reste est un crédit client à imputer.
     if (type === "AVOIR" && doc.originDocumentId) await allocateCreditIn(tx, id, doc.originDocumentId, parseDecimal(doc.ttc, SCALE.money) ?? 0n, actor.id);
     if (type === "FACTURE") await attachInvoiceNumber(tx, doc.lines.map((l) => l.sourceLineId).filter((x): x is string => !!x), number);
+    let outputCharges = 0;
+    if (type === "BL" && doc.client.isInternal) {
+      try {
+        outputCharges = await recordOutputCharges(tx, { number, date: doc.date, clientId: doc.clientId, activationId: doc.activationId },
+          { isInternal: true, outputNatureKey: doc.client.outputNatureKey },
+          doc.lines.map((l) => ({ id: l.id, productId: l.productId, inventoryItemId: l.inventoryItemId, brandId: l.brandId, designation: l.designation, quantity: l.quantity, freeQuantity: l.freeQuantity, unitCost: frozen.get(l.id) ?? null })));
+      } catch (e) {
+        if (e instanceof OutputError) throw new DocumentError(e.message);
+        throw e;
+      }
+    }
     if (type === "BL" || type === "AVOIR") {
       const brandOf = await productBrands(tx, doc.lines.map((l) => l.productId));
       const fed = projectedLines(g.cutover, g.salesFromDocuments, { isSimulation: simulation, date: doc.date, site: doc.site },
         doc.lines.map((l) => ({ id: l.id, productId: l.productId, designation: l.designation, quantity: l.quantity, freeQuantity: l.freeQuantity, netHt: l.netHt, brandId: l.productId ? brandOf.get(l.productId) ?? null : null })));
       if (fed.length) await projectDocument(tx, { type, number, date: doc.date, clientId: doc.clientId, site: doc.site, salesRepName: doc.salesRepName, legalName: String(clientSnapshot.legalName) }, fed);
     }
-    await audit({ actor, action: "VALIDATE", module: moduleOf(type), entity: "sales_document", entityId: id, label: number, after: { number, ttc: doc.ttc, simulation, approvals: approvals.length ? approvals : undefined, movements: movements.length } }, tx);
-    return { number, simulation };
+    await audit({ actor, action: "VALIDATE", module: moduleOf(type), entity: "sales_document", entityId: id, label: number, after: { number, ttc: doc.ttc, simulation, approvals: approvals.length ? approvals : undefined, movements: movements.length, outputCharges: outputCharges || undefined } }, tx);
+    return { number, simulation, outputCharges };
   });
+  if (res.outputCharges) await refreshAfterWrite(["EXPENSE"]);
+  return { number: res.number, simulation: res.simulation };
 }
 
 /* ------------------------------------------------------------------ */
@@ -672,7 +767,7 @@ export async function markDelivered(id: string, actor: AuditActor): Promise<void
 /** Annule un BL validé non facturé : contre-mouvements de stock, retrait des ventes projetées. Le numéro reste pris. */
 export async function cancelBL(id: string, reason: string, actor: AuditActor): Promise<void> {
   if (!reason.trim()) throw new DocumentError("Indiquez le motif de l'annulation.");
-  await db.transaction(async (tx) => {
+  const removed = await db.transaction(async (tx) => {
     const [d] = await tx.select().from(salesDocuments).where(eq(salesDocuments.id, id)).for("update");
     if (!d || d.type !== "BL") throw new DocumentError("Bon de livraison introuvable.");
     const lines = await tx.select().from(salesDocumentLines).where(eq(salesDocumentLines.documentId, id));
@@ -689,6 +784,9 @@ export async function cancelBL(id: string, reason: string, actor: AuditActor): P
       })), { id: actor.id }, { tx, allowNegative: true });
     }
     await removeProjection(tx, lines.map((l) => l.id));
+    // Sorties marketing : le matériel revient en stock (contre-mouvements), les charges d'échantillons disparaissent.
+    const reversedMaterial = await reverseMaterialOutputs(tx, lines.map((l) => l.id), iso(today()), actor.id, `Annulation du ${d.number} : ${reason.trim()}`);
+    const removedCharges = await removeOutputCharges(tx, lines.map((l) => l.id));
     // Les lignes de commande reprises par ce BL redeviennent à livrer.
     const orders = new Set<string>();
     for (const l of lines.filter((x) => x.sourceLineId)) {
@@ -699,8 +797,10 @@ export async function cancelBL(id: string, reason: string, actor: AuditActor): P
     }
     for (const orderId of orders) await refreshOrderStatus(tx, orderId);
     await tx.update(salesDocuments).set({ status: "ANNULE", cancelledAt: new Date(), cancelledById: actor.id, cancelReason: reason.trim(), updatedAt: new Date() }).where(eq(salesDocuments.id, id));
-    await audit({ actor, action: "CANCEL", module: "livraisons", entity: "sales_document", entityId: id, label: d.number, after: { reason, reversed: moves.length, orders: orders.size || undefined } }, tx);
+    await audit({ actor, action: "CANCEL", module: "livraisons", entity: "sales_document", entityId: id, label: d.number, after: { reason, reversed: moves.length, orders: orders.size || undefined, material: reversedMaterial || undefined, charges: removedCharges || undefined } }, tx);
+    return removedCharges;
   });
+  if (removed) await refreshAfterWrite(["EXPENSE"]);
 }
 
 /** Statut d'une commande confirmée d'après ses quantités livrées (une commande annulée ne bouge plus). */
@@ -770,6 +870,74 @@ export async function importOpeningInvoices(rows: OpeningInvoice[], actor: Audit
   });
 }
 
+export type BulkInvoiceLineInput = { productRef: string; quantity: string; freeQuantity?: string | null; unitPriceHt: string; discountPct?: string | null };
+export type BulkInvoiceInput = { number: string; date: string; site?: string | null; globalDiscountPct?: string | null; paid: boolean; notes?: string | null; lines: BulkInvoiceLineInput[] };
+
+/**
+ * Reprise des factures de vente en bloc émises dans Sage (décision du 12/10/2026) : une FACTURE réelle `SAGE_REPRISE`
+ * au client du réglage `gestion.bulkSales`, AVEC ses lignes (référence produit, quantité, UG, PU HT, remise) pour que le
+ * P&L en calcule le coût. Ni mouvement de stock (la marchandise est sortie avant le journal), ni projection dans les
+ * ventes. Réglée : `reprise_paid` = TTC (hors balance âgée). Idempotent : un numéro déjà présent est ignoré.
+ * `apply = false` : contrôle seulement (totaux, références introuvables), rien n'est écrit.
+ */
+export async function importBulkInvoices(rows: BulkInvoiceInput[], actor: AuditActor, opts: { apply: boolean }): Promise<{ inserted: number; skipped: string[]; preview: { number: string; netHt: string; ttc: string; lines: number }[] }> {
+  const g = (await getSettings()).gestion;
+  const clientId = g.bulkSales.clientId;
+  if (!clientId) throw new DocumentError("Choisissez d'abord le client « vente en bloc » (Paramètres → Gestion).");
+  const run = async (tx: Tx) => {
+    const client = (await tx.execute<Record<string, string | null>>(sql`
+      select name, legal_name, coalesce(account_code, code) as account_code, ice, billing_address, postal_code, city from clients where id = ${clientId}::uuid`)).rows[0];
+    if (!client) throw new DocumentError("Client « vente en bloc » introuvable.");
+    const refs = [...new Set(rows.flatMap((r) => r.lines.map((l) => l.productRef.trim().toUpperCase())))];
+    const products = new Map((await tx.execute<{ id: string; k: string; name: string; code: string | null; sku: string | null; unit: string; price_retail: string | null; rate: string | null }>(sql`
+      select distinct on (k.k) p.id, k.k, p.name, p.code, p.sku, p.unit, coalesce(p.price_retail, p.price_wholesale)::text as price_retail, tr.rate::text as rate
+      from products p left join tax_rates tr on tr.key = p.tax_rate_key
+      cross join lateral (values (upper(p.code)), (upper(p.sku)), (upper(p.ean))) as k(k)
+      where k.k = any(${pgArray(refs, "text")}) order by k.k, p.active desc`)).rows.map((p) => [p.k, p]));
+    const existing = new Set((await tx.execute<{ number: string }>(sql`select number from sales_documents where number = any(${pgArray(rows.map((r) => r.number), "text")})`)).rows.map((r) => r.number));
+    const rate = await defaultRate(tx, g);
+    const skipped: string[] = [];
+    const preview: { number: string; netHt: string; ttc: string; lines: number }[] = [];
+    let inserted = 0;
+    for (const r of rows) {
+      if (existing.has(r.number)) { skipped.push(`${r.number} : déjà présente`); continue; }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(r.date)) { skipped.push(`${r.number} : date invalide`); continue; }
+      const missing = r.lines.filter((l) => !products.has(l.productRef.trim().toUpperCase())).map((l) => l.productRef);
+      if (missing.length) { skipped.push(`${r.number} : référence(s) introuvable(s) ${missing.join(", ")}`); continue; }
+      const lines = r.lines.map((l, i) => {
+        const p = products.get(l.productRef.trim().toUpperCase())!;
+        const qty = parseDecimal(l.quantity, SCALE.qty), pu = parseDecimal(l.unitPriceHt, SCALE.money);
+        if (qty === null || qty <= 0n || pu === null || pu < 0n) throw new DocumentError(`${r.number}, ligne ${i + 1} : quantité ou prix invalide.`);
+        return {
+          position: i, productId: p.id, ref: p.code ?? p.sku, designation: p.name, unit: p.unit, quantity: formatScaled(qty, SCALE.qty),
+          freeQuantity: formatScaled(parseDecimal(l.freeQuantity || "0", SCALE.qty) ?? 0n, SCALE.qty), unitPriceHt: formatScaled(pu, SCALE.money),
+          publicPriceTtc: p.price_retail, discountPct: formatScaled(parseDecimal(l.discountPct || "0", SCALE.pct) ?? 0n, SCALE.pct), taxRate: p.rate ?? rate,
+        };
+      });
+      const globalDiscountPct = formatScaled(parseDecimal(r.globalDiscountPct || "0", SCALE.pct) ?? 0n, SCALE.pct);
+      const calc = computeDocument(lines.map((l) => ({ quantity: l.quantity, unitPriceHt: l.unitPriceHt, discountPct: l.discountPct, taxRate: l.taxRate })), globalDiscountPct);
+      preview.push({ number: r.number, netHt: calc.netHt, ttc: calc.ttc, lines: lines.length });
+      if (!opts.apply) continue;
+      const [doc] = await tx.insert(salesDocuments).values({
+        type: "FACTURE", status: "BROUILLON", isSimulation: false, date: r.date, clientId, site: (r.site || "COMANET").toUpperCase(),
+        clientSnapshot: { name: client.name, legalName: client.legal_name ?? client.name, accountCode: client.account_code, ice: client.ice, address: client.billing_address, postalCode: client.postal_code, city: client.city },
+        globalDiscountPct, grossHt: calc.grossHt, netHt: calc.netHt, vatTotal: calc.vatTotal, ttc: calc.ttc, vatBreakdown: calc.vatBreakdown,
+        amountInWords: amountInWords(calc.ttc, g.amountWords.major, g.amountWords.minor), source: "SAGE_REPRISE",
+        notes: r.notes ?? "Vente en bloc reprise de Sage (P&L) : lignes saisies d'après la facture Sage, sans mouvement de stock.", createdById: actor.id,
+      }).returning({ id: salesDocuments.id });
+      await tx.insert(salesDocumentLines).values(lines.map((l, i) => ({ ...l, documentId: doc.id, grossHt: calc.lines[i].grossHt, netHt: calc.lines[i].netHt, vatAmount: calc.lines[i].vatAmount, ttc: calc.lines[i].ttc })));
+      await tx.update(salesDocuments).set({
+        status: "VALIDE", number: r.number, fiscalYear: Number(r.date.slice(0, 4)), reprisePaid: r.paid ? calc.ttc : "0",
+        validatedById: actor.id, validatedAt: new Date(), updatedAt: new Date(),
+      }).where(eq(salesDocuments.id, doc.id));
+      inserted++;
+    }
+    if (opts.apply) await audit({ actor, action: "IMPORT", module: "facturation", entity: "sales_document", label: "Reprise des ventes en bloc Sage", after: { inserted, skipped: skipped.length } }, tx);
+    return { inserted, skipped, preview };
+  };
+  return db.transaction(run);
+}
+
 /* ------------------------------------------------------------------ */
 /* Correction du nom du client imprimé                                 */
 /* ------------------------------------------------------------------ */
@@ -833,6 +1001,9 @@ export async function reassignDocumentClient(
 
     const { client, snapshot, identity } = await clientIdentitySnapshot(tx, input.clientId, input.legalEntityId);
     if (client.active === false) throw new DocumentError("Ce client est archivé : réactivez sa fiche d'abord.");
+    // Une sortie marketing (client interne) porte des charges et des sorties de matériel : elle ne change pas de client.
+    const internal = (await tx.execute<{ n: number }>(sql`select count(*)::int as n from clients where id in (${d.clientId}::uuid, ${input.clientId}::uuid) and is_internal`)).rows[0]?.n ?? 0;
+    if (internal) throw new DocumentError("Une sortie marketing (client interne) ne change pas de client : annulez le BL et refaites-le au bon client.");
 
     // Pièces concernées : la pièce, et pour une commande les BL qui en sont issus (non annulés).
     const children = type === "COMMANDE"

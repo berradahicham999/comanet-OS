@@ -24,12 +24,19 @@ export type MovementInput = {
   quantity: number;
   unitCost?: number | null; activationId?: string | null; clientId?: string | null; reason?: string | null;
   date: string; createdById?: string | null; importId?: string | null;
+  /** Ligne de BL qui fait sortir l'article (sorties marketing, `validateDocument()`). */
+  documentLineId?: string | null;
+  /** Contre-mouvement : annule ce mouvement (BL annulé). */
+  reversalOf?: string | null;
 };
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-/** LA fonction qui change un stock. Refuse une sortie au-delà du disponible. */
-export async function recordMovement(input: MovementInput, tx?: Tx): Promise<{ id: string; stock: number }> {
+/**
+ * LA fonction qui change un stock. Refuse une sortie au-delà du disponible, sauf `allowNegative`
+ * (BL en mode « alerte » : `settings.gestion.marketingOutputs.insufficientStock = WARN`).
+ */
+export async function recordMovement(input: MovementInput, tx?: Tx, opts: { allowNegative?: boolean } = {}): Promise<{ id: string; stock: number }> {
   const run = async (t: Tx) => {
     const [item] = await t.select({ stock: inventoryItems.stock, unitCost: inventoryItems.unitCost, name: inventoryItems.name }).from(inventoryItems).where(eq(inventoryItems.id, input.itemId)).for("update");
     if (!item) throw new Error("Article introuvable.");
@@ -38,14 +45,16 @@ export async function recordMovement(input: MovementInput, tx?: Tx): Promise<{ i
     if (input.type === "ENTREE" && qty < 0) throw new Error("Une entrée est positive.");
     if (input.type === "SORTIE" && qty > 0) throw new Error("Une sortie est négative.");
     const next = item.stock + qty;
-    if (next < 0) throw new Error(`Stock insuffisant pour « ${item.name} » : ${item.stock} disponible${item.stock > 1 ? "s" : ""}, ${-qty} demandé${-qty > 1 ? "s" : ""}.`);
+    if (next < 0 && !opts.allowNegative) throw new Error(`Stock insuffisant pour « ${item.name} » : ${item.stock} disponible${item.stock > 1 ? "s" : ""}, ${-qty} demandé${-qty > 1 ? "s" : ""}.`);
     const unitCost = input.unitCost ?? Number(item.unitCost);
     const [m] = await t.insert(inventoryMovements).values({
       itemId: input.itemId, type: input.type, quantity: qty, unitCost: String(unitCost), activationId: input.activationId ?? null, clientId: input.clientId ?? null,
       reason: input.reason ?? null, date: input.date, createdById: input.createdById ?? null, importId: input.importId ?? null,
+      documentLineId: input.documentLineId ?? null, reversalOf: input.reversalOf ?? null,
     }).returning({ id: inventoryMovements.id });
-    // Une entrée avec un coût connu met à jour le coût unitaire de référence (dernier prix d'achat).
-    await t.update(inventoryItems).set({ stock: next, updatedAt: new Date(), ...(input.type === "ENTREE" && input.unitCost != null && input.unitCost > 0 ? { unitCost: String(input.unitCost) } : {}) }).where(eq(inventoryItems.id, input.itemId));
+    // Une entrée avec un coût connu met à jour le coût unitaire de référence (dernier prix d'achat) ; un contre-mouvement, non.
+    const newCost = input.type === "ENTREE" && !input.reversalOf && input.unitCost != null && input.unitCost > 0;
+    await t.update(inventoryItems).set({ stock: next, updatedAt: new Date(), ...(newCost ? { unitCost: String(input.unitCost) } : {}) }).where(eq(inventoryItems.id, input.itemId));
     return { id: m.id, stock: next };
   };
   return tx ? run(tx) : db.transaction(run);
@@ -95,7 +104,8 @@ export async function listInventory(f: { brand?: string | null; category?: strin
       (i.stock * i.unit_cost)::float8 as value,
       (select max(m.date)::text from inventory_movements m where m.item_id = i.id and m.type = 'SORTIE') as "lastOutAt",
       (select max(m.date)::text from inventory_movements m where m.item_id = i.id and m.type = 'ENTREE') as "lastInAt",
-      coalesce((select -sum(m.quantity) from inventory_movements m where m.item_id = i.id and m.type = 'SORTIE' and m.date >= ${todayIso}::date - 90), 0)::int as "outQty90",
+      coalesce((select -sum(m.quantity) from inventory_movements m where m.item_id = i.id and m.type = 'SORTIE' and m.date >= ${todayIso}::date - 90
+        and not exists (select 1 from inventory_movements x where x.reversal_of = m.id)), 0)::int as "outQty90",
       (select x.id from content_assets x where x.inventory_item_id = i.id and x.kind = 'PHOTO' order by x.version desc limit 1) as "photoId",
       i.created_at::text as "createdAt"
     from inventory_items i join inventory_categories c on c.key = i.category_key
@@ -114,14 +124,41 @@ export async function getInventoryItem(id: string, todayIso: string, dormantDays
   return rows.find((x) => x.id === id) ?? null;
 }
 
-export type MovementRow = { id: string; type: string; quantity: number; unitCost: number | null; date: string; reason: string | null; activationId: string | null; activation: string | null; client: string | null; createdBy: string | null; createdAt: Date };
+export type MovementRow = {
+  id: string; type: string; quantity: number; unitCost: number | null; date: string; reason: string | null; activationId: string | null; activation: string | null;
+  clientId: string | null; client: string | null; createdBy: string | null; createdAt: Date;
+  /** Sortie par BL : pièce, client interne ou non, nature de la sortie (celle du client interne, sinon commercial). */
+  documentId: string | null; documentNumber: string | null; nature: string | null; reversed: boolean;
+};
 
 export async function itemMovements(itemId: string, limit = 200): Promise<MovementRow[]> {
   const r = await db.execute<MovementRow>(sql`
-    select m.id, m.type, m.quantity, m.unit_cost::float8 as "unitCost", m.date::text as date, m.reason, m.activation_id as "activationId", a.name as activation, c.name as client, u.name as "createdBy", m.created_at as "createdAt"
+    select m.id, m.type, m.quantity, m.unit_cost::float8 as "unitCost", m.date::text as date, m.reason, m.activation_id as "activationId", a.name as activation,
+      m.client_id as "clientId", c.name as client, u.name as "createdBy", m.created_at as "createdAt",
+      d.id as "documentId", d.number as "documentNumber",
+      case when l.id is null then null when c.is_internal then c.output_nature_key else 'COMMERCIAL' end as nature,
+      exists (select 1 from inventory_movements x where x.reversal_of = m.id) as reversed
     from inventory_movements m left join activations a on a.id = m.activation_id left join clients c on c.id = m.client_id left join users u on u.id = m.created_by_id
+      left join sales_document_lines l on l.id = m.document_line_id left join sales_documents d on d.id = l.document_id
     where m.item_id = ${itemId}::uuid order by m.date desc, m.created_at desc limit ${limit}`);
   return r.rows;
+}
+
+/**
+ * Consommation d'un article par nature de sortie (BL validés, contre-mouvements déduits) : quantité et valeur au coût
+ * figé. Lecture seule — la charge du matériel est à l'achat, ceci est l'historique de consommation.
+ */
+export async function itemConsumptionByNature(itemId: string): Promise<{ nature: string; label: string; quantity: number; value: number }[]> {
+  const r = await db.execute<{ nature: string; label: string | null; quantity: number; value: number }>(sql`
+    with m as (
+      select coalesce(case when c.is_internal then c.output_nature_key else 'COMMERCIAL' end, 'COMMERCIAL') as nature,
+        -mv.quantity as qty, coalesce(mv.unit_cost, 0) as cost
+      from inventory_movements mv join sales_document_lines l on l.id = mv.document_line_id left join clients c on c.id = mv.client_id
+      where mv.item_id = ${itemId}::uuid
+    )
+    select m.nature, n.label, sum(m.qty)::float8 as quantity, sum(m.qty * m.cost)::float8 as value
+    from m left join marketing_output_natures n on n.key = m.nature group by m.nature, n.label, n.sort order by n.sort nulls last`);
+  return r.rows.map((x) => ({ nature: x.nature, label: x.label ?? x.nature, quantity: Number(x.quantity), value: Number(x.value) })).filter((x) => x.quantity !== 0);
 }
 
 /** Synthèse par marque : articles, valeur du stock, alertes, dormants. */

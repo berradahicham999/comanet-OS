@@ -3,7 +3,9 @@
  *
  * ── Chiffre d'affaires COMANET (HT) ──────────────────────────────────────────
  *  · Ventes directes : lignes de `sales` des sites DIRECTS (`settings.pnl.directSites`).
- *  · Ventes en bloc aux distributeurs : `pnl_bulk_sales` (stock Gamarde / Ainhoa facturé à Cospharma à l'arrivage).
+ *  · Ventes en bloc aux distributeurs : FACTURES − AVOIRS réels (hors simulation, brouillon, annulé) du client du
+ *    réglage `gestion.bulkSales` (COSPHARMA STE), HT net, à la date de la pièce. Le BL n'est jamais lu : un BL facturé
+ *    ne compte qu'une fois. `pnl_bulk_sales` (ancienne saisie) n'est plus lue.
  *  · Commissions de prestation : taux × CA HT remisé du prestataire (site PHARMAFIRST × 35 % par défaut).
  *  · Revente distributeur (sites COS, CAS…) : HORS CA — COMANET a déjà vendu ce stock en bloc. Montrée pour info.
  *  · Site inconnu : ni compté ni deviné, signalé dans la qualité des données.
@@ -11,20 +13,24 @@
  * ── Coût des ventes ─────────────────────────────────────────────────────────
  *  · Direct : (quantité + UG) × prix d'achat de l'article. Sans prix d'achat, la ligne n'a pas de coût :
  *    son CA est signalé « coût manquant », jamais estimé avec une marge par défaut.
- *  · En bloc : coût d'achat saisi sur la vente ; vide = signalé.
+ *  · En bloc : (quantité + UG) × prix d'achat de la fiche, par ligne de facture ; un avoir avec retour le retire,
+ *    un avoir financier ne touche que le CA. Sans prix d'achat : signalé.
  *  · Prestation : aucun (le prestataire achète la marchandise).
  *
  * ── Charges ─────────────────────────────────────────────────────────────────
- *  · Marketing : `budgetConsumptionByMonth()` (définition officielle du budget consommé).
+ *  · Marketing : `budgetConsumptionByMonth()` (définition officielle du budget consommé), ventilé par poste
+ *    (`marketingBucketOf()` : publicité, échantillons par nature, goodies, PLV, influence, activations, autres).
  *  · Charges saisies : PONCTUELLE = son mois ; MENSUELLE = chaque mois de début à fin (ouverte si fin vide).
  *
  * ── Soldes ──────────────────────────────────────────────────────────────────
- *   Marge brute = CA − coût des ventes
- *   Contribution après marketing = marge brute − marketing − charges commerciales
- *   Résultat d'exploitation = contribution − personnel − structure
- *   Résultat net = résultat d'exploitation − financier − impôts
+ *   Marge brute = CA net − coût d'achat
+ *   Contribution marketing = marge brute − marketing réel
+ *   EBITDA = contribution marketing − personnel − frais (charges commerciales + structure)
+ *   Résultat net = EBITDA − financier − impôts
+ *   Point mort : charges fixes ÷ taux de marge variable ((contribution − charges commerciales) ÷ CA).
  */
 import type { PnlSettings } from "@/lib/settings";
+import { bucketSortKey, MARKETING_BUCKET_LABELS } from "@/lib/budget-categories";
 
 export type ChargeGroup = "COMMERCIAL" | "PERSONNEL" | "STRUCTURE" | "FINANCIER" | "IMPOTS";
 export const CHARGE_GROUPS: Record<ChargeGroup, string> = {
@@ -74,10 +80,11 @@ export function chargeMonths(c: { recurrence: string; startMonth: string; endMon
 /* ------------------------------------------------------------------ entrées */
 
 export type SalesAgg = { month: number; brandId: string | null; site: string; amount: number; cogs: number; missingCostAmount: number };
-export type BulkAgg = { month: number; brandId: string; amount: number; cost: number | null };
+/** Ventes en bloc depuis les pièces : CA net (factures − avoirs), coût d'achat, CA sans prix d'achat. */
+export type BulkAgg = { month: number; brandId: string | null; amount: number; cogs: number; missingCostAmount: number };
 export type ChargeInput = { id: string; categoryKey: string; amount: number; recurrence: string; startMonth: string; endMonth: string | null; brandId: string | null };
 export type CategoryInput = { key: string; label: string; grp: ChargeGroup; sort: number };
-export type MarketingAgg = { month: number; brandId: string; consumed: number };
+export type MarketingAgg = { month: number; brandId: string; consumed: number; breakdown?: Record<string, number> };
 export type BrandInput = { id: string; name: string; color: string };
 
 export type PnlInput = {
@@ -93,6 +100,8 @@ export type PnlInput = {
   brands: BrandInput[];
   /** Filtre marque : ne garde que le CA, le coût, le marketing et les charges affectées à la marque. */
   brandId?: string | null;
+  /** Libellés des natures de sortie (`marketing_output_natures`) pour les postes « Échantillons — … ». */
+  natureLabels?: Record<string, string>;
 };
 
 /* ------------------------------------------------------------------ sorties */
@@ -110,6 +119,8 @@ export type PnlLine = {
   total: number;
   /** Ligne en pourcentage du CA (taux de marge) : `months` et `total` sont déjà des %. */
   pct?: boolean;
+  /** Clé du détail jusqu'aux pièces sources (`pnlLineSources()`) ; absent = solde ou famille. */
+  drill?: string;
 };
 
 export type BrandContribution = {
@@ -117,6 +128,8 @@ export type BrandContribution = {
   revenue: number; direct: number; bulk: number; commission: number;
   cogs: number; grossMargin: number; marketing: number; charges: number; contribution: number;
   missingCostAmount: number;
+  /** Marketing de la marque par poste (`marketingBucketOf()`). */
+  marketingBreakdown: Record<string, number>;
 };
 
 export type PnlQuality = {
@@ -135,10 +148,13 @@ export type PnlStatement = {
   quality: PnlQuality;
   kpis: {
     revenue: number; grossMargin: number; grossMarginPct: number | null; marketing: number;
+    /** Contribution marketing (marge brute − marketing réel). */
+    marketingContribution: number;
+    /** EBITDA (contribution marketing − personnel − frais). */
     operatingResult: number; netResult: number; netMarginPct: number | null;
     /** Charges fixes du dernier mois (personnel + structure + financier récurrents). */
     monthlyFixed: number;
-    /** Taux de contribution (contribution ÷ CA) sur la période. */
+    /** Taux de marge variable ((contribution − charges commerciales) ÷ CA) sur la période. */
     contributionPct: number | null;
     /** CA mensuel qui couvre les charges fixes au taux de contribution observé ; null si non calculable. */
     breakEvenMonthly: number | null;
@@ -167,7 +183,7 @@ export function buildPnl(input: PnlInput): PnlStatement {
     let r = brandAcc.get(key);
     if (!r) {
       const b = id ? brandMeta.get(id) : undefined;
-      r = { brandId: key, name: b?.name ?? "Sans marque", color: b?.color ?? "#9ca3af", revenue: 0, direct: 0, bulk: 0, commission: 0, cogs: 0, grossMargin: 0, marketing: 0, charges: 0, contribution: 0, missingCostAmount: 0 };
+      r = { brandId: key, name: b?.name ?? "Sans marque", color: b?.color ?? "#9ca3af", revenue: 0, direct: 0, bulk: 0, commission: 0, cogs: 0, grossMargin: 0, marketing: 0, charges: 0, contribution: 0, missingCostAmount: 0, marketingBreakdown: {} };
       brandAcc.set(key, r);
     }
     return r;
@@ -198,18 +214,29 @@ export function buildPnl(input: PnlInput): PnlStatement {
   for (const b of input.bulk) {
     const i = idx(b.month);
     if (i < 0 || !keep(b.brandId)) continue;
-    bulk[i] += b.amount;
-    const a = acc(b.brandId); a.bulk += b.amount;
-    if (b.cost === null) bulkWithoutCost += b.amount;
-    else { bulkCogs[i] += b.cost; a.cogs += b.cost; }
+    bulk[i] += b.amount; bulkCogs[i] += b.cogs;
+    const a = acc(b.brandId); a.bulk += b.amount; a.cogs += b.cogs; a.missingCostAmount += b.missingCostAmount;
+    bulkWithoutCost += b.missingCostAmount;
   }
 
   const marketing = zeros();
+  const mktBuckets = new Map<string, number[]>();
   for (const m of input.marketing) {
     const i = idx(m.month);
     if (i < 0 || !keep(m.brandId)) continue;
     marketing[i] += m.consumed;
-    acc(m.brandId).marketing += m.consumed;
+    const a = acc(m.brandId);
+    a.marketing += m.consumed;
+    // Ventilation : la somme des postes égale le consommé ; un écart (ventilation absente) va dans « Autres ».
+    const parts = { ...(m.breakdown ?? {}) };
+    const rest = m.consumed - Object.values(parts).reduce((x, v) => x + v, 0);
+    if (Math.abs(rest) > 0.005) parts.AUTRES = (parts.AUTRES ?? 0) + rest;
+    for (const [bucket, v] of Object.entries(parts)) {
+      if (!v) continue;
+      const arr = mktBuckets.get(bucket) ?? zeros();
+      arr[i] += v; mktBuckets.set(bucket, arr);
+      a.marketingBreakdown[bucket] = (a.marketingBreakdown[bucket] ?? 0) + v;
+    }
   }
 
   const cats = [...input.categories].sort((a, b) => a.sort - b.sort);
@@ -242,19 +269,19 @@ export function buildPnl(input: PnlInput): PnlStatement {
   // Chiffre d'affaires
   const commissionTotal = [...commissions.values()].reduce(add, zeros());
   const revenue = add(add(direct, bulk), commissionTotal);
-  push({ key: "ca", label: "Chiffre d'affaires HT", kind: "revenue", depth: 0, months: revenue });
-  push({ key: "ca_direct", label: "Ventes directes COMANET", kind: "revenue", depth: 1, parent: "ca", months: direct });
-  push({ key: "ca_bulk", label: "Ventes en bloc aux distributeurs", kind: "revenue", depth: 1, parent: "ca", months: bulk });
+  push({ key: "ca", label: "Chiffre d'affaires net HT", kind: "revenue", depth: 0, months: revenue });
+  push({ key: "ca_direct", label: "Ventes directes COMANET", kind: "revenue", depth: 1, parent: "ca", months: direct, drill: "ca_direct" });
+  push({ key: "ca_bulk", label: "Ventes en bloc (factures − avoirs)", kind: "revenue", depth: 1, parent: "ca", months: bulk, drill: "ca_bulk" });
   for (const p of rules.prestations) {
     const arr = commissions.get(p.label);
-    if (arr) push({ key: `ca_presta_${normSite(p.site)}`, label: `${p.label} (${p.ratePct} %)`, kind: "revenue", depth: 1, parent: "ca", months: arr });
+    if (arr) push({ key: `ca_presta_${normSite(p.site)}`, label: `${p.label} (${p.ratePct} %)`, kind: "revenue", depth: 1, parent: "ca", months: arr, drill: `presta:${normSite(p.site)}` });
   }
 
   // Coût des ventes et marge brute
   const cogs = add(directCogs, bulkCogs);
   push({ key: "cogs", label: "Coût d'achat des marchandises vendues", kind: "cost", depth: 0, months: cogs });
-  push({ key: "cogs_direct", label: "Sur ventes directes", kind: "cost", depth: 1, parent: "cogs", months: directCogs });
-  push({ key: "cogs_bulk", label: "Sur ventes en bloc", kind: "cost", depth: 1, parent: "cogs", months: bulkCogs });
+  push({ key: "cogs_direct", label: "Sur ventes directes", kind: "cost", depth: 1, parent: "cogs", months: directCogs, drill: "ca_direct" });
+  push({ key: "cogs_bulk", label: "Sur ventes en bloc", kind: "cost", depth: 1, parent: "cogs", months: bulkCogs, drill: "ca_bulk" });
   const gross = sub(revenue, cogs);
   push({ key: "marge_brute", label: "Marge brute", kind: "subtotal", depth: 0, months: gross });
   const rate = (num: number[], den: number[]) => num.map((v, i) => (den[i] ? (v / den[i]) * 100 : 0));
@@ -264,23 +291,34 @@ export function buildPnl(input: PnlInput): PnlStatement {
 
   // Familles de charges
   const groupTotal = (g: ChargeGroup) => cats.filter((c) => c.grp === g).map((c) => byCat.get(c.key) ?? zeros()).reduce(add, zeros());
+  const pushCats = (groups: ChargeGroup[], parent: string) => {
+    for (const g of groups) for (const c of cats.filter((x) => x.grp === g)) {
+      const arr = byCat.get(c.key);
+      if (arr && arr.some((v) => v !== 0)) push({ key: `cat_${c.key}`, label: c.label, kind: "cost", depth: 1, parent, months: arr, drill: `cat:${c.key}` });
+    }
+  };
   const pushGroup = (g: ChargeGroup) => {
     const tot = push({ key: `grp_${g}`, label: CHARGE_GROUPS[g], kind: "cost", depth: 0, months: groupTotal(g) });
-    for (const c of cats.filter((x) => x.grp === g)) {
-      const arr = byCat.get(c.key);
-      if (arr && arr.some((v) => v !== 0)) push({ key: `cat_${c.key}`, label: c.label, kind: "cost", depth: 1, parent: `grp_${g}`, months: arr });
-    }
+    pushCats([g], `grp_${g}`);
     return tot;
   };
 
-  push({ key: "marketing", label: "Marketing (engagé + publicité + échantillons)", kind: "cost", depth: 0, months: marketing });
-  const commercial = pushGroup("COMMERCIAL");
-  const contribution = sub(sub(gross, marketing), commercial);
-  push({ key: "contribution", label: "Contribution après marketing", kind: "subtotal", depth: 0, months: contribution });
+  // Marketing réel, détaillé par poste
+  push({ key: "marketing", label: "Marketing réel", kind: "cost", depth: 0, months: marketing });
+  const natureLabel = (k: string) => (k === "AUTRE" ? "nature non renseignée" : input.natureLabels?.[k] ?? k.toLowerCase());
+  const bucketLabel = (b: string) => (b.startsWith("ECH:") ? `Échantillons — ${natureLabel(b.slice(4))}` : MARKETING_BUCKET_LABELS[b] ?? b);
+  for (const [bucket, arr] of [...mktBuckets.entries()].sort((a, b) => bucketSortKey(a[0]) - bucketSortKey(b[0]) || a[0].localeCompare(b[0]))) {
+    if (arr.some((v) => Math.abs(v) > 0.005)) push({ key: `mkt_${bucket}`, label: bucketLabel(bucket), kind: "cost", depth: 1, parent: "marketing", months: arr, drill: `mkt:${bucket}` });
+  }
+  const contribution = sub(gross, marketing);
+  push({ key: "contribution", label: "Contribution marketing", kind: "subtotal", depth: 0, months: contribution });
   const personnel = pushGroup("PERSONNEL");
-  const structure = pushGroup("STRUCTURE");
-  const operating = sub(sub(contribution, personnel), structure);
-  push({ key: "resultat_exploitation", label: "Résultat d'exploitation (EBE)", kind: "subtotal", depth: 0, months: operating });
+  const commercial = groupTotal("COMMERCIAL");
+  const frais = add(commercial, groupTotal("STRUCTURE"));
+  push({ key: "frais", label: "Frais (commerciaux et structure)", kind: "cost", depth: 0, months: frais });
+  pushCats(["COMMERCIAL", "STRUCTURE"], "frais");
+  const operating = sub(sub(contribution, personnel), frais);
+  push({ key: "ebitda", label: "EBITDA", kind: "subtotal", depth: 0, months: operating });
   const financial = pushGroup("FINANCIER");
   const taxes = pushGroup("IMPOTS");
   const net = sub(sub(operating, financial), taxes);
@@ -301,7 +339,7 @@ export function buildPnl(input: PnlInput): PnlStatement {
     .filter((c) => c.recurrence === "MENSUELLE" && keep(c.brandId) && fixedGroups.has(catOf.get(c.categoryKey)?.grp as ChargeGroup) && chargeMonths(c, year).includes(lastMonth))
     .reduce((a, c) => a + c.amount, 0);
   const revT = sum(revenue);
-  const contributionPct = revT ? (sum(contribution) / revT) * 100 : null;
+  const contributionPct = revT ? ((sum(contribution) - sum(commercial)) / revT) * 100 : null;
   const breakEvenMonthly = contributionPct && contributionPct > 0 && monthlyFixed > 0 ? monthlyFixed / (contributionPct / 100) : null;
 
   const monthsWithoutCharges: number[] = [];
@@ -318,7 +356,7 @@ export function buildPnl(input: PnlInput): PnlStatement {
     },
     kpis: {
       revenue: revT, grossMargin: sum(gross), grossMarginPct: revT ? (sum(gross) / revT) * 100 : null,
-      marketing: sum(marketing), operatingResult: sum(operating), netResult: sum(net), netMarginPct: revT ? (sum(net) / revT) * 100 : null,
+      marketing: sum(marketing), marketingContribution: sum(contribution), operatingResult: sum(operating), netResult: sum(net), netMarginPct: revT ? (sum(net) / revT) * 100 : null,
       monthlyFixed, contributionPct, breakEvenMonthly,
     },
   };

@@ -5,8 +5,7 @@ import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/access";
 import { decimalOrNull, errorParam, isUuid, str } from "@/lib/gestion/form";
 import {
-  createBulkSale, createCharge, deleteBulkSale, deleteCharge, reviseCharge, savePnlRules, stopCharge, updateBulkSale, updateCharge,
-  type BulkInputForm, type ChargeInputForm,
+  createCharge, deleteCharge, reviseCharge, savePnlRules, stopCharge, updateCharge, type ChargeInputForm,
 } from "@/lib/pnl";
 import { RECURRENCES, type Recurrence } from "@/lib/pnl-shared";
 import type { PnlPrestation } from "@/lib/settings";
@@ -90,49 +89,6 @@ export async function deleteChargeAction(fd: FormData) {
   await deleteCharge(id, actorOf(user));
   done();
   redirect(back("/gestion/pnl/charges", { year: yearOf(fd), done: "1" }));
-}
-
-/* ----------------------------------------------------- ventes en bloc */
-
-function readBulk(fd: FormData): BulkInputForm {
-  const amount = decimalOrNull(fd, "amountHt", "Montant HT facturé", 2);
-  if (amount === null) throw new Error("Le montant HT facturé est obligatoire.");
-  const brandId = str(fd, "brandId");
-  if (!isUuid(brandId)) throw new Error("Choisissez la marque.");
-  return {
-    date: str(fd, "date") ?? "",
-    brandId,
-    clientId: isUuid(str(fd, "clientId")) ? str(fd, "clientId") : null,
-    label: str(fd, "label") ?? "",
-    quantity: decimalOrNull(fd, "quantity", "Quantité", 3, { min: 0 }),
-    amountHt: amount,
-    costAmount: decimalOrNull(fd, "costAmount", "Coût d'achat", 2),
-    discountPct: decimalOrNull(fd, "discountPct", "Remise", 2, { min: 0 }),
-    notes: str(fd, "notes"),
-  };
-}
-
-export async function saveBulkAction(fd: FormData) {
-  const user = await requireAdmin();
-  const id = str(fd, "id");
-  const year = yearOf(fd);
-  try {
-    if (isUuid(id)) await updateBulkSale(id, readBulk(fd), actorOf(user));
-    else await createBulkSale(readBulk(fd), actorOf(user));
-  } catch (e) {
-    redirect(back("/gestion/pnl/ventes-bloc", { year, error: decodeURIComponent(errorParam(e)), ...(isUuid(id) ? { edit: id } : { new: "1" }) }));
-  }
-  done();
-  redirect(back("/gestion/pnl/ventes-bloc", { year, done: "1" }));
-}
-
-export async function deleteBulkAction(fd: FormData) {
-  const user = await requireAdmin();
-  const id = str(fd, "id");
-  if (!isUuid(id)) return;
-  await deleteBulkSale(id, actorOf(user));
-  done();
-  redirect(back("/gestion/pnl/ventes-bloc", { year: yearOf(fd), done: "1" }));
 }
 
 /* ------------------------------------------------------------- règles */

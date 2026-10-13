@@ -1,5 +1,5 @@
 import "server-only";
-import { asc } from "drizzle-orm";
+import { asc, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { creditReasons, paymentModes, taxRates, warehouses } from "@/db/schema";
 
@@ -30,4 +30,11 @@ export async function listCreditReasons(): Promise<CreditReason[]> {
 export async function gestionRefs() {
   const [rates, modes, whs] = await Promise.all([listTaxRates(), listPaymentModes(), listWarehouses()]);
   return { taxRates: rates, paymentModes: modes, warehouses: whs };
+}
+
+/** Natures de sortie marketing (référentiel `marketing_output_natures`, Paramètres → Gestion). */
+export async function outputNatures(opts: { includeInactive?: boolean } = {}): Promise<{ key: string; label: string; sort: number; active: boolean }[]> {
+  const r = await db.execute<{ key: string; label: string; sort: number; active: boolean }>(sql`
+    select key, label, sort, active from marketing_output_natures ${opts.includeInactive ? sql`` : sql`where active`} order by sort, label`);
+  return r.rows;
 }

@@ -1,4 +1,5 @@
 import "server-only";
+import { getSettings } from "@/lib/settings";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { clientBrandDiscounts, clientDeliveryAddresses, clientGroups, clientLegalEntities, clients, type ClientLegalEntity } from "@/db/schema";
@@ -135,6 +136,33 @@ export async function setClientBlocked(id: string, blocked: boolean, reason: str
     if (blocked && !reason?.trim()) throw new Error("Indiquez le motif du blocage.");
     await tx.update(clients).set({ blocked, blockedReason: blocked ? reason!.trim() : null, updatedAt: new Date() }).where(eq(clients.id, id));
     await audit({ actor, action: blocked ? "BLOCK" : "UNBLOCK", module: "clients", entity: "client", entityId: id, label: c.name, before: { blocked: c.blocked, reason: c.reason }, after: { blocked, reason: blocked ? reason : null } }, tx);
+  });
+}
+
+/**
+ * Client interne « sorties marketing » (échantillons animation, médical, digital, commercial) : ses BL ne font jamais
+ * de CA, ses lignes produit deviennent des charges d'échantillons de sa nature (`marketing-outputs.ts`), et il sort des
+ * analyses clients (`isCommercialClientSql()`). Refusé pour le client « vente en bloc » et pour une fiche qui porte des
+ * factures, avoirs ou commandes : ce sont de vraies ventes.
+ */
+export async function setClientInternal(id: string, isInternal: boolean, natureKey: string | null, actor: AuditActor): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [c] = await tx.select({ name: clients.name, isInternal: clients.isInternal, nature: clients.outputNatureKey }).from(clients).where(eq(clients.id, id)).for("update");
+    if (!c) throw new Error("Client introuvable.");
+    const nature = isInternal ? natureKey : null;
+    if (isInternal) {
+      if (!nature) throw new Error("Choisissez la nature des sorties (animation, médical, digital, commercial…).");
+      const n = (await tx.execute<{ active: boolean }>(sql`select active from marketing_output_natures where key = ${nature}`)).rows[0];
+      if (!n?.active) throw new Error("Nature de sortie inconnue ou archivée.");
+      const bulk = (await getSettings()).gestion.bulkSales.clientId;
+      if (bulk === id) throw new Error("Ce client est le client « vente en bloc » : il ne peut pas être un client interne.");
+      const real = (await tx.execute<{ n: number }>(sql`
+        select count(*)::int as n from sales_documents where client_id = ${id}::uuid and type in ('FACTURE', 'AVOIR', 'COMMANDE') and status <> 'BROUILLON'`)).rows[0]?.n ?? 0;
+      if (real) throw new Error(`Ce client porte ${real} facture(s), avoir(s) ou commande(s) : c'est un vrai client, il ne devient pas interne.`);
+    }
+    if (c.isInternal === isInternal && c.nature === nature) return;
+    await tx.update(clients).set({ isInternal, outputNatureKey: nature, ...(isInternal ? { type: "AUTRE" as const } : {}), updatedAt: new Date() }).where(eq(clients.id, id));
+    await audit({ actor, action: "UPDATE", module: "clients", entity: "client", entityId: id, label: c.name, before: { isInternal: c.isInternal, outputNatureKey: c.nature }, after: { isInternal, outputNatureKey: nature } }, tx);
   });
 }
 
@@ -295,7 +323,7 @@ export async function setLegalEntityActive(clientId: string, id: string, active:
  */
 export const MERGE_MOVED_TABLES = [
   "sales", "animations", "client_stock_readings", "activations", "inventory_movements", "pnl_bulk_sales",
-  "client_delivery_addresses", "client_aliases", "client_legal_entities", "prescriptions", "client_visits",
+  "client_delivery_addresses", "client_aliases", "client_legal_entities", "prescriptions", "client_visits", "marketing_expenses",
 ] as const;
 /** Pièces, règlements et relances (une relance porte sur une facture validée) : la fusion est refusée s'il y en a. */
 export const MERGE_SPECIAL_TABLES = ["sales_documents", "payments", "payment_reminders", "user_client_assignments", "client_brand_discounts", "activation_clients", "objectives"] as const;
@@ -304,7 +332,7 @@ const MOVE_LABELS: Record<string, string> = {
   sales: "lignes de vente", animations: "animations", client_stock_readings: "relevés de stock", activations: "activations",
   inventory_movements: "sorties de matériel", pnl_bulk_sales: "ventes en bloc (P&L)",
   client_delivery_addresses: "adresses de livraison", client_aliases: "libellés d'import", client_legal_entities: "raisons sociales", prescriptions: "lignes d'ordonnance",
-  client_visits: "visites commerciales", objectives: "objectifs client",
+  client_visits: "visites commerciales", marketing_expenses: "sorties marketing (charges)", objectives: "objectifs client",
   activation_clients: "activations rattachées", user_client_assignments: "assignations d'utilisateurs", client_brand_discounts: "remises par marque",
   drafts: "pièces en brouillon", tasks: "tâches",
 };

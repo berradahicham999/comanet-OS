@@ -115,8 +115,8 @@ export type ExpenseRow = {
 };
 
 /**
- * Reflet d'une activation dans `marketing_expenses` : une ligne par poste, une par catégorie
- * de matériel. Tant que l'activation n'est pas validée (drapeau `isValidated`), rien n'est
+ * Reflet d'une activation dans `marketing_expenses` : une ligne par poste. Le matériel consommé n'y est
+ * pas reflété (déjà passé en charge à l'achat). Tant que l'activation n'est pas validée (drapeau `isValidated`), rien n'est
  * reflété : une idée ou une proposition n'engage aucun budget dans le Command Center.
  * Validée, chaque poste est ENGAGÉ (devis s'il existe, sinon le prévu) puis DÉPENSÉ à la facture.
  * Une activation annulée retire tout : seule une facture déjà saisie (dépensé > 0) reste,
@@ -149,22 +149,8 @@ export function expenseRowsFor(input: {
       amount, status: spent > 0 ? "SPENT" : "COMMITTED", date: l.date ?? input.date, productId: input.productId,
     });
   }
-  // Matériel sorti : coût réel, dépensé au moment de la sortie, quel que soit le statut.
-  const byCat = new Map<string, { brandId: string; amount: number }>();
-  for (const m of input.materials) {
-    const brandId = m.brandId ?? input.brandId;
-    if (!brandId) continue;
-    const cat = input.inventoryCategories.find((c) => c.key === m.categoryKey)?.budgetCategory ?? "PLV";
-    const key = `${cat}|${brandId}`;
-    const e = byCat.get(key) ?? { brandId, amount: 0 };
-    e.amount += m.quantity * num(m.unitCost);
-    byCat.set(key, e);
-  }
-  for (const [key, e] of byCat) {
-    if (e.amount <= 0) continue;
-    const cat = key.split("|")[0];
-    out.push({ ref: `MATERIAL:${cat}:${e.brandId}`, brandId: e.brandId, category: cat, label: "Matériel consommé (inventaire)", amount: e.amount, status: "SPENT", date: input.date, productId: input.productId });
-  }
+  // Matériel sorti : la charge est née à l'ACHAT du matériel (décision du 12/10/2026). Sa sortie reste tracée et
+  // valorisée dans `activation_materials` (coût complet de l'activation), sans nouvelle dépense : sinon elle compterait deux fois.
   return out;
 }
 

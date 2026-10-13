@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { baseUnitPriceHt, computeDocument } from "@/lib/gestion/calc";
 import { defaultDiscount, sourceRef, type DocType } from "@/lib/gestion/documents-shared";
-import type { EditorData, EditorProduct } from "@/lib/gestion/editor";
+import type { EditorData, EditorMaterial, EditorProduct } from "@/lib/gestion/editor";
 import type { UsualClientProduct } from "@/lib/gestion/usual-products";
+import { Badge } from "@/components/ui";
 
 /**
  * Saisie d'une pièce (commande client, BL, facture directe de services, avoir) — pensée pour le
@@ -16,11 +17,17 @@ import type { UsualClientProduct } from "@/lib/gestion/usual-products";
  * Lignes reprises d'une autre pièce (`sourceLineId`) : figées sur une facture (elles viennent du
  * BL qui a sorti le stock) et sur un avoir ; libres sur un BL préparé depuis une commande, car
  * c'est le BL qui engage (remise, prix, quantités, raison sociale restent à la main).
+ *
+ * Sorties marketing : un BL cherche dans les produits ET dans le matériel marketing (badge Produit / Matériel).
+ * Le matériel est offert (prix 0) ; sur un client interne, rien ne fait de CA et les produits sont valorisés au
+ * coût de revient (charge marketing de la nature du client), avec une alerte si ce coût manque.
  */
 
 export type EditorLine = {
   key: string;
   productId: string | null;
+  /** Article de matériel marketing (jamais avec un produit). */
+  inventoryItemId?: string | null;
   designation: string;
   ref: string | null;
   quantity: string;
@@ -47,6 +54,8 @@ export type EditorInitial = {
   notes: string;
   reasonKey: string | null;
   originDocumentId: string | null;
+  /** Activation alimentée par ce BL (sorties marketing). */
+  activationId?: string | null;
   lines: EditorLine[];
 };
 
@@ -76,12 +85,15 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
   const [reasonKey, setReasonKey] = useState(initial.reasonKey ?? "");
   const [lines, setLines] = useState<EditorLine[]>(initial.lines);
   const [query, setQuery] = useState("");
+  const [activationId, setActivationId] = useState(initial.activationId ?? "");
 
   const client = data.clients.find((c) => c.id === clientId) ?? null;
   const fromOrigin = !!initial.originDocumentId || lines.some((l) => l.sourceLineId);
   // Verrou des lignes et de l'en-tête repris : facture et avoir seulement. Un BL préparé depuis une commande reste libre.
   const locked = fromOrigin && type !== "BL";
   const stocked = type === "BL" || type === "COMMANDE";
+  // Sortie marketing : client interne (échantillons animation, médical, digital, commercial).
+  const internal = type === "BL" && !!client?.isInternal;
 
   // Produits habituels du client (12 mois), chargés dès que le client est connu : commande et BL.
   const [usualFor, setUsualFor] = useState<{ clientId: string; rows: UsualClientProduct[] } | null>(null);
@@ -127,6 +139,12 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
       .filter((p) => p.ean === query.trim() || norm(`${p.name} ${p.ref ?? ""} ${p.brand ?? ""}`).includes(q))
       .slice(0, 10);
   }, [query, data.products, stocked]);
+  // BL : le matériel marketing (goodies, PLV, print) se cherche dans la même liste.
+  const materialMatches = useMemo(() => {
+    const q = norm(query.trim());
+    if (!q || type !== "BL") return [];
+    return data.materials.filter((m) => norm(`${m.name} ${m.sku ?? ""} ${m.brand ?? ""} ${m.categoryLabel}`).includes(q)).slice(0, 6);
+  }, [query, data.materials, type]);
 
   const pickClient = (id: string) => {
     setClientId(id);
@@ -135,6 +153,12 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
     const c = data.clients.find((x) => x.id === id);
     if (c?.paymentModeKey && !paymentModeKey) setPaymentModeKey(c.paymentModeKey);
     // Les remises par défaut suivent le client choisi (lignes saisies, pas les lignes reprises).
+    // Client interne (sortie marketing) : ni prix ni remise.
+    if (c?.isInternal && type === "BL") {
+      setGlobal("0");
+      setLines((ls) => ls.map((l) => (l.productId ? { ...l, unitPriceHt: "0", discountPct: "0" } : l)));
+      return;
+    }
     if (c) setLines((ls) => ls.map((l) => {
       if (l.sourceLineId || !l.productId) return l;
       const p = data.products.find((x) => x.id === l.productId);
@@ -151,8 +175,20 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
     }
     setLines((ls) => [...ls, {
       key: newKey(), productId: p.id, designation: p.name, ref: p.ref, quantity: String(qty), freeQuantity: "0",
-      unitPriceHt: baseUnitPriceHt(p.publicPriceTtc, p.taxRate) ?? "", discountPct: client ? defaultDiscount(client.defaultDiscountPct, p.brandId ? client.brandDiscounts[p.brandId] ?? null : null) : "0",
+      unitPriceHt: internal ? "0" : baseUnitPriceHt(p.publicPriceTtc, p.taxRate) ?? "", discountPct: internal ? "0" : client ? defaultDiscount(client.defaultDiscountPct, p.brandId ? client.brandDiscounts[p.brandId] ?? null : null) : "0",
       taxRate: p.taxRate, sourceLineId: null, sourceNumber: null, returnWarehouseKey: null, maxQty: null,
+    }]);
+  };
+  const addMaterial = (m: EditorMaterial) => {
+    setQuery("");
+    const existing = lines.find((l) => l.inventoryItemId === m.id);
+    if (existing) {
+      update(existing.key, { quantity: String(Number(existing.quantity || "0") + 1) });
+      return;
+    }
+    setLines((ls) => [...ls, {
+      key: newKey(), productId: null, inventoryItemId: m.id, designation: m.name, ref: m.sku, quantity: "1", freeQuantity: "0", unitPriceHt: "0", discountPct: "0",
+      taxRate: data.defaultRate, sourceLineId: null, sourceNumber: null, returnWarehouseKey: null, maxQty: null,
     }]);
   };
   const addFreeLine = () => setLines((ls) => [...ls, {
@@ -165,13 +201,22 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
   const payload = JSON.stringify({
     id: initial.id, type, clientId, legalEntityId: legalEntityId || null, date, site, salesRepId: salesRepId || null, paymentModeKey: paymentModeKey || null, globalDiscountPct: globalDiscountPct || "0",
     notes: notes.trim() || null, reasonKey: type === "AVOIR" ? reasonKey || null : null, originDocumentId: initial.originDocumentId,
+    activationId: type === "BL" ? activationId || null : null,
     lines: lines.map((l) => ({
-      productId: l.productId, designation: l.designation, quantity: l.quantity, freeQuantity: l.freeQuantity || "0", unitPriceHt: l.unitPriceHt,
+      productId: l.productId, inventoryItemId: l.inventoryItemId ?? null, designation: l.designation, quantity: l.quantity, freeQuantity: l.freeQuantity || "0", unitPriceHt: l.unitPriceHt,
       discountPct: l.discountPct || "0", taxRate: l.taxRate, sourceLineId: l.sourceLineId,
       returnWarehouseKey: type === "AVOIR" && reason?.withReturn && l.productId ? l.returnWarehouseKey ?? "PRINCIPAL" : null,
     })),
   });
   const available = (id: string | null) => (id ? data.products.find((p) => p.id === id)?.available ?? null : null);
+  const materialOf = (id: string | null | undefined) => (id ? data.materials.find((m) => m.id === id) ?? null : null);
+  // Coût d'une ligne : matériel au coût de l'article, échantillon (client interne) au coût de revient de la fiche.
+  const lineCost = (l: EditorLine): string | null =>
+    l.inventoryItemId ? materialOf(l.inventoryItemId)?.unitCost ?? null : internal && l.productId ? data.products.find((p) => p.id === l.productId)?.costPrice ?? null : null;
+  const watched = lines.filter((l) => l.inventoryItemId || (internal && l.productId));
+  const missingCost = watched.filter((l) => !lineCost(l) || Number(lineCost(l)) === 0);
+  const outputValue = watched.reduce((a, l) => a + (Number(l.quantity || 0) + Number(l.freeQuantity || 0)) * Number(lineCost(l) ?? 0), 0);
+  const chargedValue = internal ? lines.filter((l) => l.productId).reduce((a, l) => a + (Number(l.quantity || 0) + Number(l.freeQuantity || 0)) * Number(lineCost(l) ?? 0), 0) : 0;
 
   return (
     <form action={action} className="space-y-4 text-[13px]">
@@ -226,6 +271,16 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
             <select className="select h-9" value={paymentModeKey} onChange={(e) => setPaymentModeKey(e.target.value)}><option value="">Selon la fiche client</option>{data.paymentModes.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}</select>
           </label>
         </div>
+        {internal && (
+          <div className="rounded-xl bg-purple-soft border border-purple/30 px-3 py-2 text-[12.5px] space-y-1">
+            <div><b>Sortie marketing — {data.natures[client!.outputNatureKey ?? ""] ?? "nature à compléter"}</b> : ce BL ne fait aucun CA. Les produits deviennent une charge marketing au coût de revient figé à la validation ; le matériel est tracé (déjà passé en charge à l&apos;achat).</div>
+            <label className="flex items-center gap-2"><span className="text-muted">Activation alimentée</span>
+              <select className="select h-8 max-w-sm" value={activationId} onChange={(e) => setActivationId(e.target.value)}>
+                <option value="">Aucune</option>{data.activations.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.date}</option>)}
+              </select>
+            </label>
+          </div>
+        )}
         {type === "AVOIR" && (
           <label className="block max-w-sm"><span className="label block mb-1">Motif de l&apos;avoir *</span>
             <select className="select h-9" value={reasonKey} onChange={(e) => setReasonKey(e.target.value)} required>
@@ -267,15 +322,24 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
         )}
         {!locked && !financial && (
           <div className="relative">
-            <input className="input h-10" placeholder={stocked ? "Ajouter un article : nom, référence, marque ou code-barres…" : "Ajouter un service ou des frais…"} value={query} onChange={(e) => setQuery(e.target.value)}
+            <input className="input h-10" placeholder={type === "BL" ? "Ajouter un produit ou du matériel (goodie, PLV) : nom, référence, marque, code-barres…" : stocked ? "Ajouter un article : nom, référence, marque ou code-barres…" : "Ajouter un service ou des frais…"} value={query} onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (productMatches[0]) addProduct(productMatches[0]); } }} />
-            {productMatches.length > 0 && (
+            {(productMatches.length > 0 || materialMatches.length > 0) && (
               <ul className="absolute z-20 left-0 right-0 mt-1 card p-1 max-h-80 overflow-auto shadow-lg">
                 {productMatches.map((p) => (
                   <li key={p.id}><button type="button" className="w-full text-left px-3 py-2 rounded-lg hover:bg-surface-2 flex items-center gap-2" onClick={() => addProduct(p)}>
+                    {type === "BL" && <Badge tone="blue" className="text-[10.5px] shrink-0">Produit</Badge>}
                     <span className="min-w-0 flex-1"><span className="font-medium">{p.name}</span><span className="text-faint text-[11.5px]"> {[p.ref, p.brand].filter(Boolean).join(" · ")}</span></span>
                     {p.available !== null && <span className={`text-[11.5px] tabular-nums ${Number(p.available) > 0 ? "text-muted" : "text-red"}`}>stock {Number(p.available).toLocaleString("fr-FR")}</span>}
                     {p.publicPriceTtc && <span className="text-[11.5px] text-faint tabular-nums">PPH {fmt(p.publicPriceTtc)}</span>}
+                  </button></li>
+                ))}
+                {materialMatches.map((m) => (
+                  <li key={m.id}><button type="button" className="w-full text-left px-3 py-2 rounded-lg hover:bg-surface-2 flex items-center gap-2" onClick={() => addMaterial(m)}>
+                    <Badge tone="purple" className="text-[10.5px] shrink-0">Matériel</Badge>
+                    <span className="min-w-0 flex-1"><span className="font-medium">{m.name}</span><span className="text-faint text-[11.5px]"> {[m.categoryLabel, m.brand].filter(Boolean).join(" · ")}</span></span>
+                    <span className={`text-[11.5px] tabular-nums ${m.stock > 0 ? "text-muted" : "text-red"}`}>stock {m.stock.toLocaleString("fr-FR")}</span>
+                    <span className="text-[11.5px] text-faint tabular-nums">offert</span>
                   </button></li>
                 ))}
               </ul>
@@ -289,6 +353,27 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
         ) : (
           <ul className="divide-y divide-line">
             {lines.map((l, i) => {
+              const mat = materialOf(l.inventoryItemId);
+              if (l.inventoryItemId) {
+                const shortM = !!mat && Number(l.quantity || 0) > mat.stock;
+                const cost = lineCost(l);
+                return (
+                  <li key={l.key} className="py-3 space-y-2">
+                    <div className="flex items-start gap-2">
+                      <span className="text-faint text-[11px] w-5 pt-1 tabular-nums">{i + 1}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium flex items-center gap-1.5 flex-wrap"><Badge tone="purple" className="text-[10.5px]">Matériel</Badge>{l.designation}<span className="text-faint text-[11.5px] font-normal">{[mat?.categoryLabel, mat?.brand, l.ref].filter(Boolean).join(" · ")}</span></div>
+                        <div className={`text-[11.5px] ${shortM ? "text-red" : "text-faint"}`}>Stock matériel : {mat ? mat.stock.toLocaleString("fr-FR") : "—"}{shortM ? " — insuffisant" : ""} · offert (aucun CA){cost && Number(cost) > 0 ? ` · valeur ${fmt(String(Number(cost) * Number(l.quantity || 0)))} MAD au coût de l'article` : " · coût de l'article à 0 : sortie non valorisée"}</div>
+                      </div>
+                      <button type="button" className="btn-ghost btn-sm text-red" onClick={() => remove(l.key)} aria-label="Retirer la ligne">✕</button>
+                    </div>
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 pl-7">
+                      <label className="block"><span className="label block mb-0.5">Qté ({mat?.unit ?? "u."})</span>
+                        <input className="input h-9 text-right" inputMode="numeric" value={l.quantity} onChange={(e) => update(l.key, { quantity: e.target.value.replace(/[^0-9]/g, "") })} /></label>
+                    </div>
+                  </li>
+                );
+              }
               const stock = stocked ? available(l.productId) : null;
               const frozen = !!l.sourceLineId && locked;
               const short = stock !== null && Number(l.quantity || 0) + Number(l.freeQuantity || 0) > Number(stock);
@@ -303,6 +388,12 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
                         <input className="input h-9" placeholder="Désignation" value={l.designation} onChange={(e) => update(l.key, { designation: e.target.value })} required />
                       )}
                       {stock !== null && <div className={`text-[11.5px] ${short ? "text-red" : "text-faint"}`}>Stock dépôt principal : {Number(stock).toLocaleString("fr-FR")}{short ? " — insuffisant" : ""}</div>}
+                      {internal && l.productId && (() => {
+                        const c = lineCost(l);
+                        return c && Number(c) > 0
+                          ? <div className="text-[11.5px] text-faint">Échantillon : {fmt(String((Number(l.quantity || 0) + Number(l.freeQuantity || 0)) * Number(c)))} MAD au coût de revient ({fmt(c)} / u.)</div>
+                          : <div className="text-[11.5px] text-orange">Coût de revient {c ? "à 0" : "inconnu"} : la sortie ne sera pas valorisée (renseignez le prix d&apos;achat de la fiche produit).</div>;
+                      })()}
                     </div>
                     <button type="button" className="btn-ghost btn-sm text-red" onClick={() => remove(l.key)} aria-label="Retirer la ligne">✕</button>
                   </div>
@@ -311,10 +402,14 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
                       <input className="input h-9 text-right" inputMode="decimal" value={l.quantity} onChange={(e) => update(l.key, { quantity: e.target.value.replace(",", ".") })} /></label>
                     {type !== "AVOIR" && <label className="block"><span className="label block mb-0.5">UG</span>
                       <input className="input h-9 text-right" inputMode="decimal" value={l.freeQuantity} disabled={frozen} onChange={(e) => update(l.key, { freeQuantity: e.target.value.replace(",", ".") })} /></label>}
+                    {internal ? (
+                      <div className="block col-span-2"><span className="label block mb-0.5">Prix</span><div className="h-9 flex items-center text-muted text-[12px]">sortie marketing : sans prix</div></div>
+                    ) : (<>
                     <label className="block"><span className="label block mb-0.5">P.U. HT</span>
                       <input className="input h-9 text-right" inputMode="decimal" value={l.unitPriceHt} disabled={frozen} onChange={(e) => update(l.key, { unitPriceHt: e.target.value.replace(",", ".") })} /></label>
                     <label className="block"><span className="label block mb-0.5">Remise %</span>
                       <input className="input h-9 text-right" inputMode="decimal" value={l.discountPct} disabled={frozen} onChange={(e) => update(l.key, { discountPct: e.target.value.replace(",", ".") })} /></label>
+                    </>)}
                     {!l.productId && !l.sourceLineId ? (
                       <label className="block"><span className="label block mb-0.5">TVA %</span>
                         <input className="input h-9 text-right" inputMode="decimal" value={l.taxRate} onChange={(e) => update(l.key, { taxRate: e.target.value.replace(",", ".") })} /></label>
@@ -336,7 +431,7 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
       {/* Pied */}
       <div className="grid lg:grid-cols-[1fr_320px] gap-4">
         <div className="card p-4 space-y-3">
-          {!locked && (
+          {!locked && !internal && (
             <label className="block max-w-40"><span className="label block mb-1">Remise globale %</span>
               <input className="input h-9 text-right" inputMode="decimal" value={globalDiscountPct} onChange={(e) => setGlobal(e.target.value.replace(",", "."))} /></label>
           )}
@@ -345,6 +440,13 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
             <textarea className="input min-h-16 py-2" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} /></label>
         </div>
         <div className="card p-4 text-[13px] space-y-1 tabular-nums">
+          {watched.length > 0 && (
+            <div className="pb-2 mb-1 border-b border-line text-[12.5px] space-y-0.5">
+              {internal && <div className="flex justify-between"><span className="text-muted">Charge marketing (échantillons)</span><span>{fmt(String(chargedValue))}</span></div>}
+              <div className="flex justify-between"><span className="text-muted">Valeur sortie au coût</span><span>{fmt(String(outputValue))}</span></div>
+              {missingCost.length > 0 && <div className="text-orange">{missingCost.length} ligne(s) sans coût : non valorisée(s).</div>}
+            </div>
+          )}
           {calc ? (
             <>
               <div className="flex justify-between"><span className="text-muted">Total HT</span><span>{fmt(calc.grossHt)}</span></div>

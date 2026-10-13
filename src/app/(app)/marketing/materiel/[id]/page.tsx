@@ -4,7 +4,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { requireActivationAccess, activationScope, canDoActivation } from "@/lib/activations/access";
 import { activationRefs } from "@/lib/activations/refs";
-import { getInventoryItem, itemMovements, MOVEMENT_LABELS } from "@/lib/activations/inventory";
+import { getInventoryItem, itemConsumptionByNature, itemMovements, MOVEMENT_LABELS } from "@/lib/activations/inventory";
 import { INVENTORY_STATUS_LABELS, INVENTORY_STATUS_TONES, safeTone } from "@/lib/activations/shared";
 import { getSettings } from "@/lib/settings";
 import { listBrands } from "@/lib/users";
@@ -25,10 +25,11 @@ export default async function MaterielItemPage(props: { params: Promise<{ id: st
   const todayIso = iso(today());
   const item = await getInventoryItem(id, todayIso, settings.activations.inventoryDormantDays);
   if (!item) notFound();
-  const [moves, photos, products, clients] = await Promise.all([
+  const [moves, photos, products, clients, consumption] = await Promise.all([
     itemMovements(id), listAssets({ inventoryItemId: id }),
     db.execute<{ id: string; name: string }>(sql`select id, name from products where active ${item.brandId ? sql`and brand_id = ${item.brandId}::uuid` : sql``} order by name`),
     db.execute<{ id: string; name: string; city: string | null }>(sql`select id, name, city from clients where active order by name limit 600`),
+    itemConsumptionByNature(id),
   ]);
   const photo = photos.find((p) => p.kind === "PHOTO");
   const visibleBrands = brands.filter((b) => b.active && (!scope.brandIds || scope.brandIds.includes(b.id)) || b.id === item.brandId);
@@ -62,6 +63,17 @@ export default async function MaterielItemPage(props: { params: Promise<{ id: st
             )}
           </Card>
 
+          {consumption.length > 0 && (
+            <Card title="Consommation par BL, par nature">
+              <div className="text-[13px] space-y-1">
+                {consumption.map((c) => (
+                  <div key={c.nature} className="flex justify-between gap-3"><span>{c.label}</span><span className="tabular-nums">{c.quantity} {item.unit} · {fmtMAD(c.value)}</span></div>
+                ))}
+                <p className="text-[11.5px] text-faint pt-1">Sorties par bon de livraison (contre-mouvements des BL annulés déduits), valorisées au coût figé. Pour information : la charge du matériel est passée à l&apos;achat.</p>
+              </div>
+            </Card>
+          )}
+
           <Card title={`Mouvements (${moves.length})`} pad={false}>
             <div className="table-wrap"><table className="w-full text-[12.5px]">
               <thead><tr className="text-left text-muted"><th className="px-3 py-2">Date</th><th className="px-3 py-2">Type</th><th className="px-3 py-2 text-right">Quantité</th><th className="px-3 py-2 text-right">Coût unit.</th><th className="px-3 py-2">Lié à</th><th className="px-3 py-2">Motif</th><th className="px-3 py-2">Par</th></tr></thead>
@@ -71,7 +83,12 @@ export default async function MaterielItemPage(props: { params: Promise<{ id: st
                   <td className="px-3 py-1.5"><Badge tone={m.type === "ENTREE" ? "green" : m.type === "SORTIE" ? "orange" : "gray"}>{MOVEMENT_LABELS[m.type as keyof typeof MOVEMENT_LABELS] ?? m.type}</Badge></td>
                   <td className={`px-3 py-1.5 text-right tabular-nums ${m.quantity < 0 ? "text-red" : ""}`}>{m.quantity > 0 ? `+${m.quantity}` : m.quantity}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{m.unitCost != null ? fmtMAD(m.unitCost) : "—"}</td>
-                  <td className="px-3 py-1.5">{m.activationId ? <Link href={`/marketing/activations/${m.activationId}`} className="hover:underline">{m.activation}</Link> : m.client ?? "—"}</td>
+                  <td className="px-3 py-1.5">
+                    {m.documentId ? <Link href={`/gestion/pieces/${m.documentId}`} className="hover:underline font-mono">{m.documentNumber ?? "BL"}</Link> : null}
+                    {m.documentId && (m.client || m.activationId) ? " · " : ""}
+                    {m.activationId ? <Link href={`/marketing/activations/${m.activationId}`} className="hover:underline">{m.activation}</Link> : m.client ?? (m.documentId ? "" : "—")}
+                    {m.reversed && <Badge tone="gray" className="ml-1">annulé</Badge>}
+                  </td>
                   <td className="px-3 py-1.5">{m.reason ?? "—"}</td>
                   <td className="px-3 py-1.5 text-muted">{m.createdBy ?? "—"}</td>
                 </tr>

@@ -51,7 +51,6 @@ export function PnlTabs({ current, year }: { current: string; year?: number }) {
   return <Tabs current={current} tabs={[
     { href: "/gestion/pnl", label: "Compte de résultat" },
     { href: "/gestion/pnl/charges", label: "Charges" },
-    { href: "/gestion/pnl/ventes-bloc", label: "Ventes en bloc" },
     { href: "/gestion/pnl/regles", label: "Règles" },
   ].map((t) => ({ ...t, href: t.href === current ? t.href : t.href + (t.href.endsWith("regles") ? "" : q) }))} />;
 }

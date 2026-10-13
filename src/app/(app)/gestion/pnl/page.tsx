@@ -27,7 +27,7 @@ export default async function PnlPage(props: { searchParams: Promise<{ year?: st
   const k = s.kpis, p = s.previous.kpis;
   const partial = year === curYear && to === now.getUTCMonth() + 1;
   const prevHasCharges = s.previous.quality.monthsWithoutCharges.length < to;
-  const COMPARABLE = /^(ca|cogs|marge_brute|taux_marge|marketing|revente_distributeur)/;
+  const COMPARABLE = /^(ca|cogs|marge_brute|taux_marge|marketing|mkt_|contribution|revente_distributeur)/;
   const previous: Record<string, number | undefined> = {};
   for (const l of s.previous.lines) if (prevHasCharges || COMPARABLE.test(l.key)) previous[l.key] = l.total;
 
@@ -45,8 +45,8 @@ export default async function PnlPage(props: { searchParams: Promise<{ year?: st
       <PageHeader
         eyebrow="Gestion commerciale"
         title={`P&L ${year}${brandName ? ` — ${brandName}` : ""}`}
-        subtitle={`De janvier à ${MONTHS_LONG[to - 1]}${partial ? " (mois en cours)" : ""}. CA HT de COMANET : ventes directes, ventes en bloc aux distributeurs et commissions de prestation ; la revente des distributeurs n'est pas notre CA.`}
-        actions={<><Link href={`/gestion/pnl/charges?year=${year}&new=1`} className="btn-secondary btn-sm">+ Charge</Link><Link href={`/gestion/pnl/ventes-bloc?year=${year}&new=1`} className="btn-primary btn-sm">+ Vente en bloc</Link></>}
+        subtitle={`De janvier à ${MONTHS_LONG[to - 1]}${partial ? " (mois en cours)" : ""}. CA net HT de COMANET : ventes directes, ventes en bloc (factures − avoirs réels) et commissions de prestation ; la revente des distributeurs n'est pas notre CA. Cliquez un montant pour voir ses pièces.`}
+        actions={<Link href={`/gestion/pnl/charges?year=${year}&new=1`} className="btn-secondary btn-sm">+ Charge</Link>}
       >
         <PnlTabs current="/gestion/pnl" year={year} />
       </PageHeader>
@@ -73,11 +73,12 @@ export default async function PnlPage(props: { searchParams: Promise<{ year?: st
 
       {brandId && <div className="mb-4 rounded-2xl bg-surface-2 border border-line px-4 py-2.5 text-[12.5px] text-muted">Vue marque : CA, coût, marketing et charges <b>affectées à la marque</b>. Les frais communs (loyer, salaires non affectés…) ne sont pas répartis d’office — la contribution de la marque est ce qu’elle apporte pour les couvrir.</div>}
 
-      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-3 mb-4">
         <Kpi label="CA HT" value={fmtMAD(k.revenue, { compact: true })} delta={delta(k.revenue, p.revenue)} deltaLabel="vs N-1" />
         <Kpi label="Marge brute" value={fmtMAD(k.grossMargin, { compact: true })} sub={k.grossMarginPct !== null ? `${fmtPct(k.grossMarginPct, 1)} du CA` : "—"} />
-        <Kpi label="Marketing" value={fmtMAD(k.marketing, { compact: true })} sub={k.revenue ? `${fmtPct((k.marketing / k.revenue) * 100, 1)} du CA` : "—"} invert delta={delta(k.marketing, p.marketing)} />
-        <Kpi label="Résultat d'exploitation" value={fmtMAD(k.operatingResult, { compact: true })} tone={k.operatingResult < 0 ? "red" : "green"} sub={noCharges ? "aucune charge saisie" : undefined} />
+        <Kpi label="Marketing réel" value={fmtMAD(k.marketing, { compact: true })} sub={k.revenue ? `${fmtPct((k.marketing / k.revenue) * 100, 1)} du CA` : "—"} invert delta={delta(k.marketing, p.marketing)} />
+        <Kpi label="Contribution marketing" value={fmtMAD(k.marketingContribution, { compact: true })} tone={k.marketingContribution < 0 ? "red" : undefined} sub={k.revenue ? `${fmtPct((k.marketingContribution / k.revenue) * 100, 1)} du CA` : "—"} />
+        <Kpi label="EBITDA" value={fmtMAD(k.operatingResult, { compact: true })} tone={k.operatingResult < 0 ? "red" : "green"} sub={noCharges ? "aucune charge saisie" : undefined} />
         <Kpi label="Résultat net" value={fmtMAD(k.netResult, { compact: true })} tone={k.netResult < 0 ? "red" : "green"} sub={k.netMarginPct !== null ? `${fmtPct(k.netMarginPct, 1)} du CA` : "—"} />
         <Kpi label="Point mort mensuel" value={k.breakEvenMonthly !== null ? fmtMAD(k.breakEvenMonthly, { compact: true }) : "—"} sub={k.monthlyFixed ? `CA pour couvrir ${fmtMAD(k.monthlyFixed, { compact: true })} de fixes/mois` : "saisir les charges fixes"} />
       </div>
@@ -91,7 +92,7 @@ export default async function PnlPage(props: { searchParams: Promise<{ year?: st
             {q.missingCost.length > 0 && (
               <li className="flex gap-2"><Badge tone="red">Coût</Badge><span>{fmtMAD(q.missingCost.reduce((a, x) => a + x.amount, 0))} de ventes directes sans prix d’achat ({q.missingCost.map((x) => `${s.brandList.find((b) => b.id === x.brandId)?.name ?? "sans marque"} ${fmtMAD(x.amount, { compact: true })}`).join(", ")}) : leur coût n’est pas compté. <Link href="/produits" className="underline">Renseigner les prix d’achat</Link>.</span></li>
             )}
-            {q.bulkWithoutCost > 0 && <li className="flex gap-2"><Badge tone="red">Coût</Badge><span>{fmtMAD(q.bulkWithoutCost)} de ventes en bloc sans coût d’achat. <Link href={`/gestion/pnl/ventes-bloc?year=${year}`} className="underline">Compléter</Link>.</span></li>}
+            {q.bulkWithoutCost > 0 && <li className="flex gap-2"><Badge tone="red">Coût</Badge><span>{fmtMAD(q.bulkWithoutCost)} de ventes en bloc sur des articles sans prix d’achat : leur coût n’est pas compté. <Link href="/produits" className="underline">Renseigner les prix d’achat</Link>.</span></li>}
             {q.unknownSites.length > 0 && <li className="flex gap-2"><Badge tone="yellow">Site</Badge><span>Sites non classés, exclus du P&L : {q.unknownSites.map((x) => `${x.site} (${fmtMAD(x.amount, { compact: true })})`).join(", ")}. <Link href="/gestion/pnl/regles" className="underline">Les classer</Link>.</span></li>}
           </ul>
         </Card>
@@ -99,10 +100,10 @@ export default async function PnlPage(props: { searchParams: Promise<{ year?: st
 
       <Card className="mb-4" title="Évolution mensuelle"><PnlMonthlyChart data={chart} /></Card>
 
-      <div className="mb-6"><PnlTable lines={s.lines} lastMonth={to} previous={previous} revenueTotal={k.revenue} /></div>
+      <div className="mb-6"><PnlTable lines={s.lines} lastMonth={to} previous={previous} revenueTotal={k.revenue} drillBase={`/gestion/pnl/detail?year=${year}${brandId ? `&brand=${brandId}` : ""}`} /></div>
       {!prevHasCharges && <p className="-mt-4 mb-6 text-[12px] text-faint">N-1 : comparable pour le CA, la marge et le marketing ; pas pour les charges (aucune charge saisie sur {year - 1}).</p>}
 
-      <Section title="Contribution par marque" description="CA COMANET, coût des ventes, marketing et charges affectées à la marque. Ce qui reste couvre les frais communs.">
+      <Section title="Contribution par marque" description="CA COMANET, coût des ventes, marketing réel (détail au survol) et charges affectées à la marque. Ce qui reste couvre les frais communs.">
         <div className="card overflow-x-auto">
           <table className="tbl w-full text-[13px] tabular-nums">
             <thead><tr><th className="text-left">Marque</th><th className="text-right">CA HT</th><th className="text-right">dont commission</th><th className="text-right">Coût des ventes</th><th className="text-right">Marge brute</th><th className="text-right">Marketing</th><th className="text-right">Charges affectées</th><th className="text-right">Contribution</th><th className="text-right">% CA</th></tr></thead>
@@ -114,7 +115,7 @@ export default async function PnlPage(props: { searchParams: Promise<{ year?: st
                   <td className="text-right text-muted">{b.commission ? fmtMAD(b.commission, { suffix: false }) : "—"}</td>
                   <td className="text-right">{fmtMAD(b.cogs, { suffix: false })}</td>
                   <td className="text-right">{fmtMAD(b.grossMargin, { suffix: false })}</td>
-                  <td className="text-right">{fmtMAD(b.marketing, { suffix: false })}</td>
+                  <td className="text-right" title={Object.entries(b.marketingBreakdown).filter(([, v]) => Math.abs(v) >= 0.5).map(([k2, v]) => `${s.lines.find((l) => l.key === `mkt_${k2}`)?.label ?? k2} : ${fmtMAD(v)}`).join("\n")}>{fmtMAD(b.marketing, { suffix: false })}</td>
                   <td className="text-right">{b.charges ? fmtMAD(b.charges, { suffix: false }) : "—"}</td>
                   <td className={`text-right font-semibold ${b.contribution < 0 ? "text-red" : ""}`}>{fmtMAD(b.contribution, { suffix: false })}</td>
                   <td className="text-right text-muted">{b.revenue ? fmtPct((b.contribution / b.revenue) * 100, 0) : "—"}</td>

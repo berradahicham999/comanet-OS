@@ -90,9 +90,9 @@ describe("Budget d'une activation", () => {
     const cancelled = expenseRowsFor({ status: st("ANNULEE"), brandId: "b1", productId: null, date: "2026-10-01", lines, costItems, materials: [], inventoryCategories: invCats });
     assert.deepEqual(cancelled.map((r) => [r.ref, r.amount, r.status]), [["LINE:1", 5200, "SPENT"]]);
   });
-  test("le matériel consommé est une dépense par catégorie d'inventaire et par marque", () => {
+  test("le matériel consommé n'est pas une dépense : il est passé en charge à l'achat (jamais compté deux fois)", () => {
     const rows = expenseRowsFor({ status: st("VALIDEE"), brandId: "b1", productId: null, date: "2026-10-01", lines: [], costItems, materials: [{ quantity: 10, unitCost: 25, categoryKey: "PLV", brandId: null }, { quantity: 4, unitCost: 25, categoryKey: "PLV", brandId: "b2" }], inventoryCategories: invCats });
-    assert.deepEqual(rows.map((r) => [r.ref, r.brandId, r.amount, r.status]), [["MATERIAL:PLV:b1", "b1", 250, "SPENT"], ["MATERIAL:PLV:b2", "b2", 100, "SPENT"]]);
+    assert.deepEqual(rows, []);
   });
   test("une ligne dont la marque est inconnue n'est pas reflétée (jamais de dépense sans marque)", () => {
     const rows = expenseRowsFor({ status: st("VALIDEE"), brandId: null, productId: null, date: "2026-10-01", lines: [line("1", "LIEU", 100)], costItems, materials: [], inventoryCategories: invCats });

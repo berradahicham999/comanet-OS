@@ -602,6 +602,18 @@ export const productAliases = pgTable(
 /* ------------------------------------------------------------------ */
 
 /** Groupe (enseigne) : rassemble plusieurs raisons sociales distinctes sous une même entité commerciale. */
+/**
+ * Natures de sortie marketing (migration 0052) : ANIMATION, MEDICAL, DIGITAL (influence + UGC), COMMERCIAL…
+ * Référentiel modifiable dans Paramètres → Gestion. Porté par un client interne (`clients.output_nature_key`) et
+ * par chaque charge d'échantillon née d'un BL (`marketing_expenses.output_nature`).
+ */
+export const marketingOutputNatures = pgTable("marketing_output_natures", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  sort: integer("sort").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+});
+
 export const clientGroups = pgTable("client_groups", {
   id: uuid("id").primaryKey().defaultRandom(),
   nameKey: text("name_key").notNull().unique(),
@@ -667,6 +679,13 @@ export const clients = pgTable(
     gpsStatus: text("gps_status").$type<"A_CONFIRMER" | "VALIDEE">(),
     gpsValidatedAt: timestamp("gps_validated_at", { withTimezone: true }),
     gpsValidatedBy: uuid("gps_validated_by").references((): AnyPgColumn => users.id, { onDelete: "set null" }),
+    /*
+     * Client interne « sorties marketing » (migration 0052) : un BL sur ce client ne produit jamais de CA ; ses lignes
+     * produit deviennent des charges d'échantillons de la nature ci-dessous (`src/lib/gestion/marketing-outputs.ts`).
+     * Exclu des ventes, segments et classements (`nonCommercialClientIds()`).
+     */
+    isInternal: boolean("is_internal").notNull().default(false),
+    outputNatureKey: text("output_nature_key").references((): AnyPgColumn => marketingOutputNatures.key, { onUpdate: "cascade" }),
     updatedAt: timestamp("updated_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1071,6 +1090,8 @@ export const salesDocuments = pgTable(
     amountInWords: text("amount_in_words"),
     reasonKey: text("reason_key").references(() => creditReasons.key, { onUpdate: "cascade" }),
     originDocumentId: uuid("origin_document_id").references((): AnyPgColumn => salesDocuments.id, { onDelete: "restrict" }),
+    /** Activation que ce BL de sortie marketing alimente (facultatif, migration 0052). */
+    activationId: uuid("activation_id").references((): AnyPgColumn => activations.id, { onDelete: "set null" }),
     notes: text("notes"),
     approvals: jsonb("approvals").$type<{ code: string; label: string; by: string; byId: string | null; at: string }[]>().notNull().default([]),
     approvalRequestedAt: timestamp("approval_requested_at", { withTimezone: true }),
@@ -1109,6 +1130,10 @@ export const salesDocumentLines = pgTable(
     documentId: uuid("document_id").notNull().references(() => salesDocuments.id, { onDelete: "cascade" }),
     position: integer("position").notNull().default(0),
     productId: uuid("product_id").references(() => products.id, { onDelete: "restrict" }),
+    /** Article de matériel marketing (PLV, goodie, print…) : une ligne porte un produit OU un article, jamais les deux (contrainte en base). */
+    inventoryItemId: uuid("inventory_item_id").references((): AnyPgColumn => inventoryItems.id, { onDelete: "restrict" }),
+    /** Coût unitaire figé à la validation (sorties marketing et matériel) ; NULL = non figé ou inconnu. */
+    unitCost: numeric("unit_cost", { precision: 12, scale: 2 }),
     lotId: uuid("lot_id").references(() => stockLots.id, { onDelete: "restrict" }),
     warehouseKey: text("warehouse_key").notNull().default("PRINCIPAL").references(() => warehouses.key, { onUpdate: "cascade" }),
     ref: text("ref"),
@@ -1138,6 +1163,8 @@ export const salesDocumentLines = pgTable(
     index("sales_document_lines_document_idx").on(t.documentId, t.position),
     index("sales_document_lines_product_idx").on(t.productId),
     index("sales_document_lines_source_idx").on(t.sourceLineId),
+    index("sales_document_lines_item_idx").on(t.inventoryItemId),
+    check("sales_document_lines_product_or_item_ck", sql`${t.productId} is null or ${t.inventoryItemId} is null`),
   ],
 );
 
@@ -2819,12 +2846,17 @@ export const inventoryMovements = pgTable(
     clientId: uuid("client_id").references(() => clients.id, { onDelete: "set null" }),
     reason: text("reason"),
     date: date("date").notNull(),
+    /** Ligne de BL qui a fait sortir l'article (migration 0052). */
+    documentLineId: uuid("document_line_id").references((): AnyPgColumn => salesDocumentLines.id, { onDelete: "restrict" }),
+    /** Contre-mouvement : annulation du mouvement visé (BL annulé). */
+    reversalOf: uuid("reversal_of").references((): AnyPgColumn => inventoryMovements.id, { onDelete: "restrict" }),
     createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
     importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("inventory_movements_item_idx").on(t.itemId, t.date),
+    index("inventory_movements_document_line_idx").on(t.documentLineId),
     index("inventory_movements_activation_idx").on(t.activationId),
     index("inventory_movements_client_idx").on(t.clientId),
     index("inventory_movements_user_idx").on(t.createdById),
@@ -2862,12 +2894,19 @@ export const marketingExpenses = pgTable(
       .references(() => brands.id, { onDelete: "cascade" }),
     campaignId: uuid("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
     activationId: uuid("activation_id").references(() => activations.id, { onDelete: "set null" }),
-    /** Origine dans l'activation (`LINE:<id>` ou `MATERIAL:<catégorie>`) : synchronisation idempotente. */
+    /** Origine dans l'activation (`LINE:<id>`) : synchronisation idempotente. */
     activationRef: text("activation_ref"),
     collaborationId: uuid("collaboration_id").references(() => collaborations.id, { onDelete: "set null" }),
     /** Action du plan marketing que cette dépense réalise (Marketing OS) ; NULL pour les dépenses antérieures. */
     actionId: uuid("action_id").references((): AnyPgColumn => marketingActions.id, { onDelete: "set null" }),
     productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
+    /*
+     * Charge d'échantillon née d'un BL de sortie marketing (migration 0052) — seul écrivain :
+     * `src/lib/gestion/marketing-outputs.ts`. Client servi et nature de la sortie (ANIMATION, MEDICAL…).
+     */
+    documentLineId: uuid("document_line_id").references((): AnyPgColumn => salesDocumentLines.id, { onDelete: "restrict" }),
+    clientId: uuid("client_id").references((): AnyPgColumn => clients.id, { onDelete: "set null" }),
+    outputNature: text("output_nature"),
     category: budgetCategoryEnum("category").notNull(),
     label: text("label").notNull(),
     amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
@@ -2886,6 +2925,8 @@ export const marketingExpenses = pgTable(
     index("marketing_expenses_collaboration_idx").on(t.collaborationId),
     index("marketing_expenses_product_idx").on(t.productId),
     index("marketing_expenses_action_idx").on(t.actionId),
+    uniqueIndex("marketing_expenses_document_line_uq").on(t.documentLineId).where(sql`${t.documentLineId} is not null`),
+    index("marketing_expenses_client_idx").on(t.clientId),
   ],
 );
 

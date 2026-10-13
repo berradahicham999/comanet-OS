@@ -10,7 +10,7 @@ import { getSettings } from "@/lib/settings";
 import type { DuplicateCandidate } from "@/lib/gestion/clients-shared";
 import {
   addDeliveryAddress, createClient, deleteClient, findDuplicates, mergeClients, removeDeliveryAddress, saveLegalEntity, setBrandDiscount, setClientArchived,
-  setClientBlocked, setLegalEntityActive, updateClientLegal, type ClientLegalInput, type ClientType,
+  setClientBlocked, setClientInternal, setLegalEntityActive, updateClientLegal, type ClientLegalInput, type ClientType,
 } from "@/lib/gestion/clients";
 
 /**
@@ -112,6 +112,19 @@ export async function blockClientAction(fd: FormData) {
   }
   done(id);
   redirect(`/clients/${id}?tab=infos`);
+}
+
+/** Client interne « sorties marketing » : il sort du CA et des analyses, d'où le droit « Valider ». */
+export async function internalClientAction(fd: FormData) {
+  const { user, id } = await guard("validate", fd);
+  try {
+    await setClientInternal(id, fd.get("isInternal") === "1", str(fd, "natureKey"), actor(user));
+  } catch (e) {
+    redirect(`/clients/${id}?tab=infos&error=${errorParam(e)}`);
+  }
+  done(id);
+  revalidatePath("/gestion/pnl");
+  redirect(`/clients/${id}?tab=infos&done=1`);
 }
 
 export async function archiveClientAction(fd: FormData) {
