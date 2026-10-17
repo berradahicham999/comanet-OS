@@ -264,8 +264,10 @@ export type GestionSettings = {
   /**
    * Ventes en bloc (P&L) : le client facturé en bloc à l'arrivage (COSPHARMA STE). Son CA = factures − avoirs
    * réels ; il est exclu des analyses clients. NULL = aucune vente en bloc. Jamais un id en dur dans le code.
+   * `simulationFrom` : avant la bascule, ses factures et avoirs en simulation datés de ce jour ou après comptent
+   * aussi (nul = jamais) ; les factures reprises de Sage couvrent la période d'avant.
    */
-  bulkSales: { clientId: string | null };
+  bulkSales: { clientId: string | null; simulationFrom: string | null };
   /**
    * Sorties marketing par BL (clients internes). `from` : date de démarrage — à partir de cette date, les
    * échantillons remis en visite (`sample_movements`) ne sont plus valorisés dans le budget, la charge naît au BL
@@ -335,7 +337,7 @@ export const DEFAULT_GESTION: GestionSettings = {
   readinessWindowDays: 365,
   cutover: { mode: "OFF", date: null, sites: ["COMANET", "DESK DIGITAL"] },
   salesFromDocuments: { from: null, brandIds: [] },
-  bulkSales: { clientId: null },
+  bulkSales: { clientId: null, simulationFrom: null },
   marketingOutputs: { from: null, insufficientStock: "BLOCK" },
   invoiceModel: "PPH_REMISE",
   discountTolerancePct: 0,

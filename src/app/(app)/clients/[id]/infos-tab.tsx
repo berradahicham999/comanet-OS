@@ -104,7 +104,7 @@ export async function ClientInfosTab({ client, billing, sp }: {
 
           {isBulk && (
             <Card title="Vente en bloc">
-              <p className="text-[13px] text-muted">Client « vente en bloc » (Paramètres → Gestion) : ses factures moins ses avoirs réels font le CA en bloc du P&L ; il est exclu des ventes, segments et classements.</p>
+              <p className="text-[13px] text-muted">Client « vente en bloc » (Paramètres → Gestion) : ses factures moins ses avoirs font le CA en bloc du P&L ; il est exclu des ventes, segments et classements.</p>
             </Card>
           )}
 

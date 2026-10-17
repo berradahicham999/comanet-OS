@@ -7,7 +7,7 @@
  * Couvre : contrainte « produit OU matériel » ; BL « échantillons digital » avec un produit et un goodie (stock produit et
  * stock matériel diminuent, aucune vente, une seule charge d'échantillon au coût figé) ; coût à 0 signalé ; annulation
  * (stocks rétablis, charge retirée) ; goodie offert à un vrai client (tracé, sans charge) ; ventes en bloc = factures −
- * avoirs réels (simulation exclue, `pnl_bulk_sales` ignorée, aucune vente projetée) ; reprise Sage idempotente ;
+ * avoirs réels (simulation exclue sauf à partir de `bulkSales.simulationFrom`, `pnl_bulk_sales` ignorée, aucune vente projetée) ; reprise Sage idempotente ;
  * ventilation du marketing réel ; exclusion des clients non commerciaux des analyses.
  */
 import assert from "node:assert/strict";
@@ -67,7 +67,7 @@ async function main() {
   const bulk = await mkClient(`COSPHARMA STE ${tag}`);
   await setClientInternal(digital.id, true, "DIGITAL", who);
   const s0 = await getSettings();
-  await saveSettings({ ...s0, gestion: { ...s0.gestion, bulkSales: { clientId: bulk.id }, marketingOutputs: { from: null, insufficientStock: "BLOCK" } } });
+  await saveSettings({ ...s0, gestion: { ...s0.gestion, bulkSales: { clientId: bulk.id, simulationFrom: null }, marketingOutputs: { from: null, insufficientStock: "BLOCK" } } });
 
   // 1. Contrainte en base : une ligne porte un produit OU un article de matériel.
   const draftDoc = await D.saveDraft({ type: "BL", clientId: pharmacy.id, date: day, site: "COMANET", deliveryAddress: null, salesRepId: null, paymentModeKey: null, globalDiscountPct: "0", notes: null,
@@ -173,6 +173,20 @@ async function main() {
     assert.ok(src.rows.every((r) => !/SIM/.test(r.ref ?? "")), "aucune pièce de simulation dans le détail");
     assert.ok(src.rows.some((r) => r.ref === `FAREP${tag}`));
     console.log("✓ ventes en bloc : reprise 6 000 + facture 1 200 − avoir avec retour 300 = 6 900 HT, coût 115 × 40 ; simulation et ancienne saisie ignorées, aucune vente projetée");
+
+    // Simulations comptées à partir de `bulkSales.simulationFrom` : la facture simulée (10 × 60) entre le jour même, pas avant.
+    const s3 = await getSettings();
+    await saveSettings({ ...s3, gestion: { ...s3.gestion, bulkSales: { clientId: bulk.id, simulationFrom: day } } });
+    const withSim = await pnlStatement(year, month);
+    assert.equal(Math.round((withSim.lines.find((l) => l.key === "ca_bulk")!.total - caBulk0) * 100) / 100, 7500);
+    assert.equal(Math.round(withSim.lines.find((l) => l.key === "cogs_bulk")!.total * 100) / 100 - Math.round(before.lines.find((l) => l.key === "cogs_bulk")!.total * 100) / 100, 125 * 40);
+    const simRow = (await pnlLineSources("ca_bulk", year, month, null)).rows.find((r) => /SIM/.test(r.ref ?? ""));
+    assert.ok(simRow && /en simulation/.test(simRow.detail ?? ""), "la facture simulée apparaît dans le détail, signalée");
+    const nextDay = new Date(Date.parse(`${day}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
+    await saveSettings({ ...s3, gestion: { ...s3.gestion, bulkSales: { clientId: bulk.id, simulationFrom: nextDay } } });
+    assert.equal(Math.round(((await pnlStatement(year, month)).lines.find((l) => l.key === "ca_bulk")!.total - caBulk0) * 100) / 100, 6900, "simulation antérieure à la date : exclue");
+    await saveSettings({ ...s3, gestion: { ...s3.gestion, bulkSales: { clientId: bulk.id, simulationFrom: null } } });
+    console.log("✓ ventes en bloc : facture simulée comptée à partir de la date du réglage (+600 HT, coût 10 × 40), exclue avant");
   } finally {
     const s2 = await getSettings();
     await saveSettings({ ...s2, gestion: { ...s2.gestion, cutover: s1.gestion.cutover } });

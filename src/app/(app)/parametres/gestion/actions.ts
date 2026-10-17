@@ -115,7 +115,8 @@ export async function savePoliciesAction(fd: FormData) {
 }
 
 /**
- * Ventes en bloc et sorties marketing : client facturé en bloc (son CA = factures − avoirs réels, exclu des analyses),
+ * Ventes en bloc et sorties marketing : client facturé en bloc (son CA = factures − avoirs, exclu des analyses) et date
+ * à partir de laquelle ses pièces en simulation comptent,
  * date de démarrage des sorties par BL (fin de la valorisation des remises en visite), stock de matériel insuffisant.
  */
 export async function saveOutputsAction(fd: FormData) {
@@ -129,11 +130,13 @@ export async function saveOutputsAction(fd: FormData) {
       if (!c) throw new Error("Client « vente en bloc » introuvable.");
       if (c.is_internal) throw new Error("Un client interne (sorties marketing) ne peut pas être le client « vente en bloc ».");
     }
+    const simulationFrom = str(fd, "bulkSimulationFrom");
+    if (simulationFrom && !/^\d{4}-\d{2}-\d{2}$/.test(simulationFrom)) throw new Error("Date des simulations en bloc invalide.");
     const from = str(fd, "outputsFrom");
     if (from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) throw new Error("Date de démarrage invalide.");
     next = {
       ...cur.gestion,
-      bulkSales: { clientId: clientId ?? null },
+      bulkSales: { clientId: clientId ?? null, simulationFrom: simulationFrom ?? null },
       marketingOutputs: { from: from ?? null, insufficientStock: str(fd, "outputsInsufficientStock") === "WARN" ? "WARN" : "BLOCK" },
     };
   } catch (e) {

@@ -29,6 +29,8 @@ export type SalesFilter = {
 
 /** Client « vente en bloc » du réglage `gestion.bulkSales` (NULL si aucun), lu en SQL : aucun id en dur. */
 export const BULK_CLIENT_SQL = sql`(select nullif(st.value->'gestion'->'bulkSales'->>'clientId', '')::uuid from settings st where st.key = ${SETTINGS_KEY})`;
+/** Date à partir de laquelle les pièces en simulation du client « vente en bloc » comptent (NULL = jamais). */
+export const BULK_SIMULATION_FROM_SQL = sql`(select nullif(st.value->'gestion'->'bulkSales'->>'simulationFrom', '')::date from settings st where st.key = ${SETTINGS_KEY})`;
 
 /**
  * CLIENTS NON COMMERCIAUX — définition officielle et unique.
