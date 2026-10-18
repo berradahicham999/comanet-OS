@@ -3,8 +3,9 @@
  *
  * ── Chiffre d'affaires COMANET (HT) ──────────────────────────────────────────
  *  · Ventes directes : lignes de `sales` des sites DIRECTS (`settings.pnl.directSites`).
- *  · Ventes en bloc aux distributeurs : FACTURES − AVOIRS réels (hors simulation, brouillon, annulé) du client du
- *    réglage `gestion.bulkSales` (COSPHARMA STE), HT net, à la date de la pièce. Le BL n'est jamais lu : un BL facturé
+ *  · Ventes en bloc aux distributeurs : FACTURES − AVOIRS validés (ni brouillon, ni annulé) du client du réglage
+ *    `gestion.bulkSales` (COSPHARMA STE), HT net, à la date de la pièce : réels, et en simulation à partir de
+ *    `gestion.bulkSales.simulationFrom` (avant la bascule ; décision d'Hicham du 17/10/2026). Le BL n'est jamais lu : un BL facturé
  *    ne compte qu'une fois. `pnl_bulk_sales` (ancienne saisie) n'est plus lue.
  *  · Commissions de prestation : taux × CA HT remisé du prestataire (site PHARMAFIRST × 35 % par défaut).
  *  · Revente distributeur (sites COS, CAS…) : HORS CA — COMANET a déjà vendu ce stock en bloc. Montrée pour info.

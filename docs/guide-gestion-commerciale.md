@@ -373,7 +373,7 @@ Le module est complet. Calendrier retenu : période parallèle en décembre 2026
 | Source | D'où vient la donnée | Coût des ventes |
 |---|---|---|
 | Ventes directes (sites `COMANET`, `DESK DIGITAL`) | fichier de ventes / pièces COMANET OS | (quantité + UG) × prix d'achat de l'article |
-| Ventes en bloc (Gamarde, Ainhoa → COSPHARMA STE à l'arrivage) | **factures − avoirs réels** du client « vente en bloc » (Paramètres → Gestion), HT net, à la date de la pièce ; ni brouillon, ni annulé, ni simulation ; le BL n'est jamais lu | (quantité + UG) × prix d'achat de la fiche ; un avoir avec retour le retire |
+| Ventes en bloc (Gamarde, Ainhoa → COSPHARMA STE à l'arrivage) | **factures − avoirs réels** du client « vente en bloc » (Paramètres → Gestion), HT net, à la date de la pièce ; ni brouillon, ni annulé ; réelles, et en simulation (SIMFA / SIMAV) à partir de la date « Factures en bloc en simulation comptées depuis le » (Paramètres → Gestion, 01/10/2026) ; le BL n'est jamais lu | (quantité + UG) × prix d'achat de la fiche ; un avoir avec retour le retire |
 | Commission de prestation (Auracos via Pharmafirst) | 35 % × ventes HT remisées du site `PHARMAFIRST` | aucun |
 | Revente des distributeurs (sites `COS`, `CAS`, `CAG`, `DAG`, `CMR`) | fichier de ventes | **hors CA** — affichée pour information |
 

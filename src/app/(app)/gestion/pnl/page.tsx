@@ -45,7 +45,7 @@ export default async function PnlPage(props: { searchParams: Promise<{ year?: st
       <PageHeader
         eyebrow="Gestion commerciale"
         title={`P&L ${year}${brandName ? ` — ${brandName}` : ""}`}
-        subtitle={`De janvier à ${MONTHS_LONG[to - 1]}${partial ? " (mois en cours)" : ""}. CA net HT de COMANET : ventes directes, ventes en bloc (factures − avoirs réels) et commissions de prestation ; la revente des distributeurs n'est pas notre CA. Cliquez un montant pour voir ses pièces.`}
+        subtitle={`De janvier à ${MONTHS_LONG[to - 1]}${partial ? " (mois en cours)" : ""}. CA net HT de COMANET : ventes directes, ventes en bloc (factures − avoirs) et commissions de prestation ; la revente des distributeurs n'est pas notre CA. Cliquez un montant pour voir ses pièces.`}
         actions={<Link href={`/gestion/pnl/charges?year=${year}&new=1`} className="btn-secondary btn-sm">+ Charge</Link>}
       >
         <PnlTabs current="/gestion/pnl" year={year} />

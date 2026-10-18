@@ -3,7 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { pnlCharges } from "@/db/schema";
 import { audit, changedFields, type AuditActor } from "@/lib/audit";
-import { BULK_CLIENT_SQL, isCommercialClientSql } from "@/lib/analytics";
+import { BULK_CLIENT_SQL, BULK_SIMULATION_FROM_SQL, isCommercialClientSql } from "@/lib/analytics";
 import { budgetConsumptionByMonth, engagedSql, SAMPLES_VALUED_UNTIL } from "@/lib/budget";
 import { pgArray } from "@/lib/sql-array";
 import { outputNatures } from "@/lib/gestion/refs";
@@ -43,14 +43,16 @@ async function salesAgg(year: number): Promise<SalesAgg[]> {
 }
 
 /**
- * Lignes des pièces de vente en bloc : FACTURES (+) et AVOIRS (−) réels du client `gestion.bulkSales`, ni brouillon,
- * ni annulés, ni en simulation. Coût = (quantité + UG) × prix d'achat de la fiche ; un avoir ne retire le coût que
+ * Lignes des pièces de vente en bloc : FACTURES (+) et AVOIRS (−) du client `gestion.bulkSales`, ni brouillon, ni
+ * annulés ; réels, ou en simulation datés à partir de `gestion.bulkSales.simulationFrom` (avant la bascule).
+ * Coût = (quantité + UG) × prix d'achat de la fiche ; un avoir ne retire le coût que
  * s'il fait revenir la marchandise (motif avec retour). Le BL n'est jamais lu : seule la facture fait le CA.
  */
 const BULK_LINES = (from: string, to: string) => sql`
   from sales_documents d join sales_document_lines l on l.document_id = d.id
   left join products p on p.id = l.product_id left join brands b on b.id = p.brand_id left join credit_reasons cr on cr.key = d.reason_key
-  where d.client_id = ${BULK_CLIENT_SQL} and d.type in ('FACTURE', 'AVOIR') and d.status not in ('BROUILLON', 'ANNULE') and not d.is_simulation
+  where d.client_id = ${BULK_CLIENT_SQL} and d.type in ('FACTURE', 'AVOIR') and d.status not in ('BROUILLON', 'ANNULE')
+    and (not d.is_simulation or d.date >= ${BULK_SIMULATION_FROM_SQL})
     and d.date >= ${from}::date and d.date < ${to}::date`;
 const BULK_SIGN = sql`(case when d.type = 'AVOIR' then -1 else 1 end)`;
 const BULK_COSTED = sql`(l.product_id is not null and (d.type = 'FACTURE' or coalesce(cr.with_return, false)))`;
@@ -192,16 +194,16 @@ export async function pnlLineSources(drill: string, year: number, month: number 
     return finish(p ? `${p.label} (${p.ratePct} %)` : site, "Commission = taux × CA HT remisé du prestataire.", await salesRows([site], p?.ratePct ?? 0));
   }
   if (drill === "ca_bulk") {
-    const r = await db.execute<{ id: string; number: string; date: string; type: string; client: string; source: string; amount: number; cost: number; missing: number }>(sql`
-      select d.id, d.number, d.date::text as date, d.type, coalesce(d.client_snapshot->>'legalName', '') as client, d.source,
+    const r = await db.execute<{ id: string; number: string; date: string; type: string; client: string; source: string; simulation: boolean; amount: number; cost: number; missing: number }>(sql`
+      select d.id, d.number, d.date::text as date, d.type, coalesce(d.client_snapshot->>'legalName', '') as client, d.source, d.is_simulation as simulation,
         coalesce(sum(${BULK_SIGN} * l.net_ht), 0)::float8 as amount,
         coalesce(sum(case when ${BULK_COSTED} and p.cost_price is not null then ${BULK_SIGN} * (l.quantity + l.free_quantity) * p.cost_price else 0 end), 0)::float8 as cost,
         coalesce(sum(case when ${BULK_COSTED} and p.cost_price is null then ${BULK_SIGN} * l.net_ht else 0 end), 0)::float8 as missing
       ${BULK_LINES(from, to)} ${brandCond(brandId)}
       group by d.id order by d.date, d.number`);
-    return finish("Ventes en bloc (factures − avoirs)", "Factures et avoirs réels du client « vente en bloc » (Paramètres → Gestion) ; les pièces en simulation n'y entrent pas.", r.rows.map((x) => ({
+    return finish("Ventes en bloc (factures − avoirs)", "Factures et avoirs validés du client « vente en bloc » (Paramètres → Gestion) : réels, et en simulation à partir de la date choisie dans le réglage.", r.rows.map((x) => ({
       date: x.date, label: x.client, ref: x.number, href: docHref(x.id), amount: Number(x.amount), cost: Number(x.cost),
-      detail: `${x.type === "AVOIR" ? "Avoir" : "Facture"}${x.source === "SAGE_REPRISE" ? " reprise de Sage" : ""}${x.missing ? ` · dont ${Math.round(x.missing).toLocaleString("fr-FR")} MAD sans prix d'achat` : ""}`,
+      detail: `${x.type === "AVOIR" ? "Avoir" : "Facture"}${x.source === "SAGE_REPRISE" ? " reprise de Sage" : ""}${x.simulation ? " en simulation" : ""}${x.missing ? ` · dont ${Math.round(x.missing).toLocaleString("fr-FR")} MAD sans prix d'achat` : ""}`,
     })));
   }
   if (drill.startsWith("cat:")) {

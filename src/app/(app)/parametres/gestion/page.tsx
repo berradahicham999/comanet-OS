@@ -204,13 +204,16 @@ export default async function GestionSettingsPage(props: { searchParams: Promise
       </Card>
 
       <Card title="Ventes en bloc et sorties marketing" className="mb-4">
-        <form id="sorties" action={saveOutputsAction} className="grid sm:grid-cols-3 gap-3 text-[13px] scroll-mt-20">
+        <form id="sorties" action={saveOutputsAction} className="grid sm:grid-cols-2 gap-3 text-[13px] scroll-mt-20">
           <label className="block"><span className="label block mb-1">Client « vente en bloc »</span>
             <select name="bulkClientId" defaultValue={g.bulkSales.clientId ?? ""} className="select h-9">
               <option value="">Aucun</option>
               {bulkCandidates.rows.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
-            <span className="text-[11px] text-faint">Ses factures − avoirs réels font le CA en bloc du P&L ; il sort des ventes, segments et classements.</span>
+            <span className="text-[11px] text-faint">Ses factures − avoirs font le CA en bloc du P&L ; il sort des ventes, segments et classements.</span>
+          </label>
+          <label className="block"><span className="label block mb-1">Factures en bloc en simulation comptées depuis le</span><input type="date" name="bulkSimulationFrom" defaultValue={g.bulkSales.simulationFrom ?? ""} className="input h-9" />
+            <span className="text-[11px] text-faint">Avant la bascule, ses factures et avoirs SIMFA / SIMAV validés à partir de cette date entrent dans le CA en bloc. Vide = seules les pièces réelles (et la reprise Sage) comptent.</span>
           </label>
           <label className="block"><span className="label block mb-1">Sorties marketing par BL depuis le</span><input type="date" name="outputsFrom" defaultValue={g.marketingOutputs.from ?? ""} className="input h-9" />
             <span className="text-[11px] text-faint">À partir de cette date, la charge d&apos;un échantillon médical naît au BL de dotation : les remises en visite ne sont plus valorisées (jamais deux fois).</span>
@@ -218,7 +221,7 @@ export default async function GestionSettingsPage(props: { searchParams: Promise
           <label className="block"><span className="label block mb-1">Stock de matériel insuffisant</span>
             <select name="outputsInsufficientStock" defaultValue={g.marketingOutputs.insufficientStock} className="select h-9"><option value="BLOCK">Bloquer le BL</option><option value="WARN">Alerter seulement</option></select>
           </label>
-          <div className="sm:col-span-3"><button className="btn-primary btn-sm" type="submit">Enregistrer</button></div>
+          <div className="sm:col-span-2"><button className="btn-primary btn-sm" type="submit">Enregistrer</button></div>
         </form>
         <div id="natures" className="mt-4 pt-4 border-t border-line space-y-1 text-[12.5px] scroll-mt-20">
           <div className="label mb-1">Natures de sortie (clients internes)</div>

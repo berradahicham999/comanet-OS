@@ -325,8 +325,8 @@ contrôle portées par `crmUserId`). Copilote : `get_client_portfolio`, `get_cli
 
 **P&L** (`/gestion/pnl`, section du `docs/guide-gestion-commerciale.md`, migration 0031). Réservé aux administrateurs
 (`requireAdmin()` : salaires). Compte de résultat mensuel HT : CA = ventes directes (sites de `settings.pnl.directSites`)
-+ ventes en bloc = FACTURES − AVOIRS réels du client `settings.gestion.bulkSales` (COSPHARMA STE ; ni brouillon, ni annulé, ni
-simulation ; coût = (qté + UG) × `cost_price`, avoir avec retour déduit ; ventes Sage 2026 reprises par `importBulkInvoices()` ;
++ ventes en bloc = FACTURES − AVOIRS du client `settings.gestion.bulkSales` (COSPHARMA STE ; ni brouillon, ni annulé ; réelles,
+et en simulation à partir de `bulkSales.simulationFrom`, 01/10/2026 ; coût = (qté + UG) × `cost_price`, avoir avec retour déduit ; ventes Sage 2026 reprises par `importBulkInvoices()` ;
 `pnl_bulk_sales` gardée en lecture seule, hors calcul, saisie masquée)
 + commissions de prestation (taux × CA HT remisé du prestataire : PHARMAFIRST × 35 %). La revente des distributeurs (COS,
 CAS…) est hors CA, affichée pour info. Coût des ventes : (quantité + UG) × `products.cost_price` ; sans prix d'achat, CA
