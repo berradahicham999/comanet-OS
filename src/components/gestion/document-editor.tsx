@@ -6,6 +6,7 @@ import { baseUnitPriceHt, computeDocument } from "@/lib/gestion/calc";
 import { defaultDiscount, sourceRef, type DocType } from "@/lib/gestion/documents-shared";
 import type { EditorData, EditorMaterial, EditorProduct } from "@/lib/gestion/editor";
 import type { UsualClientProduct } from "@/lib/gestion/usual-products";
+import type { ClientReturnContext } from "@/lib/gestion/client-returns";
 import { Badge } from "@/components/ui";
 
 /**
@@ -17,6 +18,10 @@ import { Badge } from "@/components/ui";
  * Lignes reprises d'une autre pièce (`sourceLineId`) : figées sur une facture (elles viennent du
  * BL qui a sorti le stock) et sur un avoir ; libres sur un BL préparé depuis une commande, car
  * c'est le BL qui engage (remise, prix, quantités, raison sociale restent à la main).
+ *
+ * Avoir libre (sans facture d'origine) : produits rendus ou crédités, marques ou libellés libres ; un produit reprend
+ * le dernier prix du client (sinon PPH HT − remise client), le motif décide du dépôt de retour (ou d'aucun mouvement),
+ * et un produit suivi par lot désigne le lot rendu (lots livrés au client, ou saisie libre).
  *
  * Sorties marketing : un BL cherche dans les produits ET dans le matériel marketing (badge Produit / Matériel).
  * Le matériel est offert (prix 0) ; sur un client interne, rien ne fait de CA et les produits sont valorisés au
@@ -38,6 +43,8 @@ export type EditorLine = {
   sourceLineId: string | null;
   sourceNumber: string | null;
   returnWarehouseKey: string | null;
+  /** Avoir libre : lot rendu (produit suivi par lot), facultatif. */
+  returnLot?: { lotNumber: string; expiryDate: string | null } | null;
   /** Plafond de quantité (reste à facturer / à créditer), pour les lignes reprises d'une pièce. */
   maxQty: string | null;
 };
@@ -69,7 +76,7 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
   data: EditorData;
   initial: EditorInitial;
   action: (fd: FormData) => Promise<void>;
-  creditReasons?: { key: string; label: string; withReturn: boolean }[];
+  creditReasons?: { key: string; label: string; withReturn: boolean; returnWarehouseKey: string | null }[];
   warehouses?: { key: string; label: string }[];
   canValidate: boolean;
 }) {
@@ -104,9 +111,17 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
     return () => { alive = false; };
   }, [clientId, stocked]);
   const usual = usualFor && usualFor.clientId === clientId ? usualFor.rows : [];
-  // Avoir financier : ni facture ni BL d'origine, une ligne par marque (remise sur objectifs…), sans stock.
-  const financial = type === "AVOIR" && !fromOrigin;
-  const reasons = financial ? creditReasons.filter((r) => !r.withReturn) : creditReasons;
+  // Avoir libre : ni facture ni BL d'origine ; produits rendus ou crédités, marques (remise sur objectifs…) ou libellés.
+  const freeCredit = type === "AVOIR" && !fromOrigin;
+  const reasons = creditReasons;
+  const [returnCtx, setReturnCtx] = useState<{ clientId: string; ctx: ClientReturnContext } | null>(null);
+  useEffect(() => {
+    if (!clientId || !freeCredit) return;
+    let alive = true;
+    fetch(`/api/gestion/retours-client/${clientId}`).then((r) => (r.ok ? r.json() : null)).then((ctx) => { if (alive && ctx?.lastPrices) setReturnCtx({ clientId, ctx }); }).catch(() => {});
+    return () => { alive = false; };
+  }, [clientId, freeCredit]);
+  const ctx = returnCtx && returnCtx.clientId === clientId ? returnCtx.ctx : null;
   const [brandPick, setBrandPick] = useState("");
   const addBrandLine = (brandId: string) => {
     const b = data.brands.find((x) => x.id === brandId);
@@ -135,10 +150,10 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
     const q = norm(query.trim());
     if (!q) return [];
     return data.products
-      .filter((p) => (stocked ? p.kind === "PRODUIT" : p.kind !== "PRODUIT"))
+      .filter((p) => (stocked || freeCredit ? p.kind === "PRODUIT" : p.kind !== "PRODUIT"))
       .filter((p) => p.ean === query.trim() || norm(`${p.name} ${p.ref ?? ""} ${p.brand ?? ""}`).includes(q))
       .slice(0, 10);
-  }, [query, data.products, stocked]);
+  }, [query, data.products, stocked, freeCredit]);
   // BL : le matériel marketing (goodies, PLV, print) se cherche dans la même liste.
   const materialMatches = useMemo(() => {
     const q = norm(query.trim());
@@ -173,10 +188,13 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
       update(existing.key, { quantity: String(Number(existing.quantity || "0") + qty) });
       return;
     }
+    // Avoir libre : dernier prix et dernière remise du client sur ce produit, s'il en a un.
+    const last = freeCredit ? ctx?.lastPrices[p.id] ?? null : null;
     setLines((ls) => [...ls, {
       key: newKey(), productId: p.id, designation: p.name, ref: p.ref, quantity: String(qty), freeQuantity: "0",
-      unitPriceHt: internal ? "0" : baseUnitPriceHt(p.publicPriceTtc, p.taxRate) ?? "", discountPct: internal ? "0" : client ? defaultDiscount(client.defaultDiscountPct, p.brandId ? client.brandDiscounts[p.brandId] ?? null : null) : "0",
-      taxRate: p.taxRate, sourceLineId: null, sourceNumber: null, returnWarehouseKey: null, maxQty: null,
+      unitPriceHt: internal ? "0" : last ? last.unitPriceHt : baseUnitPriceHt(p.publicPriceTtc, p.taxRate) ?? "",
+      discountPct: internal ? "0" : last ? String(Number(last.discountPct)) : client ? defaultDiscount(client.defaultDiscountPct, p.brandId ? client.brandDiscounts[p.brandId] ?? null : null) : "0",
+      taxRate: p.taxRate, sourceLineId: null, sourceNumber: null, returnWarehouseKey: freeCredit ? reason?.returnWarehouseKey ?? null : null, maxQty: null,
     }]);
   };
   const addMaterial = (m: EditorMaterial) => {
@@ -205,7 +223,8 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
     lines: lines.map((l) => ({
       productId: l.productId, inventoryItemId: l.inventoryItemId ?? null, designation: l.designation, quantity: l.quantity, freeQuantity: l.freeQuantity || "0", unitPriceHt: l.unitPriceHt,
       discountPct: l.discountPct || "0", taxRate: l.taxRate, sourceLineId: l.sourceLineId,
-      returnWarehouseKey: type === "AVOIR" && reason?.withReturn && l.productId ? l.returnWarehouseKey ?? "PRINCIPAL" : null,
+      returnWarehouseKey: type === "AVOIR" && reason?.withReturn && l.productId ? l.returnWarehouseKey ?? reason.returnWarehouseKey ?? "PRINCIPAL" : null,
+      returnLot: type === "AVOIR" && reason?.withReturn && l.productId && !l.sourceLineId && l.returnLot?.lotNumber.trim() ? l.returnLot : null,
     })),
   });
   const available = (id: string | null) => (id ? data.products.find((p) => p.id === id)?.available ?? null : null);
@@ -283,9 +302,17 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
         )}
         {type === "AVOIR" && (
           <label className="block max-w-sm"><span className="label block mb-1">Motif de l&apos;avoir *</span>
-            <select className="select h-9" value={reasonKey} onChange={(e) => setReasonKey(e.target.value)} required>
-              <option value="">Choisir…</option>{reasons.map((r) => <option key={r.key} value={r.key}>{r.label}{r.withReturn ? " (retour en stock)" : ""}</option>)}
+            <select className="select h-9" value={reasonKey} required onChange={(e) => {
+              // Le dépôt de retour des lignes suit le motif choisi (modifiable ensuite ligne par ligne).
+              const next = creditReasons.find((r) => r.key === e.target.value);
+              setReasonKey(e.target.value);
+              setLines((ls) => ls.map((l) => (l.productId ? { ...l, returnWarehouseKey: next?.returnWarehouseKey ?? null } : l)));
+            }}>
+              <option value="">Choisir…</option>{reasons.map((r) => <option key={r.key} value={r.key}>{r.label}{r.withReturn ? ` (retour : ${warehouses.find((w) => w.key === r.returnWarehouseKey)?.label ?? r.returnWarehouseKey})` : ""}</option>)}
             </select>
+            {reason && <span className="block text-[11.5px] text-muted mt-1">{reason.withReturn
+              ? `Les produits rendus rentrent au dépôt « ${warehouses.find((w) => w.key === reason.returnWarehouseKey)?.label ?? reason.returnWarehouseKey} » à la validation (modifiable ligne par ligne).`
+              : "Aucun mouvement de stock : seul le montant est crédité au client."}</span>}
           </label>
         )}
       </div>
@@ -294,14 +321,14 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
       <div className="card p-4 space-y-3">
         <div className="flex items-center justify-between gap-2">
           <h3 className="font-semibold">Lignes</h3>
-          {(type === "FACTURE" || financial) && !locked && <button type="button" className="btn-ghost btn-sm" onClick={addFreeLine}>+ Ligne libre</button>}
+          {(type === "FACTURE" || freeCredit) && !locked && <button type="button" className="btn-ghost btn-sm" onClick={addFreeLine}>+ Ligne libre</button>}
         </div>
-        {financial && (
+        {freeCredit && (
           <div className="space-y-2">
+            <p className="text-[12px] text-muted">Avoir libre : produits rendus ou crédités (recherche ci-dessous, au dernier prix du client), marques (« Gamarde », « Alphascience »… avec le montant HT remboursé) ou libellés libres. Le motif décide du stock : retour en bon état → remis en stock vendable ; périmé ou abîmé → dépôt non vendable ; crédité sans retour ou financier → aucun mouvement. Une fois validé, le montant devient un crédit client à imputer sur ses factures.</p>
             <select className="select h-10" value={brandPick} onChange={(e) => addBrandLine(e.target.value)}>
-              <option value="">Ajouter une marque…</option>{data.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              <option value="">Ajouter une marque (montant libre)…</option>{data.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
-            <p className="text-[12px] text-muted">Avoir financier : une ligne par marque (« Gamarde », « Alphascience »…) avec le montant HT remboursé ; la TVA et le TTC se calculent. Sans effet sur le stock ; une fois validé, le montant devient un crédit client à imputer sur ses factures.</p>
           </div>
         )}
         {!locked && stocked && client && usual.length > 0 && (
@@ -320,9 +347,9 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
             </div>
           </div>
         )}
-        {!locked && !financial && (
+        {!locked && (
           <div className="relative">
-            <input className="input h-10" placeholder={type === "BL" ? "Ajouter un produit ou du matériel (goodie, PLV) : nom, référence, marque, code-barres…" : stocked ? "Ajouter un article : nom, référence, marque ou code-barres…" : "Ajouter un service ou des frais…"} value={query} onChange={(e) => setQuery(e.target.value)}
+            <input className="input h-10" placeholder={type === "BL" ? "Ajouter un produit ou du matériel (goodie, PLV) : nom, référence, marque, code-barres…" : freeCredit ? "Ajouter un produit rendu ou crédité : nom, référence, marque ou code-barres…" : stocked ? "Ajouter un article : nom, référence, marque ou code-barres…" : "Ajouter un service ou des frais…"} value={query} onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (productMatches[0]) addProduct(productMatches[0]); } }} />
             {(productMatches.length > 0 || materialMatches.length > 0) && (
               <ul className="absolute z-20 left-0 right-0 mt-1 card p-1 max-h-80 overflow-auto shadow-lg">
@@ -416,11 +443,40 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
                     ) : <div className="block"><span className="label block mb-0.5">TVA</span><div className="h-9 flex items-center justify-end text-muted">{Number(l.taxRate).toLocaleString("fr-FR")} %</div></div>}
                     <div className="block"><span className="label block mb-0.5">Net HT</span><div className="h-9 flex items-center justify-end font-medium tabular-nums">{calc ? fmt(calc.lines[i].netHt) : "—"}</div></div>
                   </div>
+                  {freeCredit && l.productId && (() => {
+                    const last = ctx?.lastPrices[l.productId];
+                    return <div className="pl-7 text-[11.5px] text-faint">{last
+                      ? `Dernier prix de ce client : ${fmt(last.unitPriceHt)} HT, remise ${Number(last.discountPct).toLocaleString("fr-FR")} % (${last.number ?? "pièce"} du ${last.date.split("-").reverse().join("/")})`
+                      : ctx ? "Aucune pièce validée de ce produit pour ce client : prix de base PPH HT, remise du client." : null}</div>;
+                  })()}
                   {type === "AVOIR" && reason?.withReturn && l.productId && warehouses.length > 0 && (
                     <label className="flex items-center gap-2 pl-7 text-[12px]"><span className="text-muted">Retour au dépôt</span>
-                      <select className="select h-8 max-w-48" value={l.returnWarehouseKey ?? "PRINCIPAL"} onChange={(e) => update(l.key, { returnWarehouseKey: e.target.value })}>{warehouses.map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}</select>
+                      <select className="select h-8 max-w-48" value={l.returnWarehouseKey ?? reason.returnWarehouseKey ?? "PRINCIPAL"} onChange={(e) => update(l.key, { returnWarehouseKey: e.target.value })}>{warehouses.map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}</select>
                     </label>
                   )}
+                  {freeCredit && reason?.withReturn && l.productId && data.products.find((p) => p.id === l.productId)?.trackLots && (() => {
+                    const known = ctx?.lots[l.productId] ?? [];
+                    const listId = `lots-${l.key}`;
+                    const setLot = (lotNumber: string) => {
+                      // Lot connu : sa péremption ; on quitte un lot connu : la péremption saisie repart de zéro.
+                      const k = known.find((x) => x.lotNumber === lotNumber.trim());
+                      const wasKnown = known.some((x) => x.lotNumber === l.returnLot?.lotNumber.trim());
+                      update(l.key, { returnLot: { lotNumber, expiryDate: k ? k.expiryDate : wasKnown ? null : l.returnLot?.expiryDate ?? null } });
+                    };
+                    const isKnown = !!l.returnLot && known.some((x) => x.lotNumber === l.returnLot!.lotNumber.trim());
+                    return (
+                      <div className="flex flex-wrap items-center gap-2 pl-7 text-[12px]">
+                        <span className="text-muted">Lot rendu</span>
+                        <input className="input h-8 max-w-40" list={listId} placeholder={known.length ? "Choisir ou saisir" : "N° de lot (facultatif)"} value={l.returnLot?.lotNumber ?? ""} onChange={(e) => setLot(e.target.value)} />
+                        <datalist id={listId}>{known.map((x) => <option key={x.lotNumber} value={x.lotNumber}>{x.expiryDate ? `péremption ${x.expiryDate.split("-").reverse().join("/")} · ` : ""}livré le {x.lastDate.split("-").reverse().join("/")}</option>)}</datalist>
+                        {l.returnLot?.lotNumber.trim() && !isKnown && (
+                          <label className="flex items-center gap-1"><span className="text-muted">péremption</span>
+                            <input type="date" className="input h-8" value={l.returnLot.expiryDate ?? ""} onChange={(e) => update(l.key, { returnLot: { lotNumber: l.returnLot!.lotNumber, expiryDate: e.target.value || null } })} /></label>
+                        )}
+                        {!l.returnLot?.lotNumber.trim() && <span className="text-faint">sans lot, l&apos;entrée se fait hors lot</span>}
+                      </div>
+                    );
+                  })()}
                 </li>
               );
             })}

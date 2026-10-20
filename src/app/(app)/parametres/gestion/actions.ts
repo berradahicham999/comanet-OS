@@ -206,7 +206,13 @@ export async function saveCreditReasonAction(fd: FormData) {
     const label = str(fd, "label");
     const key = str(fd, "key") ?? (label ? refKey(label) : null);
     if (!key || !label) throw new Error("Libellé obligatoire.");
-    const values = { label, withReturn: bool(fd, "withReturn"), sort: intOrNull(fd, "sort", "Ordre", 0, 999) ?? 0, active: bool(fd, "active") };
+    // Dépôt de retour (interne et actif) ou aucun mouvement ; `withReturn` en découle (contrainte en base).
+    const returnWarehouseKey = str(fd, "returnWarehouseKey");
+    if (returnWarehouseKey) {
+      const [w] = await db.select({ kind: warehouses.kind, active: warehouses.active }).from(warehouses).where(eq(warehouses.key, returnWarehouseKey));
+      if (!w || w.kind !== "INTERNE" || !w.active) throw new Error("Le retour se fait dans un dépôt interne actif.");
+    }
+    const values = { label, withReturn: !!returnWarehouseKey, returnWarehouseKey, sort: intOrNull(fd, "sort", "Ordre", 0, 999) ?? 0, active: bool(fd, "active") };
     await db.insert(creditReasons).values({ key, ...values }).onConflictDoUpdate({ target: creditReasons.key, set: values });
     await audit({ actor: actorOf(user), action: "SETTINGS", module: "administration", entity: "credit_reason", label: key, after: values });
   } catch (e) {

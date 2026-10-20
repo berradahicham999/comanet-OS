@@ -21,7 +21,7 @@ export async function listWarehouses(): Promise<Warehouse[]> {
   return db.select().from(warehouses).orderBy(asc(warehouses.sort), asc(warehouses.key));
 }
 
-export type CreditReason = { key: string; label: string; withReturn: boolean; sort: number; active: boolean };
+export type CreditReason = { key: string; label: string; withReturn: boolean; returnWarehouseKey: string | null; sort: number; active: boolean };
 export async function listCreditReasons(): Promise<CreditReason[]> {
   return db.select().from(creditReasons).orderBy(asc(creditReasons.sort), asc(creditReasons.key));
 }
