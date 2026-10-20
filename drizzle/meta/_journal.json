@@ -372,6 +372,13 @@
       "when": 1790000700000,
       "tag": "0052_sorties_marketing",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1790000800000,
+      "tag": "0053_avoir_libre",
+      "breakpoints": true
     }
   ]
 }

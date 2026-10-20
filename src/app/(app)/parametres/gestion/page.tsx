@@ -187,7 +187,9 @@ export default async function GestionSettingsPage(props: { searchParams: Promise
               <input type="hidden" name="key" value={r.key} />
               <input name="sort" defaultValue={r.sort} className="input h-8 text-[12px]" />
               <input name="label" defaultValue={r.label} className="input h-8 text-[12px]" />
-              <label className="flex items-center gap-1 text-[11px]" title="Le motif implique un retour physique en stock"><input type="checkbox" name="withReturn" defaultChecked={r.withReturn} /> retour en stock</label>
+              <select name="returnWarehouseKey" defaultValue={r.returnWarehouseKey ?? ""} className="select h-8 text-[11.5px] max-w-56" title="Ce que devient la marchandise rendue">
+                <option value="">Aucun mouvement de stock</option>{refs.warehouses.filter((w) => w.kind === "INTERNE" && w.active).map((w) => <option key={w.key} value={w.key}>Retour au dépôt {w.label}</option>)}
+              </select>
               <label className="text-center" title="Actif"><input type="checkbox" name="active" defaultChecked={r.active} /></label>
               <button className="btn-ghost btn-sm text-[11px]" type="submit">OK</button>
             </form>
@@ -195,11 +197,13 @@ export default async function GestionSettingsPage(props: { searchParams: Promise
           <form action={saveCreditReasonAction} className="grid grid-cols-[50px_1fr_auto_40px_auto] items-center gap-1 pt-1">
             <input name="sort" defaultValue={reasons.length * 10 + 10} className="input h-8 text-[12px]" />
             <input name="label" placeholder="Libellé du motif" className="input h-8 text-[12px]" required />
-            <label className="flex items-center gap-1 text-[11px]"><input type="checkbox" name="withReturn" /> retour en stock</label>
+            <select name="returnWarehouseKey" defaultValue="" className="select h-8 text-[11.5px] max-w-56">
+              <option value="">Aucun mouvement de stock</option>{refs.warehouses.filter((w) => w.kind === "INTERNE" && w.active).map((w) => <option key={w.key} value={w.key}>Retour au dépôt {w.label}</option>)}
+            </select>
             <label className="text-center"><input type="checkbox" name="active" defaultChecked /></label>
             <button className="btn-primary btn-sm text-[11px]" type="submit">Ajouter</button>
           </form>
-          <p className="text-[11px] text-faint pt-1">Un motif « retour en stock » fait rentrer la marchandise au dépôt choisi sur chaque ligne de l&apos;avoir.</p>
+          <p className="text-[11px] text-faint pt-1">Le motif décide du stock, sur un avoir de facture comme sur un avoir libre : « Retour au dépôt … » fait rentrer les produits de l&apos;avoir dans ce dépôt (modifiable ligne par ligne), « Aucun mouvement » ne crédite que le montant (financier, produit crédité sans retour).</p>
         </div>
       </Card>
 

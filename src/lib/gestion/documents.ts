@@ -69,6 +69,8 @@ export type DraftLineInput = {
   warehouseKey?: string | null;
   sourceLineId?: string | null;
   returnWarehouseKey?: string | null;
+  /** Avoir libre, produit suivi par lot : lot rendu par le client (choisi parmi ses lots livrés, ou saisi), facultatif. */
+  returnLot?: { lotNumber: string; expiryDate?: string | null } | null;
 };
 
 export type DraftInput = {
@@ -212,6 +214,7 @@ async function itemInfos(t: Tx | typeof db, ids: string[]): Promise<Map<string, 
 type DraftLineRow = {
   position: number; productId: string | null; inventoryItemId: string | null; lotId: string | null; warehouseKey: string; ref: string | null; designation: string; unit: string | null;
   quantity: string; freeQuantity: string; unitPriceHt: string; publicPriceTtc: string | null; discountPct: string; taxRate: string; sourceLineId: string | null; returnWarehouseKey: string | null;
+  lotAllocations: { lotId: string | null; lotNumber: string; expiryDate: string | null; qty: string }[];
 };
 
 /**
@@ -228,7 +231,7 @@ function materialLine(type: DocType, l: DraftLineInput, i: number, items: Map<st
   return {
     position: i, productId: null, inventoryItemId: it.id, lotId: null, warehouseKey: "PRINCIPAL", ref: it.sku, designation: it.name, unit: it.unit,
     quantity: formatScaled(qty, SCALE.qty), freeQuantity: "0.000", unitPriceHt: "0.00", publicPriceTtc: null, discountPct: "0.00",
-    taxRate: rate, sourceLineId: l.sourceLineId ?? null, returnWarehouseKey: null,
+    taxRate: rate, sourceLineId: l.sourceLineId ?? null, returnWarehouseKey: null, lotAllocations: [],
   };
 }
 
@@ -268,12 +271,17 @@ export async function saveDraft(input: DraftInput, actor: AuditActor): Promise<s
       // Sortie marketing (client interne) : aucun prix, aucune remise — la valeur est le coût de revient figé à la validation.
       const pu = client.is_internal ? 0n : parseDecimal(l.unitPriceHt, SCALE.money);
       if (pu === null || pu < 0n) throw new DocumentError(`Ligne ${i + 1} (${designation}) : prix unitaire HT manquant.`);
+      // Avoir libre : lot rendu tel que saisi (créé au journal à la validation s'il est inconnu).
+      const lotNumber = input.type === "AVOIR" && p && !l.sourceLineId ? l.returnLot?.lotNumber?.trim() || null : null;
+      const lotExpiry = lotNumber ? l.returnLot?.expiryDate || null : null;
+      if (lotExpiry && !/^\d{4}-\d{2}-\d{2}$/.test(lotExpiry)) throw new DocumentError(`Ligne ${i + 1} (${designation}) : date de péremption du lot invalide.`);
       return {
         position: i, productId: p?.id ?? null, inventoryItemId: null as string | null, lotId: l.lotId ?? null, warehouseKey: l.warehouseKey ?? "PRINCIPAL",
         ref: p ? (p.code ?? p.sku) : null, designation, unit: p?.unit ?? null,
         quantity: formatScaled(qty, SCALE.qty), freeQuantity: formatScaled(free, SCALE.qty), unitPriceHt: formatScaled(pu, SCALE.money),
         publicPriceTtc: p?.price_retail ?? null, discountPct: client.is_internal ? "0.00" : formatScaled(parseDecimal(l.discountPct || "0", SCALE.pct) ?? 0n, SCALE.pct),
         taxRate: p?.rate ?? l.taxRate ?? rate, sourceLineId: l.sourceLineId ?? null, returnWarehouseKey: l.returnWarehouseKey ?? null,
+        lotAllocations: lotNumber ? [{ lotId: null, lotNumber, expiryDate: lotExpiry, qty: formatScaled(qty, SCALE.qty) }] : [],
       };
     });
     const globalDiscountPct = client.is_internal ? "0.00" : formatScaled(parseDecimal(input.globalDiscountPct || "0", SCALE.pct) ?? 0n, SCALE.pct);
@@ -376,12 +384,13 @@ export async function createCreditNote(invoiceId: string, actor: AuditActor): Pr
   if (!lines.length) throw new DocumentError("Toutes les lignes de cette facture ont déjà fait l'objet d'un avoir avec retour.");
   const open = (await db.execute<{ id: string }>(sql`select id from sales_documents where origin_document_id = ${invoiceId}::uuid and type = 'AVOIR' and status = 'BROUILLON' limit 1`)).rows[0];
   if (open) throw new DocumentError("Un avoir brouillon existe déjà sur cette facture : terminez-le ou supprimez-le.");
+  const back = (await db.execute<{ wh: string | null }>(sql`select return_warehouse_key as wh from credit_reasons where key = 'RETOUR'`)).rows[0]?.wh ?? "PRINCIPAL";
   return saveDraft({
     type: "AVOIR", clientId: inv.clientId, legalEntityId: inv.legalEntityId, date: iso(today()), site: inv.site, deliveryAddress: null, salesRepId: inv.salesRepId,
     paymentModeKey: inv.paymentModeKey, globalDiscountPct: inv.globalDiscountPct, notes: null, reasonKey: "RETOUR", originDocumentId: inv.id,
     lines: lines.map((l) => ({
       productId: l.productId, designation: l.designation, quantity: remainingQty(l.quantity, l.creditedQty), freeQuantity: "0", unitPriceHt: l.unitPriceHt,
-      discountPct: l.discountPct, taxRate: l.taxRate, sourceLineId: l.id, returnWarehouseKey: l.productId ? "PRINCIPAL" : null,
+      discountPct: l.discountPct, taxRate: l.taxRate, sourceLineId: l.id, returnWarehouseKey: l.productId ? back : null,
     })),
   }, actor);
 }
@@ -619,19 +628,37 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
         }
       }
     }
-    const reason = doc.reasonKey ? (await tx.execute<{ with_return: boolean }>(sql`select with_return from credit_reasons where key = ${doc.reasonKey}`)).rows[0] : null;
+    // Avoir : le motif dit où rentre la marchandise (dépôt du motif, modifiable par ligne) ; sans dépôt, aucun mouvement.
+    const reason = doc.reasonKey ? (await tx.execute<{ with_return: boolean; return_warehouse_key: string | null }>(sql`
+      select with_return, return_warehouse_key from credit_reasons where key = ${doc.reasonKey}`)).rows[0] : null;
+    const returnLots: { lineId: string; productId: string; lotNumber: string; qty: string }[] = [];
     if (type === "AVOIR" && reason?.with_return) {
       for (const l of doc.lines) {
-        if (!l.productId || !l.returnWarehouseKey || l.productKind !== "PRODUIT") continue;
-        // Lot du retour : celui qu'avait livré le BL d'origine (facture → BL).
-        const lot = l.trackLots ? (await tx.execute<{ lot: string | null }>(sql`
-          select (bl.lot_allocations->0->>'lotNumber') as lot from sales_document_lines inv join sales_document_lines bl on bl.id = inv.source_line_id
-          where inv.id = ${l.sourceLineId}::uuid`)).rows[0]?.lot ?? null : null;
-        movements.push({ productId: l.productId, type: "RETOUR_CLIENT", quantity: l.quantity, warehouseKey: l.returnWarehouseKey, lotNumber: lot, date: doc.date, sourceType: "AVOIR", sourceId: id, sourceLineId: l.id });
+        const warehouseKey = l.returnWarehouseKey ?? reason.return_warehouse_key;
+        if (!l.productId || !warehouseKey || l.productKind !== "PRODUIT") continue;
+        // Lot du retour : celui qu'avait livré le BL d'origine (facture → BL) ; sur un avoir libre, celui saisi.
+        let lot: string | null = null;
+        let expiryDate: string | null = null;
+        if (l.trackLots && l.sourceLineId) {
+          lot = (await tx.execute<{ lot: string | null }>(sql`
+            select (bl.lot_allocations->0->>'lotNumber') as lot from sales_document_lines inv join sales_document_lines bl on bl.id = inv.source_line_id
+            where inv.id = ${l.sourceLineId}::uuid`)).rows[0]?.lot ?? null;
+        } else if (l.trackLots) {
+          lot = l.lotAllocations?.[0]?.lotNumber ?? null;
+          expiryDate = l.lotAllocations?.[0]?.expiryDate ?? null;
+        }
+        movements.push({ productId: l.productId, type: "RETOUR_CLIENT", quantity: l.quantity, warehouseKey, lotNumber: lot, expiryDate, date: doc.date, sourceType: "AVOIR", sourceId: id, sourceLineId: l.id });
+        if (lot) returnLots.push({ lineId: l.id, productId: l.productId, lotNumber: lot, qty: l.quantity });
       }
     }
     for (const [lineId, alloc] of lineAllocations) await tx.update(salesDocumentLines).set({ lotAllocations: alloc }).where(eq(salesDocumentLines.id, lineId));
     if (movements.length) await recordStockMovements(movements, { id: actor.id }, { tx, allowNegative: g.insufficientStock === "WARN" });
+    // Lots rendus, figés sur la ligne (imprimés sur l'avoir) avec la péremption connue du journal.
+    for (const r of returnLots) {
+      const lot = (await tx.execute<{ id: string; expiry_date: string | null }>(sql`
+        select id, expiry_date::text from stock_lots where product_id = ${r.productId}::uuid and lot_number = ${r.lotNumber}`)).rows[0];
+      await tx.update(salesDocumentLines).set({ lotAllocations: [{ lotId: lot?.id ?? null, lotNumber: r.lotNumber, expiryDate: lot?.expiry_date ?? null, qty: r.qty }] }).where(eq(salesDocumentLines.id, r.lineId));
+    }
 
     // Sorties marketing (`marketing-outputs.ts`) : coût unitaire figé — matériel au coût de l'article, échantillon d'un
     // client interne au coût de revient de la fiche produit (NULL si inconnu : signalé, jamais estimé) ; puis sortie du matériel.
@@ -686,10 +713,9 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
       }
     }
     if (type === "AVOIR" && !doc.originDocumentId) {
-      // Avoir financier (remise sur objectifs…) : ni facture ni stock ; un crédit client à imputer ensuite.
+      // Avoir libre : articles (retour en bon état, périmé ou abîmé, crédité sans retour), marques ou libellés libres ;
+      // le stock suit le motif. Aucun plafond : c'est un crédit client à imputer ensuite sur ses factures.
       if (!doc.reasonKey) throw new DocumentError("Indiquez le motif de l'avoir.");
-      if (reason?.with_return) throw new DocumentError("Un avoir sans facture d'origine ne fait pas rentrer de marchandise : choisissez un motif sans retour en stock.");
-      if (doc.lines.some((l) => l.productId)) throw new DocumentError("Un avoir financier se ventile par marque ou par libellé libre, sans article.");
     }
     if (type === "AVOIR" && doc.originDocumentId) {
       const room = (await tx.execute<{ room: string }>(sql`

@@ -109,7 +109,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
             data={data}
             action={saveDocumentAction}
             canValidate={canValidate}
-            creditReasons={reasons.filter((r) => r.active).map((r) => ({ key: r.key, label: r.label, withReturn: r.withReturn }))}
+            creditReasons={reasons.filter((r) => r.active).map((r) => ({ key: r.key, label: r.label, withReturn: r.withReturn, returnWarehouseKey: r.returnWarehouseKey }))}
             warehouses={whs.filter((w) => w.active && w.kind === "INTERNE").map((w) => ({ key: w.key, label: w.label }))}
             initial={{
               id, clientId: doc.clientId, legalEntityId: doc.legalEntityId, date: doc.date, site: doc.site, salesRepId: doc.salesRepId, paymentModeKey: doc.paymentModeKey,
@@ -118,6 +118,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
                 key: l.id, productId: l.productId, inventoryItemId: l.inventoryItemId, designation: l.designation, ref: l.ref, quantity: String(Number(l.quantity)), freeQuantity: String(Number(l.freeQuantity)),
                 unitPriceHt: l.unitPriceHt, discountPct: String(Number(l.discountPct)), taxRate: l.taxRate, sourceLineId: l.sourceLineId, sourceNumber: l.sourceNumber,
                 returnWarehouseKey: l.returnWarehouseKey, maxQty: l.sourceLineId ? sources.get(l.sourceLineId) ?? null : null,
+                returnLot: type === "AVOIR" && !l.sourceLineId && l.lotAllocations?.[0] ? { lotNumber: l.lotAllocations[0].lotNumber, expiryDate: l.lotAllocations[0].expiryDate } : null,
               })),
             }}
           />

@@ -117,6 +117,9 @@ async function main() {
   const D = await import("@/lib/gestion/documents");
   const { iso, today } = await import("@/lib/format");
   const who = { id: u.id, name: u.name };
+  // Anti-doublon des commandes (0051) : deux commandes du même client par le même utilisateur en 20 s sont refusées ;
+  // les commandes suivantes du scénario sont saisies par d'autres comptes.
+  const [who2, who3, who4] = (await db.execute<{ id: string; name: string }>(sql`select id, name from users order by created_at offset 1 limit 3`)).rows;
   const day = iso(today());
   const client = await one<{ id: string }>(sql`select id from clients where account_code = ${"C" + tag}`);
   await db.execute(sql`update clients set city = 'CASABLANCA', billing_address = '23 AV HASSAN II' where id = ${client.id}::uuid`);
@@ -183,7 +186,7 @@ async function main() {
   assert.ok(!vbc.simulation && vbc.number.startsWith("BC"), vbc.number);
   assert.equal((await D.getDocument(bc))!.status, "VALIDE");
   assert.equal((await stockState({ productIds: [p1.id] }))[0].available, "143.000"); // une commande ne touche pas au stock
-  await refused("préparer un BL d'une commande brouillon", async () => D.createBLFromOrder(await D.saveDraft({ ...draft("1", "0"), type: "COMMANDE" }, who), who), /confirmée/);
+  await refused("préparer un BL d'une commande brouillon", async () => D.createBLFromOrder(await D.saveDraft({ ...draft("1", "0"), type: "COMMANDE" }, who2), who), /confirmée/);
   const blA = await D.createBLFromOrder(bc, who);
   const blADoc = (await D.getDocument(blA))!;
   assert.equal(blADoc.type, "BL");
@@ -221,7 +224,7 @@ async function main() {
 
   // Remise au-delà de la remise autorisée du client (25 %) : la confirmation de la commande la bloque ;
   // une fois débloquée, son BL la reprend sans redemander le déblocage (sauf si on la relève sur le BL).
-  const bcHigh = await D.saveDraft({ ...draft("2", "30"), type: "COMMANDE", globalDiscountPct: "5" }, who);
+  const bcHigh = await D.saveDraft({ ...draft("2", "30"), type: "COMMANDE", globalDiscountPct: "5" }, who3);
   await assert.rejects(D.validateDocument(bcHigh, who), (e) => e instanceof D.CommercialBlockError && /remise 33,5|remise 33.5/.test(e.message));
   await D.validateDocument(bcHigh, who, { override: true });
   const blHigh = await D.createBLFromOrder(bcHigh, who);
@@ -233,7 +236,7 @@ async function main() {
   assert.ok((await D.documentIssues((await D.getDocument(blHigh))!)).some((i) => i.code === "REMISE"), "remise relevée sur le BL au-delà de la commande non signalée");
   await D.deleteDraft(blHigh, who);
   // Commande sans aucune remise (saisie avant que la commande en porte une) : le BL reçoit la remise du client.
-  const bcZero = await D.saveDraft({ ...draft("1", "0"), type: "COMMANDE" }, who);
+  const bcZero = await D.saveDraft({ ...draft("1", "0"), type: "COMMANDE" }, who4);
   await D.validateDocument(bcZero, who);
   const blZero = (await D.getDocument(await D.createBLFromOrder(bcZero, who)))!;
   assert.deepEqual(blZero.lines.map((l) => l.discountPct), ["25.00"]);
@@ -409,7 +412,6 @@ async function main() {
   const brandRow = await one<{ name: string }>(sql`select name from brands where id = ${brand.id}::uuid`);
   const avf = await D.saveDraft({ type: "AVOIR", clientId: client.id, date: day, site: "COMANET", deliveryAddress: null, salesRepId: null, paymentModeKey: null, globalDiscountPct: "0", notes: null, reasonKey: "RETOUR",
     lines: [{ productId: null, designation: brandRow.name, quantity: "1", unitPriceHt: "500", discountPct: "0", taxRate: "20" }, { productId: null, designation: "Alphascience", quantity: "1", unitPriceHt: "250", discountPct: "0", taxRate: "20" }] }, who);
-  await refused("avoir financier avec retour en stock", () => D.validateDocument(avf, who), /sans retour en stock/);
   const avfDoc = (await D.getDocument(avf))!;
   await D.saveDraft({ id: avf, type: "AVOIR", clientId: client.id, date: day, site: "COMANET", deliveryAddress: null, salesRepId: null, paymentModeKey: null, globalDiscountPct: "0", notes: null, reasonKey: "REMISE_OBJECTIFS",
     lines: avfDoc.lines.map((l) => ({ productId: null, designation: l.designation, quantity: l.quantity, unitPriceHt: l.unitPriceHt, discountPct: l.discountPct, taxRate: l.taxRate })) }, who);
@@ -421,6 +423,42 @@ async function main() {
   await RG.allocateCredit(avf, faPay, "400", who);
   assert.equal((await RG.invoiceSettlement(faPay)).balance, "0.00");
   console.log(`✓ nom du client corrigé sur ${renamed.number} (ICE et montants figés), avoir financier ${vAvf.number} par marque (900 TTC) imputé sur une facture`);
+
+  // Avoir libre avec articles : le motif décide du stock (bon état → vendable, périmé → non vendable, sans retour → rien).
+  const head = { type: "AVOIR" as const, clientId: client.id, date: day, site: "COMANET", deliveryAddress: null, salesRepId: null, paymentModeKey: null, globalDiscountPct: "0", notes: null };
+  const st0 = Object.fromEntries((await stockState({ productIds: [p1.id, p2.id] })).map((x) => [x.productId, x]));
+  const avr = await D.saveDraft({ ...head, reasonKey: "RETOUR", lines: [
+    { productId: p1.id, quantity: "2", unitPriceHt: "100", discountPct: "10", returnWarehouseKey: "PRINCIPAL", returnLot: { lotNumber: "A" } },
+    { productId: p2.id, quantity: "1", unitPriceHt: "50", discountPct: "0", returnWarehouseKey: "PRINCIPAL" },
+    { productId: null, designation: "Geste commercial", quantity: "1", unitPriceHt: "20", discountPct: "0", taxRate: "20" },
+  ] }, who);
+  const vAvr = await D.validateDocument(avr, who);
+  const avrDoc = (await D.getDocument(avr))!;
+  const st1 = Object.fromEntries((await stockState({ productIds: [p1.id, p2.id] })).map((x) => [x.productId, x]));
+  assert.equal(Number(st1[p1.id].available) - Number(st0[p1.id].available), 2);
+  assert.equal(Number(st1[p2.id].available) - Number(st0[p2.id].available), 1);
+  assert.equal(avrDoc.lines[0].lotAllocations[0].lotNumber, "A");
+  assert.equal(avrDoc.lines[0].lotAllocations[0].expiryDate, "2027-01-31");
+  assert.ok(avrDoc.lines[0].lotAllocations[0].lotId);
+  assert.equal((await one<{ n: number }>(sql`select count(*)::int as n from stock_movements where source_type = 'AVOIR' and source_id = ${avr}::uuid and type = 'RETOUR_CLIENT'`)).n, 2);
+  console.log(`✓ avoir libre ${vAvr.number} : 2 produits remis en stock vendable (lot A et sa péremption repris), ligne libre sans stock`);
+
+  const avp = await D.saveDraft({ ...head, reasonKey: "PERIME", lines: [
+    { productId: p1.id, quantity: "1", unitPriceHt: "100", discountPct: "0", returnWarehouseKey: "NON_VENDABLE", returnLot: { lotNumber: "Z" + tag, expiryDate: "2026-09-30" } },
+  ] }, who);
+  await D.validateDocument(avp, who);
+  const st2 = (await stockState({ productIds: [p1.id] }))[0];
+  assert.equal(st2.available, st1[p1.id].available);
+  assert.equal(Number(st2.internalTotal) - Number(st1[p1.id].internalTotal), 1);
+  assert.equal((await one<{ e: string }>(sql`select expiry_date::text as e from stock_lots where product_id = ${p1.id}::uuid and lot_number = ${"Z" + tag}`)).e, "2026-09-30");
+  console.log("✓ avoir libre périmé : entrée au dépôt non vendable, lot inconnu créé avec sa péremption, stock vendable inchangé");
+
+  const avs = await D.saveDraft({ ...head, reasonKey: "SANS_RETOUR", lines: [{ productId: p2.id, quantity: "3", unitPriceHt: "50", discountPct: "0" }] }, who);
+  await D.validateDocument(avs, who);
+  assert.equal((await stockState({ productIds: [p2.id] }))[0].internalTotal, st1[p2.id].internalTotal);
+  assert.equal((await D.getDocument(avs))!.ttc !== "0.00", true);
+  await refused("avoir libre sans motif", async () => D.validateDocument(await D.saveDraft({ ...head, reasonKey: null, lines: [{ productId: p2.id, quantity: "1", unitPriceHt: "50", discountPct: "0" }] }, who), who), /motif/);
+  console.log("✓ avoir libre crédité sans retour : montant crédité, aucun mouvement de stock");
 
   // Fusion de deux fiches d'un même point de vente (PARA LA GLOIRE aux ventes, LA GLOIRE au terrain) et
   // facturation au nom de la raison sociale absorbée.

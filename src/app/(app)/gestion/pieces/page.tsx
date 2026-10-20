@@ -40,7 +40,7 @@ export default async function PiecesPage(props: { searchParams: Promise<{ type?:
         subtitle={MODE_HINT[mode]}
         actions={<span className="flex gap-2 flex-wrap">
           {type !== "COMMANDE" && <Link href={`/gestion/exports?types=${type}`} className="btn-secondary btn-sm">Sélectionner et exporter</Link>}
-          {canCreate && <Link href={`/gestion/pieces/nouveau?type=${type}`} className="btn-primary btn-sm">+ {type === "COMMANDE" ? "Commande client" : type === "BL" ? "Bon de livraison" : type === "AVOIR" ? "Avoir financier" : "Facture de services"}</Link>}
+          {canCreate && <Link href={`/gestion/pieces/nouveau?type=${type}`} className="btn-primary btn-sm">+ {type === "COMMANDE" ? "Commande client" : type === "BL" ? "Bon de livraison" : type === "AVOIR" ? "Avoir" : "Facture de services"}</Link>}
         </span>}
       >
         <GestionTabs current="/gestion/pieces" />
@@ -58,7 +58,7 @@ export default async function PiecesPage(props: { searchParams: Promise<{ type?:
             ? "Un bon de livraison sort le stock du dépôt principal (lot au plus proche de la péremption). Il se facture ensuite, seul ou regroupé avec d'autres BL du même client."
             : type === "FACTURE"
               ? "Une facture d'articles se crée depuis les BL (onglet « Facturer des BL ») ; une facture directe ne porte que des services ou des frais."
-              : "Un avoir se crée depuis une facture validée (bouton « Faire un avoir » sur la facture) : retour de marchandise, erreur de prix. Une remise hors facture (objectifs atteints) se fait en « avoir financier », ventilé par marque."}
+              : "Un avoir se crée depuis une facture validée (bouton « Faire un avoir » sur la facture), ou librement avec « + Avoir » : produits rendus (remis en stock vendable, ou au dépôt non vendable s'ils sont périmés ou abîmés), produits crédités sans retour, ou remise par marque (objectifs atteints). Le motif décide du stock."}
           action={canCreate && (type === "BL" || type === "COMMANDE") ? <Link href={`/gestion/pieces/nouveau?type=${type}`} className="btn-primary btn-sm">{type === "BL" ? "Créer le premier BL" : "Saisir la première commande"}</Link> : undefined}
         />
       ) : (

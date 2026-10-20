@@ -1043,11 +1043,16 @@ export const documentSequences = pgTable(
   (t) => [primaryKey({ columns: [t.seriesKey, t.year] })],
 );
 
-/** Motifs d'avoir (modifiables) ; `withReturn` : le motif implique un retour physique de marchandise. */
+/**
+ * Motifs d'avoir (modifiables). `returnWarehouseKey` : dépôt interne où rentre la marchandise rendue (retour en bon
+ * état → entrepôt vendable, périmé ou abîmé → non vendable) ; NULL = aucun mouvement (financier, crédité sans retour).
+ * `withReturn` suit toujours le dépôt (contrainte en base, migration 0053).
+ */
 export const creditReasons = pgTable("credit_reasons", {
   key: text("key").primaryKey(),
   label: text("label").notNull(),
   withReturn: boolean("with_return").notNull().default(false),
+  returnWarehouseKey: text("return_warehouse_key").references(() => warehouses.key, { onUpdate: "cascade" }),
   sort: integer("sort").notNull().default(0),
   active: boolean("active").notNull().default(true),
 });
@@ -1157,7 +1162,7 @@ export const salesDocumentLines = pgTable(
     /** Ligne de commande client : quantité déjà livrée par des BL validés (le reste à livrer = quantité − livré). */
     deliveredQty: numeric("delivered_qty", { precision: 12, scale: 3 }).notNull().default("0"),
     returnWarehouseKey: text("return_warehouse_key").references(() => warehouses.key, { onUpdate: "cascade" }),
-    lotAllocations: jsonb("lot_allocations").$type<{ lotId: string; lotNumber: string; expiryDate: string | null; qty: string }[]>().notNull().default([]),
+    lotAllocations: jsonb("lot_allocations").$type<{ lotId: string | null; lotNumber: string; expiryDate: string | null; qty: string }[]>().notNull().default([]),
   },
   (t) => [
     index("sales_document_lines_document_idx").on(t.documentId, t.position),

@@ -139,7 +139,7 @@ Règles :
 | **+ Bon de livraison** (`/gestion/pieces/nouveau?type=BL`) | Saisie pensée pour le téléphone : client (recherche), date, site, commercial, règlement ; articles par nom, référence, marque ou code-barres, avec le stock du dépôt principal ; quantité, UG, P.U. HT, remise ; totaux en direct. « Brouillon » ou « Valider ». |
 | **Fiche pièce** (`/gestion/pieces/[id]`) | Brouillon : modification, aperçu PDF « Provisoire », blocages à lever, suppression. Validée : lignes (lots servis, quantités facturées), totaux, montant en lettres, échéance, pièces liées, blocages levés, historique ; actions Marquer livré, Facturer ce client, Faire un avoir, Annuler le BL ; PDF, téléchargement, envoi WhatsApp / e-mail avec lien public. |
 | **Facturer des BL** (`/gestion/pieces/facturer`) | Clients ayant des BL à facturer (du plus ancien), puis choix des BL : une facture brouillon regroupe leur reste à facturer. |
-| **Paramètres → Gestion commerciale** | Mode de bascule (Sage fait foi / période parallèle), modèle de facture (PPH TTC + remise, ou prix net), tolérance de remise, « Livré » exigé avant facturation, contrôle d'encours, libellés du montant en lettres, durée des liens de partage, alerte BL non facturés ; motifs d'avoir (avec ou sans retour en stock). |
+| **Paramètres → Gestion commerciale** | Mode de bascule (Sage fait foi / période parallèle), modèle de facture (PPH TTC + remise, ou prix net), tolérance de remise, « Livré » exigé avant facturation, contrôle d'encours, libellés du montant en lettres, durée des liens de partage, alerte BL non facturés ; motifs d'avoir et leur effet sur le stock (retour au dépôt vendable, au dépôt non vendable, ou aucun mouvement). |
 | **Action Center** (catégorie « Gestion commerciale ») | BL non facturés au-delà du délai réglé, pièces dont le déblocage est demandé, lots périmés ou proches de la péremption encore en stock. |
 | **Recherche** et copilote | Un numéro de BL, de facture ou d'avoir se retrouve par la recherche universelle (droits Commandes / Livraisons / Facturation et portée client respectés). |
 
@@ -157,8 +157,9 @@ Règles :
   l'enregistrement : le navigateur n'est jamais cru.
 - **Stock.** Le BL sort le stock à la validation (quantité + UG) du dépôt principal ; pour un article suivi par lot,
   les lots sont servis au plus proche de la péremption, sans jamais servir un lot périmé, et imprimés sur le BL.
-  Stock insuffisant : refus (ou alerte, selon le réglage). Un avoir « avec retour » fait rentrer la marchandise au
-  dépôt choisi, sur le lot livré à l'origine.
+  Stock insuffisant : refus (ou alerte, selon le réglage). Un avoir dont le motif porte un dépôt de retour fait rentrer
+  la marchandise dans ce dépôt (modifiable ligne par ligne), sur le lot livré à l'origine (avoir de facture) ou sur le
+  lot désigné (avoir libre).
 - **Facture d'articles = depuis les BL.** Une facture directe ne porte que des services ou des frais ; un article
   stocké se facture toujours depuis son BL (c'est le BL qui a sorti le stock). Une facture regroupe les BL d'un
   seul client, de même nature (réelle / simulation) et de même remise globale ; les UG suivent la première
@@ -349,9 +350,16 @@ sur le serveur Next : `/gestion/pieces/<id>/pdf`.
   commande se change par la commande. Refusé pour une facture ou un avoir (pièce fiscale : avoir puis nouvelle
   facture) et pour un BL déjà facturé. Le garde-fou de la base ne laisse bouger client, identité et empreinte que pour
   un BL ou une commande, et seulement depuis `reassignDocumentClient()`.
-- **Avoir financier** (Pièces → Avoirs → « + Avoir financier ») : sans facture ni BL, motif sans retour en stock
-  (« Remise sur objectifs » par défaut), une ligne par marque avec son montant HT. Sans effet sur le stock ni sur le
-  sell-in produit ; validé, il devient un crédit client imputable sur ses factures depuis sa fiche.
+- **Avoir libre** (Pièces → Avoirs → « + Avoir », migration 0053) : sans facture ni BL d'origine, motif obligatoire.
+  Lignes : produits (au dernier prix et à la dernière remise du client sur ses BL et factures validés, sinon PPH HT
+  moins la remise du client ; modifiables), marques avec un montant HT (remise sur objectifs) ou libellés libres. Le
+  **motif décide du stock** (`credit_reasons.return_warehouse_key`, réglable dans Paramètres → Gestion) : « Retour en
+  bon état » → entrepôt COMANET (vendable) ; « Retour périmé ou abîmé » → dépôt Non vendable ; « Produit crédité sans
+  retour » (casse, perte, détruit chez le client) et motifs financiers → aucun mouvement. Le dépôt se change ligne par
+  ligne. Produit suivi par lot : le lot rendu se choisit parmi les lots livrés à ce client ou se saisit (lot inconnu
+  créé au journal avec la péremption saisie), facultatif ; il est imprimé sur l'avoir. Aucun plafond de quantité
+  (décision d'Hicham, 20/10/2026). Les lignes produit réduisent le sell-in comme un avoir de facture (projection) ;
+  validé, l'avoir devient un crédit client imputable sur ses factures depuis sa fiche.
 - **Export groupé** (Envoi au comptable, ou « Sélectionner et exporter » depuis la liste des pièces) : période,
   types (BL, factures, avoirs), cases à cocher, puis un ZIP assemblé dans le navigateur avec le PDF de chaque pièce
   et un récapitulatif CSV (sans limite de nombre). Le récapitulatif comptable du mois reste disponible en Excel.
