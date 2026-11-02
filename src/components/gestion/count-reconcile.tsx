@@ -3,12 +3,12 @@
 import { useMemo, useState, useTransition } from "react";
 
 /**
- * Rapprochement d'un inventaire : théorique figé, compté (somme des saisies), écart en quantité,
+ * Rapprochement d'un inventaire : théorique figé (+ pièces antérieures saisies après le démarrage), compté (somme des saisies), écart en quantité,
  * valeur et %, motif et commentaire (enregistrés à chaque changement). Filtres : écarts, non comptés.
  */
 export type ReconcileLine = {
   id: string; product: string; ref: string | null; brand: string | null; lotNumber: string | null; expiryDate: string | null;
-  theoreticalQty: string; counted: string | null; entries: number; gapQty: string | null; gapValue: string | null; gapPct: number | null;
+  theoreticalQty: string; lateQty?: string | null; counted: string | null; entries: number; gapQty: string | null; gapValue: string | null; gapPct: number | null;
   reasonKey: string | null; comment: string | null; addedDuringCount: boolean;
 };
 
@@ -70,7 +70,7 @@ export function CountReconcile({ countId, lines, reasons, editable, save }: {
                 <tr key={l.id} className="border-b border-line last:border-0 align-top">
                   <td className="px-2 py-2"><div className="font-medium">{l.product}</div>
                     <div className="text-faint text-[11px]">{[l.ref, l.brand, l.lotNumber ? `lot ${l.lotNumber}` : null, l.addedDuringCount ? "trouvé au comptage" : null].filter(Boolean).join(" · ")}</div></td>
-                  <td className="px-2 py-2 text-right tabular-nums">{fq(l.theoreticalQty)}</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{fq(l.theoreticalQty)}{l.lateQty ? <div className="text-[10.5px] text-faint" title="Pièces datées d'avant le comptage, saisies après son démarrage">dont {Number(l.lateQty) > 0 ? "+" : ""}{fq(l.lateQty)} saisi après</div> : null}</td>
                   <td className="px-2 py-2 text-right tabular-nums">{l.counted === null ? <span className="text-orange">non compté</span> : <>{fq(l.counted)}<div className="text-[10.5px] text-faint">{l.entries} saisie{l.entries > 1 ? "s" : ""}</div></>}</td>
                   <td className={`px-2 py-2 text-right tabular-nums font-medium ${g && g < 0 ? "text-red" : g && g > 0 ? "text-green" : ""}`}>{g === null ? "—" : `${g > 0 ? "+" : ""}${fq(l.gapQty)}`}{l.gapPct !== null && g ? <div className="text-[10.5px] font-normal">{l.gapPct > 0 ? "+" : ""}{l.gapPct.toLocaleString("fr-FR")} %</div> : null}</td>
                   <td className="px-2 py-2 text-right tabular-nums">{g ? fm(l.gapValue) : ""}</td>

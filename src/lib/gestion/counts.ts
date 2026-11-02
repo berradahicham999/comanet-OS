@@ -6,7 +6,7 @@ import { audit, type AuditActor } from "@/lib/audit";
 import { BUSINESS_TZ, iso, today } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { pgArray } from "@/lib/sql-array";
-import { countLineKey, countStats, countedByLine, gapLeads, gapOverOutflows, lineGap, recurringGaps, type CountStatus, type GapLead } from "./counts-shared";
+import { countLineKey, countStats, countedByLine, gapLeads, gapOverOutflows, lineGap, recurringGaps, theoreticalWithLate, type CountStatus, type GapLead } from "./counts-shared";
 import { recordStockMovements, type LedgerInput } from "./ledger";
 import { SCALE, formatScaled, parseDecimal } from "./money";
 import { allocateNumber } from "./numbering";
@@ -29,6 +29,8 @@ const MODULE = "stock" as const;
 export type CountLineView = {
   id: string; productId: string; product: string; ref: string | null; ean: string | null; brand: string | null; trackLots: boolean;
   lotNumber: string | null; expiryDate: string | null; theoreticalQty: string; cmup: string | null;
+  /** Part du théorique venue de mouvements antérieurs au comptage saisis après son démarrage (null si aucun). */
+  lateQty: string | null;
   counted: string | null; entries: number; gapQty: string | null; gapValue: string | null; gapPct: number | null;
   reasonKey: string | null; comment: string | null; addedDuringCount: boolean;
 };
@@ -61,18 +63,29 @@ export async function getCount(id: string): Promise<CountView | null> {
     c.brandIds.length ? db.execute<{ id: string; name: string }>(sql`select id, name from brands where id = any(${pgArray(c.brandIds)}) order by name`) : Promise.resolve({ rows: [] as { id: string; name: string }[] }),
   ]);
   const counted = countedByLine(entries.rows.map((e) => ({ productId: e.product_id, lotNumber: e.lot_number, quantity: e.quantity })));
+  const closed = c.status === "VALIDE";
+  // Comptage ouvert : mouvements datés d'avant le jour du comptage, enregistrés après son démarrage.
+  const late = new Map<string, string>();
+  if (c.status === "EN_COURS" && c.startedAt) {
+    const rows = (await db.execute<{ product_id: string; lot_number: string | null; qty: string }>(sql`
+      select m.product_id, l.lot_number, sum(m.quantity)::text as qty from stock_movements m left join stock_lots l on l.id = m.lot_id
+      where m.warehouse_key = ${c.warehouseKey} and m.date < ${c.countDate}::date and m.created_at > ${c.startedAt.toISOString()}::timestamptz
+      group by 1, 2 having sum(m.quantity) <> 0`)).rows;
+    for (const r of rows) late.set(countLineKey(r.product_id, r.lot_number), r.qty);
+  }
   const perLine = new Map<string, number>();
   for (const e of entries.rows) { const k = countLineKey(e.product_id, e.lot_number); perLine.set(k, (perLine.get(k) ?? 0) + 1); }
-  const closed = c.status === "VALIDE";
   return {
     ...c,
     lines: lines.rows.map((r) => {
       const k = countLineKey(String(r.product_id), r.lot_number as string | null);
       const cnt = closed ? (r.counted_qty as string | null) : counted.get(k) ?? null;
-      const g = cnt === null ? null : lineGap(String(r.theoretical_qty), cnt, r.cmup as string | null);
+      const lateQty = late.get(k) ?? null;
+      const theoretical = theoreticalWithLate(String(r.theoretical_qty), lateQty);
+      const g = cnt === null ? null : lineGap(theoretical, cnt, r.cmup as string | null);
       return {
         id: String(r.id), productId: String(r.product_id), product: String(r.product), ref: r.ref as string | null, ean: r.ean as string | null, brand: r.brand as string | null,
-        trackLots: !!r.track_lots, lotNumber: r.lot_number as string | null, expiryDate: r.expiry_date as string | null, theoreticalQty: String(r.theoretical_qty),
+        trackLots: !!r.track_lots, lotNumber: r.lot_number as string | null, expiryDate: r.expiry_date as string | null, theoreticalQty: theoretical, lateQty,
         cmup: r.cmup as string | null, counted: cnt, entries: perLine.get(k) ?? 0, gapQty: g?.gapQty ?? null, gapValue: g?.gapValue ?? null, gapPct: g?.gapPct ?? null,
         reasonKey: r.reason_key as string | null, comment: r.comment as string | null, addedDuringCount: !!r.added_during_count,
       };
@@ -129,7 +142,8 @@ export async function deleteCount(id: string, actor: AuditActor): Promise<void> 
 
 /**
  * Démarre le comptage : fige, pour chaque article stocké du périmètre, le théorique par lot dans le
- * dépôt (somme des mouvements à cet instant) et le CMUP. Un article sans stock a une ligne à 0 :
+ * dépôt (somme des mouvements à cet instant) et le CMUP. Une pièce datée d'avant le comptage et saisie
+ * ensuite s'y ajoute à la lecture (`getCount()`). Un article sans stock a une ligne à 0 :
  * ce qu'on trouve en rayon se compte aussi.
  */
 export async function startCount(id: string, actor: AuditActor): Promise<number> {
@@ -228,7 +242,8 @@ export async function setLineReason(lineId: string, reasonKey: string | null, co
 /**
  * Valide l'inventaire : compté = somme des saisies ; chaque ligne comptée en écart devient un
  * mouvement AJUSTEMENT_INVENTAIRE (quantité = écart, sur son lot, à la date du comptage) ; une ligne
- * sans saisie n'est pas ajustée (non comptée ≠ zéro). Tout écart exige un motif. Numéro INV.
+ * sans saisie n'est pas ajustée (non comptée ≠ zéro). Tout écart exige un motif. Numéro INV. Le théorique
+ * comprend les mouvements datés d'avant le comptage mais saisis après son démarrage (`theoreticalWithLate()`).
  */
 export async function validateCount(id: string, actor: AuditActor): Promise<{ number: string; adjustments: number }> {
   return db.transaction(async (tx) => {
@@ -242,7 +257,8 @@ export async function validateCount(id: string, actor: AuditActor): Promise<{ nu
     const missingReason = counted.filter((l) => (parseDecimal(l.gapQty, SCALE.qty) ?? 0n) !== 0n && !l.reasonKey);
     if (missingReason.length) throw new CountError(`Motif manquant pour ${missingReason.length} écart(s) : ${missingReason.slice(0, 3).map((l) => l.product + (l.lotNumber ? ` (lot ${l.lotNumber})` : "")).join(", ")}${missingReason.length > 3 ? "…" : ""}.`);
     for (const l of view.lines) {
-      await tx.update(stockCountLines).set({ countedQty: l.counted, gapQty: l.gapQty, gapValue: l.gapValue }).where(eq(stockCountLines.id, l.id));
+      // Le théorique enregistré inclut les mouvements saisis en retard : écart = compté − théorique, toujours.
+      await tx.update(stockCountLines).set({ theoreticalQty: l.theoreticalQty, countedQty: l.counted, gapQty: l.gapQty, gapValue: l.gapValue }).where(eq(stockCountLines.id, l.id));
     }
     const moves: LedgerInput[] = counted.filter((l) => (parseDecimal(l.gapQty, SCALE.qty) ?? 0n) !== 0n).map((l) => ({
       productId: l.productId, type: "AJUSTEMENT_INVENTAIRE", quantity: l.gapQty!, warehouseKey: c.warehouseKey, lotNumber: l.lotNumber, expiryDate: l.expiryDate,
@@ -292,14 +308,14 @@ export async function gapAnalysis(id: string): Promise<GapAnalysisRow[]> {
   const [blAfter, lateBls, recAfter, openOrders, credits, samples, sampleMoves, outflows, since, history] = await Promise.all([
     db.execute<{ product_id: string; n: number; qty: string }>(sql`
       select l.product_id, count(distinct d.id)::int as n, sum(l.quantity + l.free_quantity)::text as qty from sales_document_lines l join sales_documents d on d.id = l.document_id
-      where d.type = 'BL' and d.status <> 'BROUILLON' and d.date <= ${c.countDate}::date and d.validated_at > ${started}::timestamptz and l.product_id = any(${pgArray(pids)}) group by 1`),
+      where d.type = 'BL' and d.status <> 'BROUILLON' and d.date = ${c.countDate}::date and d.validated_at > ${started}::timestamptz and l.product_id = any(${pgArray(pids)}) group by 1`),
     db.execute<{ product_id: string; n: number }>(sql`
       select l.product_id, count(distinct d.id)::int as n from sales_document_lines l join sales_documents d on d.id = l.document_id
       where d.type = 'BL' and d.status <> 'BROUILLON' and d.date between ${from}::date and ${c.countDate}::date
         and d.validated_at > (d.date::timestamp + make_interval(hours => ${g.lateEntryHours + 24})) and l.product_id = any(${pgArray(pids)}) group by 1`),
     db.execute<{ product_id: string; n: number; qty: string }>(sql`
       select l.product_id, count(distinct d.id)::int as n, sum(l.quantity)::text as qty from purchase_document_lines l join purchase_documents d on d.id = l.document_id
-      where d.type = 'RECEPTION' and d.status <> 'BROUILLON' and d.date <= ${c.countDate}::date and d.validated_at > ${started}::timestamptz and l.product_id = any(${pgArray(pids)}) group by 1`),
+      where d.type = 'RECEPTION' and d.status <> 'BROUILLON' and d.date = ${c.countDate}::date and d.validated_at > ${started}::timestamptz and l.product_id = any(${pgArray(pids)}) group by 1`),
     db.execute<{ product_id: string; qty: string }>(sql`
       select l.product_id, sum(l.quantity - l.received_qty)::text as qty from purchase_document_lines l join purchase_documents d on d.id = l.document_id
       where d.type = 'COMMANDE' and d.status in ('VALIDE', 'PARTIELLE') and l.product_id = any(${pgArray(pids)}) group by 1`),
