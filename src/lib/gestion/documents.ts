@@ -592,7 +592,7 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
       if (last && doc.date < last) throw new DocumentError(`Une facture ne peut pas être datée avant la dernière facture validée (${last}).`);
     }
 
-    // Stock : BL = sortie (FEFO pour les articles suivis par lot) ; avoir avec retour = entrée.
+    // Stock : BL = sortie (FEFO pour les articles suivis par lot ; sans lot d'abord sinon) ; avoir avec retour = entrée.
     const movements: LedgerInput[] = [];
     const lineAllocations = new Map<string, { lotId: string; lotNumber: string; expiryDate: string | null; qty: string }[]>();
     if (type === "BL") {
@@ -602,7 +602,18 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
       for (const l of doc.lines.filter((x) => x.productId)) {
         const out = (parseDecimal(l.quantity, SCALE.qty) ?? 0n) + (parseDecimal(l.freeQuantity, SCALE.qty) ?? 0n);
         if (out <= 0n) continue;
-        if (l.trackLots && !l.lotId) {
+        // Article non suivi par lot : on sort d'abord le stock sans lot, puis, s'il en manque, les lots que
+        // l'inventaire a pu enregistrer (lot trouvé en rayon), au plus tôt périmé.
+        let fromLots = out;
+        if (!l.trackLots && !l.lotId) {
+          const noLot = fromDb((await tx.execute<{ qty: string | null }>(sql`
+            select sum(quantity)::text as qty from stock_movements where product_id = ${l.productId}::uuid and warehouse_key = ${l.warehouseKey} and lot_id is null`)).rows[0]?.qty ?? "0", SCALE.qty) ?? 0n;
+          const taken = noLot <= 0n ? 0n : noLot < out ? noLot : out;
+          fromLots = out - taken;
+          if (taken > 0n) movements.push({ productId: l.productId!, type: "SORTIE_BL", quantity: formatScaled(-taken, SCALE.qty), warehouseKey: l.warehouseKey, date: doc.date, sourceType: "BL", sourceId: id, sourceLineId: l.id });
+          if (fromLots === 0n) continue;
+        }
+        if (!l.lotId) {
           const key = `${l.productId}|${l.warehouseKey}`;
           if (!lotStock.has(key)) {
             lotStock.set(key, (await tx.execute<{ lot_id: string; lot_number: string; expiry_date: string | null; qty: string }>(sql`
@@ -611,9 +622,9 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
               .map((r) => ({ lotId: r.lot_id, lotNumber: r.lot_number, expiryDate: r.expiry_date, available: fromDb(r.qty, SCALE.qty) ?? 0n })));
           }
           const lots = lotStock.get(key)!;
-          const alloc = allocateFefo(lots, out, todayIso);
+          const alloc = allocateFefo(lots, fromLots, todayIso);
           if (alloc.missing > 0n && g.insufficientStock === "BLOCK") {
-            throw new DocumentError(`Stock insuffisant pour ${l.designation} : il manque ${formatScaled(alloc.missing, SCALE.qty).replace(/\.?0+$/, "")} unité(s) en lots non périmés.`);
+            throw new DocumentError(`Stock insuffisant pour ${l.designation} : il manque ${formatScaled(alloc.missing, SCALE.qty).replace(/\.?0+$/, "")} unité(s)${l.trackLots ? " en lots non périmés" : ""}.`);
           }
           for (const a of alloc.allocations) {
             const lot = lots.find((x) => x.lotId === a.lotId)!;

@@ -376,6 +376,18 @@ async function main() {
   assert.equal(closed2.theoreticalQty, late2.theoreticalQty);
   assert.equal(closed2.gapQty, `-${late2.theoreticalQty}`);
   await recordStockMovements([{ productId: p2.id, type: "STOCK_INITIAL", quantity: frozen2, unitCost: "200", date: day, sourceType: "MANUEL" }], actor); // remis pour la suite
+
+  // Article non suivi par lot dont l'inventaire a enregistré un lot trouvé en rayon : le BL sort d'abord
+  // le stock sans lot, puis le lot (avant : « Stock insuffisant … 0 disponible » alors que le lot était plein).
+  await recordStockMovements([{ productId: p2.id, type: "STOCK_INITIAL", quantity: "5", unitCost: "200", lotNumber: "LX", expiryDate: "2029-01-01", date: day, sourceType: "MANUEL" }], actor);
+  const blMix = await D.saveDraft({ type: "BL", clientId: client.id, date: day, site: "COMANET", deliveryAddress: null, salesRepId: null, paymentModeKey: null, globalDiscountPct: "0", notes: null,
+    lines: [{ productId: p2.id, quantity: String(Number(frozen2) + 3), unitPriceHt: "200", discountPct: "0" }] }, who);
+  await D.validateDocument(blMix, who, { override: true });
+  const stMix = (await stockState({ productIds: [p2.id] }))[0];
+  assert.equal(stMix.available, "2.000");
+  assert.equal(stMix.lots.find((x) => x.lotNumber === "LX")!.qty, "2.000");
+  await recordStockMovements([{ productId: p2.id, type: "STOCK_INITIAL", quantity: frozen2, unitCost: "200", date: day, sourceType: "MANUEL" }], actor); // remis pour la suite
+  console.log(`✓ BL d'un article non suivi par lot : ${frozen2} sortis sans lot puis 3 du lot LX trouvé à l'inventaire`);
   console.log(`✓ inventaire : sortie datée de la veille saisie après le démarrage reprise dans le théorique (${frozen2} → ${late2.theoreticalQty}), compté 0 validé sans « stock insuffisant »`);
 
 
