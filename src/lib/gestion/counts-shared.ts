@@ -31,6 +31,15 @@ export function countedByLine(entries: { productId: string; lotNumber: string | 
   return new Map([...m].map(([k, v]) => [k, formatScaled(v, SCALE.qty)]));
 }
 
+/**
+ * Théorique retenu = théorique figé au démarrage + mouvements datés d'AVANT le jour du comptage mais
+ * enregistrés après le démarrage (BL ou réception saisis en retard) : la marchandise était déjà sortie
+ * ou entrée quand on a compté. Sans eux, l'ajustement reprendrait une sortie déjà passée au journal.
+ */
+export function theoreticalWithLate(frozen: string, late: string | null | undefined): string {
+  return formatScaled((q(frozen) ?? 0n) + (q(late ?? "0") ?? 0n), SCALE.qty);
+}
+
 export type LineGap = { gapQty: string; gapValue: string | null; gapPct: number | null };
 
 /** Écart = compté − théorique ; valeur au CMUP figé au démarrage ; % du théorique (— si théorique nul). */
@@ -112,11 +121,11 @@ export type GapLead = { code: LeadCode; data: string; hypothesis: string };
 /** Faits mesurés pour un article en écart (tous en quantités, texte décimal ; 0 = rien trouvé). */
 export type GapFacts = {
   gapQty: string;
-  /** BL datés au plus tard du jour du comptage mais validés après son démarrage (non inclus dans le théorique figé). */
+  /** BL datés du jour du comptage mais validés après son démarrage (les antérieurs sont déjà dans le théorique). */
   blAfterStart: { count: number; qty: string };
   /** BL de la période validés plus de N heures après leur date. */
   lateBls: { count: number; hours: number };
-  /** Réceptions datées au plus tard du jour du comptage mais validées après son démarrage. */
+  /** Réceptions datées du jour du comptage mais validées après son démarrage (les antérieures sont déjà dans le théorique). */
   receptionsAfterStart: { count: number; qty: string };
   /** Reste à recevoir de commandes ouvertes (livraison possiblement arrivée, non réceptionnée). */
   openOrdersQty: string;
@@ -144,7 +153,7 @@ export function gapLeads(f: GapFacts): GapLead[] {
   const out: GapLead[] = [];
   if (missing && f.blAfterStart.count > 0) out.push({
     code: "BL_APRES_DEMARRAGE",
-    data: `${f.blAfterStart.count} BL daté(s) au plus tard du jour du comptage, validé(s) après son démarrage (${fmt(f.blAfterStart.qty)} u.).`,
+    data: `${f.blAfterStart.count} BL daté(s) du jour du comptage, validé(s) après son démarrage (${fmt(f.blAfterStart.qty)} u.).`,
     hypothesis: "La marchandise est sortie avant le comptage mais le BL n'était pas encore validé : le théorique figé la comptait encore. Le manquant peut n'être qu'apparent.",
   });
   if (missing && f.lateBls.count > 0) out.push({
@@ -154,7 +163,7 @@ export function gapLeads(f: GapFacts): GapLead[] {
   });
   if (!missing && f.receptionsAfterStart.count > 0) out.push({
     code: "RECEPTION_APRES_DEMARRAGE",
-    data: `${f.receptionsAfterStart.count} réception(s) datée(s) au plus tard du jour du comptage, validée(s) après son démarrage (${fmt(f.receptionsAfterStart.qty)} u.).`,
+    data: `${f.receptionsAfterStart.count} réception(s) datée(s) du jour du comptage, validée(s) après son démarrage (${fmt(f.receptionsAfterStart.qty)} u.).`,
     hypothesis: "La marchandise était en rayon mais absente du théorique figé : le surplus peut n'être qu'apparent.",
   });
   if (!missing && n(f.openOrdersQty) > 0n) out.push({

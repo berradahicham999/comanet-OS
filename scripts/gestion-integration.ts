@@ -358,6 +358,26 @@ async function main() {
   await refused("modifier une ligne d'inventaire validé", () => db.execute(sql`update stock_count_lines set counted_qty = 0 where count_id = ${cnt}::uuid`), /clos/);
   console.log(`✓ inventaire ${vinv.number} validé : 2 ajustements (lot L1 −3, lot L9 +4), non comptés non ajustés, motif exigé, inventaire figé`);
 
+  // Pièce datée d'avant le comptage, saisie après son démarrage : elle entre dans le théorique, sinon
+  // l'ajustement reprendrait une sortie déjà passée au journal (« Stock insuffisant » à la validation).
+  const cnt2 = await K.createCount({ title: "IT inventaire tardif " + tag, warehouseKey: "PRINCIPAL", brandIds: [brand.id], blind: false, countDate: day, notes: null }, who);
+  await K.startCount(cnt2, who);
+  const frozen2 = (await K.getCount(cnt2))!.lines.find((l) => l.productId === p2.id && !l.lotNumber)!.theoreticalQty;
+  const yesterday = iso(new Date(new Date(`${day}T12:00:00Z`).getTime() - 86400000));
+  await recordStockMovements([{ productId: p2.id, type: "CASSE_PERIME", quantity: "-2", date: yesterday, sourceType: "MANUEL" }], actor);
+  const late2 = (await K.getCount(cnt2))!.lines.find((l) => l.productId === p2.id && !l.lotNumber)!;
+  assert.equal(late2.lateQty, "-2.000");
+  assert.equal(Number(late2.theoreticalQty), Number(frozen2) - 2);
+  await K.addEntry(cnt2, { productId: p2.id, quantity: "0" }, who);
+  await K.setLineReason(late2.id, "ERREUR_COMPTAGE", null);
+  await K.validateCount(cnt2, who);
+  assert.equal((await stockState({ productIds: [p2.id] }))[0].available, "0.000");
+  const closed2 = (await K.getCount(cnt2))!.lines.find((l) => l.id === late2.id)!;
+  assert.equal(closed2.theoreticalQty, late2.theoreticalQty);
+  assert.equal(closed2.gapQty, `-${late2.theoreticalQty}`);
+  await recordStockMovements([{ productId: p2.id, type: "STOCK_INITIAL", quantity: frozen2, unitCost: "200", date: day, sourceType: "MANUEL" }], actor); // remis pour la suite
+  console.log(`✓ inventaire : sortie datée de la veille saisie après le démarrage reprise dans le théorique (${frozen2} → ${late2.theoreticalQty}), compté 0 validé sans « stock insuffisant »`);
+
 
   // Règlements et bascule (lot 5) : imputation partielle, dépassement refusé, virement encaissé d'emblée,
   // impayé qui rouvre la facture, règlement figé, reprise Sage, bascule réelle (numéro légal, projection).

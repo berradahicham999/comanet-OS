@@ -1,7 +1,7 @@
 /** Gestion commerciale — inventaires (src/lib/gestion/counts-shared.ts). */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { countLineKey, countStats, countedByLine, gapLeads, gapOverOutflows, lineGap, recurringGaps, type GapFacts } from "@/lib/gestion/counts-shared";
+import { countLineKey, countStats, countedByLine, gapLeads, gapOverOutflows, lineGap, recurringGaps, theoreticalWithLate, type GapFacts } from "@/lib/gestion/counts-shared";
 
 describe("compté et écart", () => {
   test("le compté d'une ligne est la somme des saisies de tous les compteurs, lot sans casse ni espaces", () => {
@@ -13,6 +13,13 @@ describe("compté et écart", () => {
     assert.equal(m.get(countLineKey("p", "A12")), "15.000");
     assert.equal(m.get(countLineKey("p", null)), "2.000");
     assert.equal(m.get(countLineKey("q", null)), undefined);
+  });
+  test("le théorique reprend les pièces datées d'avant le comptage saisies après son démarrage", () => {
+    assert.equal(theoreticalWithLate("117", "-20"), "97.000");
+    assert.equal(theoreticalWithLate("10", null), "10.000");
+    assert.equal(theoreticalWithLate("0", "5"), "5.000");
+    // 117 figés, BL de 20 saisi en retard, compté 0 : l'ajustement est −97, pas −117.
+    assert.equal(lineGap(theoreticalWithLate("117", "-20"), "0", null).gapQty, "-97.000");
   });
   test("écart en quantité, en valeur au CMUP figé et en % du théorique", () => {
     assert.deepEqual(lineGap("20", "17", "111.8118"), { gapQty: "-3.000", gapValue: "-335.44", gapPct: -15 });
