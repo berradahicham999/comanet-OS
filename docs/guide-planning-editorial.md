@@ -16,6 +16,13 @@ Un contenu archivé n'est jamais supprimé : on garde le brief, les fichiers et 
 ## 1. Lire le calendrier
 
 - **Mois / Semaine / Liste** : trois façons de voir la même chose. Sur téléphone, c'est la liste par défaut.
+  Le mois sert à voir l'ensemble ; la semaine est la vue de travail (marque, produit, objectif, date du
+  livrable, livrable déposé, légende rédigée sur chaque carte).
+- **Confort / Compact** : en confort (par défaut), chaque carte du mois montre le titre sur trois lignes,
+  le statut, le format, l'heure et les initiales du responsable ; au-delà de trois contenus, « + N autres »
+  ouvre la journée en grand (le numéro du jour aussi). Compact revient à une ligne par contenu. Le choix est
+  mémorisé sur l'ordinateur.
+- **Plein écran** : le planning occupe tout l'écran, sans le menu ; « Réduire » ou Échap pour revenir.
 - **Par date / Par marque / Par plateforme** : « Par marque » montre une ligne par marque et une colonne
   par jour. Une ligne vide = une marque sans rien de prévu. Une case orange = trois contenus ou plus le
   même jour.

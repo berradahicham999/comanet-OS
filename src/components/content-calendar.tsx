@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import clsx from "clsx";
-import { AlertTriangle, ChevronLeft, ChevronRight, Copy, Plus, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, Copy, Maximize2, Minimize2, Plus, X } from "lucide-react";
 import { Badge, BrandDot } from "@/components/ui";
 import { PlatformIcon } from "@/components/platform-icon";
 import { toneClass, type ContentRefs } from "@/lib/content/shared";
@@ -33,6 +33,22 @@ export type CalendarActions = {
 };
 
 const DAYS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
+/** Densité d'affichage, mémorisée par navigateur (confort par défaut : cartes lisibles). */
+type Density = "comfort" | "compact";
+const DENSITY_KEY = "comanet-planning-density";
+function readDensity(): Density {
+  try { return window.localStorage.getItem(DENSITY_KEY) === "compact" ? "compact" : "comfort"; } catch { return "comfort"; }
+}
+function subscribeDensity(cb: () => void) {
+  window.addEventListener("storage", cb); window.addEventListener(DENSITY_KEY, cb);
+  return () => { window.removeEventListener("storage", cb); window.removeEventListener(DENSITY_KEY, cb); };
+}
+/** En vue mois confort, au-delà de ce nombre la case affiche « + N autres ». */
+const MONTH_VISIBLE = 3;
+/** Teinte de fond d'une carte : la couleur de la marque, très éclaircie. */
+const tint = (color: string, pct: number) => `color-mix(in srgb, ${color} ${pct}%, white)`;
+const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("");
+const abbr = (label: string) => (label.length <= 5 ? label : label.slice(0, 4) + ".");
 const fmtDay = new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "numeric", month: "long" });
 const fmtShort = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short" });
 const d = (iso: string) => new Date(iso + "T12:00:00Z");
@@ -57,9 +73,26 @@ export function ContentCalendar(props: {
   const [create, setCreate] = useState<{ date: string; brandId?: string; platform?: string } | null>(null);
   const [dup, setDup] = useState<ContentCard | null>(null);
   const [toast, setToast] = useState<{ text: string; href?: string; tone: "ok" | "err" } | null>(null);
+  const [openDay, setOpenDay] = useState<string | null>(null);
+  const density = useSyncExternalStore(subscribeDensity, readDensity, () => "comfort" as Density);
+  const [full, setFull] = useState(false);
+  function chooseDensity(v: Density) {
+    try { window.localStorage.setItem(DENSITY_KEY, v); } catch { /* ignoré si bloqué */ }
+    window.dispatchEvent(new Event(DENSITY_KEY));
+  }
+  // Échap quitte le plein écran (sauf si une fenêtre est ouverte : elle se ferme d'abord).
+  const modalOpen = !!(create || dup || openDay);
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !modalOpen) setFull(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [full, modalOpen]);
 
   const statusOf = useMemo(() => new Map(refs.statuses.map((s) => [s.key, s])), [refs.statuses]);
   const platformOf = useMemo(() => new Map(refs.platforms.map((p) => [p.key, p])), [refs.platforms]);
+  const formatOf = useMemo(() => new Map(refs.formats.map((f) => [f.key, f])), [refs.formats]);
+  const objectiveOf = useMemo(() => new Map(refs.objectives.map((o) => [o.key, o])), [refs.objectives]);
   const byDate = useMemo(() => { const m = new Map<string, ContentCard[]>(); for (const c of cards) (m.get(c.date) ?? m.set(c.date, []).get(c.date)!).push(c); return m; }, [cards]);
 
   function go(patch: Record<string, string | null>) {
@@ -93,34 +126,72 @@ export function ContentCalendar(props: {
   }
 
   /* --------------------------- Rendu d'une carte --------------------------- */
-  function cardView(c: ContentCard, compact?: boolean) {
+  /**
+   * Trois tailles de carte :
+   * - `mini` : une ligne (vue mois compacte, matrices) ;
+   * - `comfort` : titre sur deux lignes, statut, format, heure, responsable (vue mois confort) ;
+   * - `detail` : tout le brief en un coup d'œil (vue semaine, liste, journée).
+   * Fond = couleur de la marque, pastille = statut, bordure rouge = retard.
+   */
+  function cardView(c: ContentCard, size: "mini" | "comfort" | "detail" = "detail") {
     const st = statusOf.get(c.status); const pf = platformOf.get(c.platform ?? "");
+    const fmt = c.format ? formatOf.get(c.format)?.label ?? c.format : null;
+    const obj = c.objective ? objectiveOf.get(c.objective)?.label ?? c.objective : null;
+    const time = c.publishTime?.slice(0, 5) ?? null;
+    const lateLabel = c.late === "PUBLICATION" ? "Publication en retard" : c.late === "LIVRABLE" ? "Livrable en retard" : null;
+    const mini = size === "mini";
+    const edge = c.late ? "var(--color-red)" : tint(c.color, mini ? 18 : 30);
     return (
       <div
         draggable={props.canEdit}
         onDragStart={(e) => { setDragId(c.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData(DRAG_TYPE, c.id); }}
         onDragEnd={() => { setDragId(null); setOverDate(null); }}
-        className={clsx("group relative rounded-lg border bg-surface text-[12px] leading-tight transition-shadow", props.canEdit && "cursor-grab active:cursor-grabbing", dragId === c.id && "opacity-40", c.late ? "border-red/40" : "border-line")}
-        style={{ borderLeftWidth: 3, borderLeftColor: c.color }}
-        title={`${c.brand} · ${st?.label ?? c.status}${c.responsible ? ` · ${c.responsible}` : ""}${c.late === "PUBLICATION" ? " · Publication en retard" : c.late === "LIVRABLE" ? " · Livrable en retard" : ""}`}
+        className={clsx("group relative border transition-shadow hover:shadow-[var(--shadow-card)]", mini ? "rounded-md text-[12px] leading-tight" : "rounded-lg text-[13px] leading-snug", props.canEdit && "cursor-grab active:cursor-grabbing", dragId === c.id && "opacity-40", c.late && "ring-1 ring-red")}
+        style={{ background: mini ? undefined : tint(c.color, 9), borderTopColor: edge, borderRightColor: edge, borderBottomColor: edge, borderLeftWidth: 4, borderLeftColor: c.color }}
+        title={`${c.title}\n${c.brand} · ${st?.label ?? c.status}${fmt ? ` · ${fmt}` : ""}${time ? ` · ${time}` : ""}${c.responsible ? ` · ${c.responsible}` : ""}${lateLabel ? ` · ${lateLabel}` : ""}`}
       >
-        <Link href={`/marketing/planning/${c.id}`} className={clsx("block", compact ? "px-1.5 py-1" : "px-2 py-1.5")}>
-          <div className="flex items-center gap-1 min-w-0">
-            {pf && <span className="text-ink-2 shrink-0"><PlatformIcon icon={pf.icon} label={pf.label} size={12} /></span>}
-            <span className="truncate font-medium">{c.title}</span>
-            {c.late && <AlertTriangle size={11} className="text-red shrink-0 ml-auto" />}
-          </div>
-          {!compact && (
-            <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-              <span className={clsx("badge text-[10px] py-0", toneClass(st?.tone))}>{st?.label ?? c.status}</span>
-              {c.publishTime && <span className="text-muted">{c.publishTime.slice(0, 5)}</span>}
-              {c.responsible && <span className="text-muted truncate">{c.responsible.split(" ")[0]}</span>}
+        <Link href={`/marketing/planning/${c.id}`} className={clsx("block", mini ? "px-1.5 py-1" : size === "comfort" ? "px-2 py-1.5" : "px-2.5 py-2")}>
+          {mini ? (
+            <div className="flex items-center gap-1 min-w-0">
+              {pf && <span className="text-ink-2 shrink-0"><PlatformIcon icon={pf.icon} label={pf.label} size={12} /></span>}
+              <span className="truncate font-medium">{c.title}</span>
+              {c.late && <AlertTriangle size={11} className="text-red shrink-0 ml-auto" />}
             </div>
+          ) : (
+            <>
+              {size === "detail" && <div className="text-[11px] font-semibold uppercase tracking-wide mb-0.5 truncate" style={{ color: c.color }}>{c.brand}</div>}
+              <div className="flex items-start gap-1.5 min-w-0">
+                {c.late ? <AlertTriangle size={14} className="text-red shrink-0 mt-0.5" />
+                  : pf && <span className="text-ink-2 shrink-0 mt-0.5"><PlatformIcon icon={pf.icon} label={pf.label} size={14} /></span>}
+                <span className={clsx("font-semibold text-ink break-words", size === "comfort" ? "line-clamp-3" : "line-clamp-4")}>{c.title}</span>
+              </div>
+              <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                <span className={clsx("badge text-[11px] py-0 max-w-full min-w-0 truncate block", lateLabel ? "bg-red-soft text-red" : toneClass(st?.tone))}>{lateLabel ?? st?.label ?? c.status}</span>
+                {lateLabel && size === "detail" && <span className={clsx("badge text-[11px] py-0 max-w-full min-w-0 truncate block", toneClass(st?.tone))}>{st?.label ?? c.status}</span>}
+              </div>
+              <div className="mt-1 flex items-center gap-1.5 text-[12px] text-ink-2 min-w-0">
+                <span className="truncate">{[fmt, time].filter(Boolean).join(" · ") || (pf?.label ?? "")}</span>
+                {c.responsible && (
+                  <span className="ml-auto shrink-0 inline-flex h-5 min-w-5 px-1 items-center justify-center rounded-full bg-white/80 border border-line text-[10px] font-semibold text-ink-2" title={`Responsable : ${c.responsible}`}>{initials(c.responsible)}</span>
+                )}
+              </div>
+              {size === "detail" && (
+                <div className="mt-1.5 pt-1.5 border-t border-black/5 space-y-0.5 text-[12px] text-ink-2">
+                  {c.product && <div className="truncate"><span className="text-muted">Produit :</span> {c.product}{c.productCount > 1 ? ` +${c.productCount - 1}` : ""}</div>}
+                  {obj && <div className="truncate"><span className="text-muted">Objectif :</span> {obj}</div>}
+                  {c.deadline && <div><span className="text-muted">Livrable attendu le</span> {fmtShort.format(d(c.deadline))}</div>}
+                  <div className="flex items-center gap-2.5 pt-0.5">
+                    <span className={clsx("inline-flex items-center gap-1", c.hasDeliverable ? "text-green" : "text-faint")}>{c.hasDeliverable ? <Check size={12} /> : <X size={12} />}Livrable</span>
+                    <span className={clsx("inline-flex items-center gap-1", c.hasCaption ? "text-green" : "text-faint")}>{c.hasCaption ? <Check size={12} /> : <X size={12} />}Légende</span>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </Link>
         {props.canCreate && (
-          <button type="button" onClick={(e) => { e.preventDefault(); setDup(c); }} className="absolute right-1 top-1 hidden group-hover:flex h-5 w-5 items-center justify-center rounded bg-surface-2 text-ink-2 hover:text-ink" title="Dupliquer" aria-label="Dupliquer">
-            <Copy size={11} />
+          <button type="button" onClick={(e) => { e.preventDefault(); setDup(c); }} className="absolute right-1 top-1 hidden group-hover:flex h-6 w-6 items-center justify-center rounded-md bg-surface border border-line text-ink-2 hover:text-ink" title="Dupliquer" aria-label="Dupliquer">
+            <Copy size={12} />
           </button>
         )}
       </div>
@@ -130,22 +201,33 @@ export function ContentCalendar(props: {
   function dayCell(date: string, cardsOfDay: ContentCard[], tall?: boolean) {
     const inMonth = date >= props.start && date < props.end;
     const isToday = date === todayIso;
+    const comfort = density === "comfort";
+    // Vue mois confort : 3 cartes au plus, le reste derrière « + N autres » (la journée s'ouvre en grand).
+    const limit = !tall && comfort && cardsOfDay.length > MONTH_VISIBLE ? MONTH_VISIBLE - 1 : cardsOfDay.length;
+    const hidden = cardsOfDay.length - limit;
     return (
       <div
         onDragOver={(e) => { if (isDrag(e)) { e.preventDefault(); setOverDate(date); } }}
         onDragLeave={() => setOverDate((o) => (o === date ? null : o))}
         onDrop={(e) => onDrop(e, date)}
-        className={clsx("group/cell relative flex flex-col gap-1 p-1.5 border-t border-l border-line min-w-0", tall ? "min-h-[320px]" : "min-h-[104px]", !inMonth && "bg-surface-2/60 text-faint", overDate === date && "bg-accent-soft ring-2 ring-inset ring-accent/50", date < todayIso && inMonth && "bg-black/[0.015]")}
+        className={clsx("group/cell relative flex flex-col border-t border-l border-line min-w-0", comfort ? "gap-1.5 p-2" : "gap-1 p-1.5",
+          tall ? "min-h-[440px]" : comfort ? "min-h-[168px]" : "min-h-[104px]",
+          !inMonth && "bg-surface-2/60 text-faint", overDate === date && "bg-accent-soft ring-2 ring-inset ring-accent/50", date < todayIso && inMonth && "bg-black/[0.015]")}
       >
-        <div className="flex items-center justify-between text-[11px]">
-          <span className={clsx("inline-flex h-5 min-w-5 px-1 items-center justify-center rounded-full font-medium", isToday && "bg-ink text-white")}>{Number(date.slice(8, 10))}</span>
+        <div className="flex items-center justify-between">
+          <button type="button" onClick={() => cardsOfDay.length ? setOpenDay(date) : props.canCreate && setCreate({ date })}
+            className={clsx("inline-flex items-center justify-center rounded-full font-semibold hover:bg-black/5", comfort ? "h-7 min-w-7 px-1.5 text-[14px]" : "h-5 min-w-5 px-1 text-[11px]", isToday && "bg-ink text-white hover:bg-ink")}
+            title={cardsOfDay.length ? "Voir la journée" : undefined}>{Number(date.slice(8, 10))}</button>
           {props.canCreate && (
-            <button type="button" onClick={() => setCreate({ date })} className="opacity-0 group-hover/cell:opacity-100 focus:opacity-100 h-5 w-5 rounded hover:bg-black/5 flex items-center justify-center text-ink-2" title="Ajouter un contenu" aria-label="Ajouter un contenu">
-              <Plus size={12} />
+            <button type="button" onClick={() => setCreate({ date })} className={clsx("opacity-0 group-hover/cell:opacity-100 focus:opacity-100 rounded-md hover:bg-black/5 flex items-center justify-center text-ink-2", comfort ? "h-7 w-7" : "h-5 w-5")} title="Ajouter un contenu" aria-label="Ajouter un contenu">
+              <Plus size={comfort ? 15 : 12} />
             </button>
           )}
         </div>
-        {cardsOfDay.map((c) => <div key={c.id}>{cardView(c, !tall)}</div>)}
+        {cardsOfDay.slice(0, limit).map((c) => <div key={c.id}>{cardView(c, tall ? "detail" : comfort ? "comfort" : "mini")}</div>)}
+        {hidden > 0 && (
+          <button type="button" onClick={() => setOpenDay(date)} className="text-left text-[12px] font-medium text-accent hover:underline px-1">+ {hidden} autre{hidden > 1 ? "s" : ""}</button>
+        )}
       </div>
     );
   }
@@ -161,8 +243,8 @@ export function ContentCalendar(props: {
 
   const grid = (days: string[], tall?: boolean) => (
     <div className="card overflow-hidden">
-      <div className="grid grid-cols-7 text-[11px] font-medium text-muted">
-        {DAYS.map((x, i) => <div key={x} className="px-2 py-1.5 border-l border-line first:border-l-0">{x}{tall && <span className="ml-1 text-ink">{fmtShort.format(d(days[i]))}</span>}</div>)}
+      <div className={clsx("grid grid-cols-7 font-semibold text-muted bg-surface-2", density === "comfort" || tall ? "text-[13px]" : "text-[11px]")}>
+        {DAYS.map((x, i) => <div key={x} className={clsx("px-2 py-2 border-l border-line first:border-l-0", tall && days[i] === todayIso && "text-accent")}>{x}{tall && <span className="ml-1.5 text-ink">{fmtShort.format(d(days[i]))}</span>}</div>)}
       </div>
       <div className="grid grid-cols-7 border-b border-r border-line">
         {days.map((date) => <div key={date} className="contents">{dayCell(date, byDate.get(date) ?? [], tall)}</div>)}
@@ -177,20 +259,21 @@ export function ContentCalendar(props: {
       : [...refs.platforms.filter((p) => p.active || cards.some((c) => c.platform === p.key)).map((p) => ({ key: p.key, label: p.label, color: null as string | null, icon: p.icon, match: (c: ContentCard) => c.platform === p.key })),
         { key: "__none", label: "Sans plateforme", color: null, icon: null, match: (c: ContentCard) => !c.platform }];
     const wide = days.length > 7;
+    const comfort = density === "comfort";
     return (
       <div className="card overflow-x-auto">
-        <table className="text-[11px] border-collapse" style={{ minWidth: wide ? days.length * 44 + 160 : "100%" }}>
-          <thead><tr>
-            <th className="sticky left-0 z-10 bg-surface text-left px-3 py-2 font-medium text-muted w-[160px]">{props.mode === "brand" ? "Marque" : "Plateforme"}</th>
-            {days.map((date) => <th key={date} className={clsx("px-1 py-2 font-medium text-center border-l border-line", date === todayIso && "text-accent")}>{wide ? Number(date.slice(8, 10)) : `${DAYS[(d(date).getUTCDay() + 6) % 7]} ${Number(date.slice(8, 10))}`}</th>)}
+        <table className={clsx("border-collapse", comfort ? "text-[12px]" : "text-[11px]")} style={{ minWidth: wide ? days.length * (comfort ? 64 : 48) + 180 : "100%", width: "100%" }}>
+          <thead><tr className="bg-surface-2">
+            <th className="sticky left-0 z-10 bg-surface-2 text-left px-3 py-2 font-semibold text-muted w-[180px]">{props.mode === "brand" ? "Marque" : "Plateforme"}</th>
+            {days.map((date) => <th key={date} className={clsx("px-1 py-2 font-semibold text-center border-l border-line", date === todayIso ? "text-accent" : "text-muted")}>{wide ? <><span className="block text-[10px] font-medium">{DAYS[(d(date).getUTCDay() + 6) % 7]}</span>{Number(date.slice(8, 10))}</> : `${DAYS[(d(date).getUTCDay() + 6) % 7]} ${Number(date.slice(8, 10))}`}</th>)}
           </tr></thead>
           <tbody>
             {rows.map((r) => {
               const rowCards = cards.filter(r.match);
               return (
                 <tr key={r.key} className="border-t border-line">
-                  <td className="sticky left-0 z-10 bg-surface px-3 py-1.5 font-medium whitespace-nowrap">
-                    <span className="inline-flex items-center gap-1.5">{r.color ? <BrandDot color={r.color} /> : <PlatformIcon icon={r.icon} label={r.label} size={12} />}{r.label}<span className="text-faint">· {rowCards.length}</span></span>
+                  <td className={clsx("sticky left-0 z-10 bg-surface px-3 font-semibold whitespace-nowrap", comfort ? "py-2.5 text-[13px]" : "py-1.5")}>
+                    <span className="inline-flex items-center gap-1.5">{r.color ? <BrandDot color={r.color} /> : <PlatformIcon icon={r.icon} label={r.label} size={14} />}{r.label}<span className="text-faint font-normal">· {rowCards.length}</span></span>
                   </td>
                   {days.map((date) => {
                     const cell = rowCards.filter((c) => c.date === date);
@@ -199,14 +282,25 @@ export function ContentCalendar(props: {
                         onDragOver={(e) => { if (isDrag(e)) { e.preventDefault(); setOverDate(date); } }}
                         onDrop={(e) => onDrop(e, date)}
                         onDoubleClick={() => props.canCreate && setCreate({ date, brandId: props.mode === "brand" ? r.key : undefined, platform: props.mode === "platform" && r.key !== "__none" ? r.key : undefined })}
-                        className={clsx("border-l border-line align-top p-0.5", overDate === date && "bg-accent-soft", cell.length >= 3 && "bg-orange-soft/60")}
+                        className={clsx("border-l border-line align-top", comfort ? "p-1" : "p-0.5", overDate === date && "bg-accent-soft", cell.length >= 3 && "bg-orange-soft/60")}
                         title={cell.length ? cell.map((c) => c.title).join("\n") : props.canCreate ? "Double-clic : ajouter" : ""}>
-                        <div className={clsx("flex gap-0.5", wide ? "flex-col items-center" : "flex-wrap")}>
+                        <div className={clsx("flex", wide ? "flex-col gap-1" : "flex-col gap-1.5")}>
                           {cell.map((c) => {
+                            if (!wide) return <div key={c.id} className="w-full">{cardView(c, comfort ? "comfort" : "mini")}</div>;
+                            // Mois en matrice : une étiquette lisible par contenu (plateforme ou marque + format), couleur du statut.
                             const st = statusOf.get(c.status); const pf = platformOf.get(c.platform ?? "");
-                            return wide
-                              ? <Link key={c.id} href={`/marketing/planning/${c.id}`} draggable={props.canEdit} onDragStart={(e) => { setDragId(c.id); e.dataTransfer.setData(DRAG_TYPE, c.id); }} onDragEnd={() => setDragId(null)} title={`${c.title} · ${st?.label ?? c.status}`} className={clsx("h-3.5 w-3.5 rounded-sm flex items-center justify-center", toneClass(st?.tone), c.late && "ring-1 ring-red")} style={props.mode === "platform" ? { background: c.color, color: "white" } : undefined}>{props.mode === "brand" && pf ? <PlatformIcon icon={pf.icon} label={pf.label} size={9} /> : null}</Link>
-                              : <div key={c.id} className="w-full">{cardView(c, true)}</div>;
+                            const fmt = c.format ? formatOf.get(c.format)?.label ?? c.format : null;
+                            const label = fmt ? abbr(fmt) : props.mode === "platform" ? abbr(c.brand) : "";
+                            return (
+                              <Link key={c.id} href={`/marketing/planning/${c.id}`} draggable={props.canEdit} onDragStart={(e) => { setDragId(c.id); e.dataTransfer.setData(DRAG_TYPE, c.id); }} onDragEnd={() => setDragId(null)}
+                                title={`${c.title}\n${c.brand} · ${st?.label ?? c.status}${fmt ? ` · ${fmt}` : ""}`}
+                                className={clsx("w-full rounded flex items-center gap-1 px-1 font-semibold overflow-hidden whitespace-nowrap", comfort ? "h-6 text-[11px]" : "h-5 text-[10px]", props.mode === "brand" && toneClass(st?.tone), c.late && "ring-1 ring-red")}
+                                style={props.mode === "platform" ? { background: tint(c.color, 18), color: "var(--color-ink)", borderLeft: `3px solid ${c.color}` } : undefined}>
+                                {props.mode === "brand" && pf && <PlatformIcon icon={pf.icon} label={pf.label} size={comfort ? 11 : 10} />}
+                                {props.mode === "platform" && <span className={clsx("h-1.5 w-1.5 shrink-0 rounded-full", toneClass(st?.tone))} style={{ background: "currentColor" }} />}
+                                <span className="truncate">{label}</span>
+                              </Link>
+                            );
                           })}
                         </div>
                       </td>
@@ -228,11 +322,11 @@ export function ContentCalendar(props: {
         {dates.length === 0 && <div className="card card-pad text-sm text-muted">Aucun contenu sur cette période avec ces filtres.{props.canCreate && <> <button type="button" className="text-accent font-medium" onClick={() => setCreate({ date: props.start >= todayIso ? props.start : todayIso })}>Ajouter un contenu</button>.</>}</div>}
         {dates.map((date) => (
           <div key={date}>
-            <div className={clsx("flex items-center gap-2 text-[12px] font-medium mb-1.5", date === todayIso ? "text-accent" : "text-muted")}>
+            <div className={clsx("flex items-center gap-2 text-[14px] font-semibold mb-2", date === todayIso ? "text-accent" : "text-ink-2")}>
               <span className="capitalize">{fmtDay.format(d(date))}</span>{date === todayIso && <Badge tone="accent">Aujourd&apos;hui</Badge>}
-              {props.canCreate && <button type="button" className="btn-ghost btn-sm h-6 px-1.5" onClick={() => setCreate({ date })} aria-label="Ajouter"><Plus size={12} /></button>}
+              {props.canCreate && <button type="button" className="btn-ghost btn-sm h-7 px-1.5" onClick={() => setCreate({ date })} aria-label="Ajouter"><Plus size={14} /></button>}
             </div>
-            <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-2">{byDate.get(date)!.map((c) => <div key={c.id}>{cardView(c)}</div>)}</div>
+            <div className={clsx("grid gap-2.5", full ? "sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4" : "sm:grid-cols-2 xl:grid-cols-3")}>{byDate.get(date)!.map((c) => <div key={c.id}>{cardView(c, density === "compact" ? "comfort" : "detail")}</div>)}</div>
           </div>
         ))}
       </div>
@@ -241,37 +335,50 @@ export function ContentCalendar(props: {
 
   const period = effectiveView === "week" ? `Semaine du ${fmtShort.format(d(props.start))}` : capitalize(new Intl.DateTimeFormat("fr-FR", { month: "long", year: "numeric" }).format(d(props.start)));
   const sel = (name: string, label: string, options: { value: string; label: string }[]) => (
-    <select key={name} aria-label={label} value={sp.get(name) ?? ""} onChange={(e) => go({ [name]: e.target.value || null })} className="select h-8 text-[12px] w-auto max-w-[170px]"><option value="">{label}</option>{options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
+    <select key={name} aria-label={label} value={sp.get(name) ?? ""} onChange={(e) => go({ [name]: e.target.value || null })} className="select h-9 text-[13px] w-auto max-w-[200px]"><option value="">{label}</option>{options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
   );
   const anyFilter = ["brand", "platform", "format", "status", "responsible"].some((k) => sp.get(k));
 
+  const seg = (active: boolean) => clsx("px-3 h-9 font-medium", active ? "bg-ink text-white" : "bg-surface hover:bg-surface-2 text-ink-2");
+  const activeStatuses = refs.statuses.filter((s) => s.active && !s.isArchived);
+
   return (
-    <div className="space-y-3">
-      {/* Barre d'outils */}
+    <div className={clsx(full ? "fixed inset-0 z-[45] bg-bg overflow-auto p-3 sm:p-5 space-y-3" : "space-y-3")}>
+      {/* Barre d'outils, ligne 1 : période, vue, regroupement, affichage, création */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1">
-          <button type="button" className="btn-secondary btn-sm h-8 w-8 p-0" onClick={() => nav(-1)} aria-label="Période précédente"><ChevronLeft size={14} /></button>
-          <button type="button" className="btn-secondary btn-sm h-8" onClick={() => go({ d: todayIso })}>Aujourd&apos;hui</button>
-          <button type="button" className="btn-secondary btn-sm h-8 w-8 p-0" onClick={() => nav(1)} aria-label="Période suivante"><ChevronRight size={14} /></button>
-          <span className="font-semibold text-[15px] px-2 whitespace-nowrap">{period}</span>
+          <button type="button" className="btn-secondary btn-sm h-9 w-9 p-0" onClick={() => nav(-1)} aria-label="Période précédente"><ChevronLeft size={16} /></button>
+          <button type="button" className="btn-secondary btn-sm h-9" onClick={() => go({ d: todayIso })}>Aujourd&apos;hui</button>
+          <button type="button" className="btn-secondary btn-sm h-9 w-9 p-0" onClick={() => nav(1)} aria-label="Période suivante"><ChevronRight size={16} /></button>
+          <span className="font-semibold text-[18px] px-2 whitespace-nowrap">{period}</span>
         </div>
-        <div className="inline-flex rounded-lg border border-line overflow-hidden text-[12px]">
-          {(["month", "week", "list"] as const).map((v) => <button key={v} type="button" onClick={() => go({ view: v })} className={clsx("px-2.5 h-8", (props.view ?? "month") === v ? "bg-ink text-white" : "bg-surface hover:bg-surface-2")}>{{ month: "Mois", week: "Semaine", list: "Liste" }[v]}</button>)}
+        <div className="inline-flex rounded-lg border border-line overflow-hidden text-[13px]">
+          {(["month", "week", "list"] as const).map((v) => <button key={v} type="button" onClick={() => go({ view: v })} className={seg((props.view ?? "month") === v)}>{{ month: "Mois", week: "Semaine", list: "Liste" }[v]}</button>)}
         </div>
         {effectiveView !== "list" && (
-          <div className="inline-flex rounded-lg border border-line overflow-hidden text-[12px]">
-            {(["date", "brand", "platform"] as const).map((m) => <button key={m} type="button" onClick={() => go({ mode: m === "date" ? null : m })} className={clsx("px-2.5 h-8", props.mode === m ? "bg-ink text-white" : "bg-surface hover:bg-surface-2")}>{{ date: "Par date", brand: "Par marque", platform: "Par plateforme" }[m]}</button>)}
+          <div className="inline-flex rounded-lg border border-line overflow-hidden text-[13px]">
+            {(["date", "brand", "platform"] as const).map((m) => <button key={m} type="button" onClick={() => go({ mode: m === "date" ? null : m })} className={seg(props.mode === m)}>{{ date: "Par date", brand: "Par marque", platform: "Par plateforme" }[m]}</button>)}
           </div>
         )}
-        <div className="flex flex-wrap gap-1.5 ml-auto">
-          {sel("brand", "Toutes les marques", props.brands.filter((b) => b.active).map((b) => ({ value: b.id, label: b.name })))}
-          {sel("platform", "Toutes les plateformes", refs.platforms.filter((p) => p.active).map((p) => ({ value: p.key, label: p.label })))}
-          {sel("format", "Tous les formats", refs.formats.filter((f) => f.active).map((f) => ({ value: f.key, label: f.label })))}
-          {sel("status", "Tous les statuts", refs.statuses.filter((s) => s.active).map((s) => ({ value: s.key, label: s.label })))}
-          {sel("responsible", "Tous les responsables", props.users.map((u) => ({ value: u.id, label: u.name })))}
-          {anyFilter && <button type="button" className="btn-ghost btn-sm h-8" onClick={() => go({ brand: null, platform: null, format: null, status: null, responsible: null })}>Effacer</button>}
-          {props.canCreate && <button type="button" className="btn-primary btn-sm h-8" onClick={() => setCreate({ date: props.start >= todayIso ? props.start : todayIso, brandId: sp.get("brand") ?? undefined, platform: sp.get("platform") ?? undefined })}><Plus size={14} /> Contenu</button>}
+        <div className="flex items-center gap-1.5 ml-auto">
+          <div className="hidden sm:inline-flex rounded-lg border border-line overflow-hidden text-[13px]" role="group" aria-label="Taille des cartes">
+            {(["comfort", "compact"] as const).map((v) => <button key={v} type="button" onClick={() => chooseDensity(v)} className={seg(density === v)} aria-pressed={density === v}>{{ comfort: "Confort", compact: "Compact" }[v]}</button>)}
+          </div>
+          <button type="button" className="hidden lg:inline-flex btn-secondary btn-sm h-9 items-center gap-1.5" onClick={() => setFull((f) => !f)} title={full ? "Quitter le plein écran (Échap)" : "Afficher le planning sur tout l'écran"}>
+            {full ? <Minimize2 size={14} /> : <Maximize2 size={14} />}{full ? "Réduire" : "Plein écran"}
+          </button>
+          {props.canCreate && <button type="button" className="btn-primary btn-sm h-9" onClick={() => setCreate({ date: props.start >= todayIso ? props.start : todayIso, brandId: sp.get("brand") ?? undefined, platform: sp.get("platform") ?? undefined })}><Plus size={15} /> Contenu</button>}
         </div>
+      </div>
+
+      {/* Ligne 2 : filtres */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {sel("brand", "Toutes les marques", props.brands.filter((b) => b.active).map((b) => ({ value: b.id, label: b.name })))}
+        {sel("platform", "Toutes les plateformes", refs.platforms.filter((p) => p.active).map((p) => ({ value: p.key, label: p.label })))}
+        {sel("format", "Tous les formats", refs.formats.filter((f) => f.active).map((f) => ({ value: f.key, label: f.label })))}
+        {sel("status", "Tous les statuts", refs.statuses.filter((s) => s.active).map((s) => ({ value: s.key, label: s.label })))}
+        {sel("responsible", "Tous les responsables", props.users.map((u) => ({ value: u.id, label: u.name })))}
+        {anyFilter && <button type="button" className="btn-ghost btn-sm h-9" onClick={() => go({ brand: null, platform: null, format: null, status: null, responsible: null })}>Effacer les filtres</button>}
       </div>
 
       {/* Indicateurs */}
@@ -288,6 +395,25 @@ export function ContentCalendar(props: {
           : props.mode !== "date" ? matrix(props.view === "week" ? weekDays : monthDays.filter((x) => x >= props.start && x < props.end))
           : props.view === "week" ? grid(weekDays, true) : grid(monthDays)}
       </div>
+
+      {/* Légende */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12px] text-muted">
+        <span className="font-semibold text-ink-2">Légende</span>
+        <span>Fond et bord gauche = couleur de la marque</span>
+        <span className="hidden sm:inline text-faint">|</span>
+        <span className="inline-flex flex-wrap items-center gap-1">Statut :{activeStatuses.map((s) => <span key={s.key} className={clsx("badge text-[11px] py-0", toneClass(s.tone))}>{s.label}</span>)}</span>
+        <span className="hidden sm:inline text-faint">|</span>
+        <span className="inline-flex items-center gap-1"><AlertTriangle size={12} className="text-red" /> bordure rouge = en retard</span>
+        <span className="hidden sm:inline text-faint">|</span>
+        <span>Pastille ronde = initiales du responsable</span>
+      </div>
+
+      {openDay && (
+        <Modal title={capitalize(fmtDay.format(d(openDay)))} onClose={() => setOpenDay(null)} wide>
+          <div className="grid sm:grid-cols-2 gap-2.5">{(byDate.get(openDay) ?? []).map((c) => <div key={c.id}>{cardView(c, "detail")}</div>)}</div>
+          {props.canCreate && <button type="button" className="btn-secondary btn-sm mt-3" onClick={() => { const date = openDay; setOpenDay(null); setCreate({ date }); }}><Plus size={14} /> Ajouter un contenu ce jour</button>}
+        </Modal>
+      )}
 
       {create && <QuickCreate init={create} {...props} onClose={() => setCreate(null)} onDone={(r) => { setCreate(null); if ("id" in r) { setToast({ text: "Contenu ajouté au planning.", href: `/marketing/planning/${r.id}`, tone: "ok" }); router.refresh(); } else setToast({ text: r.error, tone: "err" }); }} />}
       {dup && <Duplicate card={dup} refs={refs} onClose={() => setDup(null)} onDone={(r) => { setDup(null); if ("id" in r) { setToast({ text: "Contenu dupliqué.", href: `/marketing/planning/${r.id}`, tone: "ok" }); router.refresh(); } else setToast({ text: r.error, tone: "err" }); }} action={props.actions.duplicate} />}
