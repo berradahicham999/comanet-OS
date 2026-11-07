@@ -7,6 +7,7 @@ import { requireAdmin } from "@/lib/access";
 import { createPreviewToken, resolveAccessFor } from "@/lib/permissions";
 import { PREVIEW_COOKIE } from "@/lib/access-shared";
 import { readConfig } from "@/lib/permissions-form";
+import { revokeSessions } from "@/lib/sessions";
 import {
   AdminGuardError, applyCityScopeToAnimatrices, createUser, duplicateUser, saveUserConfig, setUserActive, updateProfile,
 } from "@/lib/admin-users";
@@ -83,6 +84,15 @@ export async function setActiveAction(fd: FormData) {
   }
   refresh(id);
   redirect(`/parametres/utilisateurs/${id}?ok=${active ? "reactive" : "suspendu"}`);
+}
+
+/** Déconnecte un appareil (`sessionId`) ou tous les appareils d'un compte. Effet à la prochaine requête de cet appareil. */
+export async function revokeSessionAction(fd: FormData) {
+  const actor = await requireAdmin();
+  const id = str(fd, "id");
+  await revokeSessions(actor, id, str(fd, "sessionId") || undefined);
+  revalidatePath(`/parametres/utilisateurs/${id}`);
+  redirect(`/parametres/utilisateurs/${id}?ok=appareil`);
 }
 
 export async function duplicateUserAction(fd: FormData) {

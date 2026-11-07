@@ -41,6 +41,8 @@ export function newId(): string {
 
 export type QueuedAction = {
   clientEventId: string;
+  /** Compte qui a fait l'action : sur un téléphone partagé, elle n'est jamais envoyée sous la session d'un autre. */
+  userId?: string;
   type: "START" | "STOP" | "NON_EFFECTUEE";
   doctorId?: string | null;
   /** Visite commerciale : client visité. */
@@ -198,6 +200,9 @@ export function fieldQueue(kind: "medical" | "crm"): FieldQueue {
         if (r.ok) {
           done.push(item.seq);
           out.sent.push({ clientEventId: item.clientEventId, type: item.type, visitId: r.visitId!, message: r.message });
+        } else if (r.code === "WRONG_USER") {
+          // Action d'un autre compte : elle attend sa prochaine connexion sur ce téléphone.
+          continue;
         } else if (r.code === "WAIT_START") {
           // Le démarrage n'est pas encore arrivé ; s'il a été refusé, la fin n'a plus d'objet.
           const startRejected = out.rejected.some((x) => x.clientEventId === item.startRef);

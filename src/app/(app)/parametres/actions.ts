@@ -119,6 +119,10 @@ export async function updateSettings(formData: FormData) {
       maxDecisions: Math.max(1, Math.round(num(formData, "mp_maxDecisions", cur.marketingPlan.maxDecisions))),
     },
     crm: parseCrm(formData, cur.crm),
+    mobile: {
+      adminIdleMinutes: Math.max(0, Math.round(num(formData, "mobile_adminIdleMinutes", cur.mobile.adminIdleMinutes))),
+      gpsTimeoutS: Math.min(30, Math.max(3, Math.round(num(formData, "mobile_gpsTimeoutS", cur.mobile.gpsTimeoutS)))),
+    },
     creative: {
       fatigueWindowDays: Math.max(7, Math.round(num(formData, "cr_fatigueWindowDays", cur.creative.fatigueWindowDays))),
       duplicateThreshold: Math.min(1, Math.max(0.3, num(formData, "cr_duplicateThreshold", cur.creative.duplicateThreshold))),

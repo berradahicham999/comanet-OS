@@ -9,6 +9,10 @@ const nextConfig: NextConfig = {
     },
   },
   serverExternalPackages: ["pg", "@react-pdf/renderer"],
+  // Sans ce type, certains téléphones enregistrent l'APK comme un fichier ordinaire et refusent de l'installer.
+  async headers() {
+    return [{ source: "/downloads/:file*.apk", headers: [{ key: "Content-Type", value: "application/vnd.android.package-archive" }, { key: "Content-Disposition", value: "attachment" }] }];
+  },
   // Les migrations SQL (drizzle/) doivent être embarquées dans les fonctions serverless pour /installation.
   outputFileTracingIncludes: {
     "/installation": ["./drizzle/**/*"],

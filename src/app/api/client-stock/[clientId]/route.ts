@@ -15,5 +15,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ clientId: stri
   }
   const { clientId } = await ctx.params;
   if (!/^[0-9a-f-]{36}$/i.test(clientId)) return Response.json({}, { status: 400 });
+  // Hors de la portée de la personne : pas de pré-remplissage. La saisie reste possible, le champ « rayon » est simplement vide.
+  if (access.scope !== "ALL" && !access.clientIds.includes(clientId)) return Response.json({}, { headers: { "Cache-Control": "no-store" } });
   return Response.json(await lastReadingsForClient(clientId), { headers: { "Cache-Control": "no-store" } });
 }

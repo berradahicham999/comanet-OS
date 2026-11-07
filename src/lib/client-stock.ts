@@ -31,6 +31,8 @@ export type ReadingInput = {
   /** Journée d'animation d'origine : ses relevés précédents sont remplacés (correction), les autres sont conservés. */
   animationId?: string | null;
   comment?: string | null;
+  /** Relevé venu de la file hors connexion de l'app mobile : le rejouer n'ajoute aucune ligne. */
+  clientEventId?: string | null;
   lines: { productId: string; quantity: number }[];
 };
 
@@ -50,7 +52,7 @@ export async function recordReadings(input: ReadingInput, ex: Executor = db): Pr
     return true;
   });
   if (!rows.length) return 0;
-  await ex.insert(clientStockReadings).values(
+  const inserted = await ex.insert(clientStockReadings).values(
     rows.map((l) => ({
       clientId: input.clientId,
       productId: l.productId,
@@ -60,9 +62,10 @@ export async function recordReadings(input: ReadingInput, ex: Executor = db): Pr
       channel: input.channel,
       animationId: input.animationId ?? null,
       comment: input.comment ?? null,
+      clientEventId: input.clientEventId ?? null,
     })),
-  );
-  return rows.length;
+  ).onConflictDoNothing().returning({ id: clientStockReadings.id });
+  return inserted.length;
 }
 
 /** Supprimer une animation retire ses relevés : ils n'existaient que par elle. */

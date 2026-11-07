@@ -38,11 +38,13 @@ export type SaveAnimationContext = {
   id: string | null;
   parsed: ParsedAnimation;
   actor: Actor;
+  /** Saisie venue de l'app mobile : identifiant de rejeu, heure du téléphone, position au moment d'enregistrer. */
+  mobile?: { clientEventId: string; deviceTime: Date | null; gpsLat: string | null; gpsLng: string | null; gpsAccuracyM: number | null; gpsError: string | null };
 };
 
 type ClientRow = { client_name: string; client_city: string | null; animatrice_name: string | null };
 
-export async function saveAnimation({ id, parsed, actor }: SaveAnimationContext): Promise<SaveAnimationOutcome> {
+export async function saveAnimation({ id, parsed, actor, mobile }: SaveAnimationContext): Promise<SaveAnimationOutcome> {
   /* -- 1) Point de vente, animatrice, ville normalisée, clé de déduplication -------- */
   const ctx = await db.execute(sql`
     select c.name as client_name, c.city as client_city,
@@ -95,6 +97,7 @@ export async function saveAnimation({ id, parsed, actor }: SaveAnimationContext)
     samples: parsed.samples,
     comment: parsed.comment,
     photoUrl: parsed.photoUrl,
+    ...(mobile ?? {}),
   };
 
   const result = await db.transaction(async (tx) => {

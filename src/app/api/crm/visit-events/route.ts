@@ -29,6 +29,12 @@ export async function POST(req: Request) {
 
   const results: (CrmActionResult & { clientEventId: string })[] = [];
   for (const e of events) {
+    // Téléphone partagé : l'action d'un autre compte reste dans la file, elle attend sa prochaine connexion.
+    const owner = (e as { userId?: string }).userId;
+    if (owner && owner !== access.user.id) {
+      results.push({ clientEventId: String(e?.clientEventId ?? ""), ok: false, code: "WRONG_USER", message: "Action d'un autre compte." });
+      continue;
+    }
     const type = e?.type;
     if (type !== "START" && type !== "STOP" && type !== "NON_EFFECTUEE") {
       results.push({ clientEventId: String(e?.clientEventId ?? ""), ok: false, code: "INVALID", message: "Action inconnue." });

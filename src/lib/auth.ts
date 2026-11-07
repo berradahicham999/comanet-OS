@@ -1,15 +1,17 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { SignJWT, jwtVerify } from "jose";
+import { jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users, type UserRole } from "@/db/schema";
 import { cache } from "react";
+import { checkSession, closeSession, openSession } from "@/lib/sessions";
+import { SESSION_MAX_AGE_S } from "@/lib/sessions-shared";
+import { signSessionToken } from "@/lib/session-token";
 
 export const SESSION_COOKIE = "comanet_session";
-const SESSION_DAYS = 7;
 
 export type SessionUser = { id: string; name: string; email: string; role: UserRole };
 
@@ -19,25 +21,26 @@ function secret() {
   return new TextEncoder().encode(s);
 }
 
-export async function createSession(user: SessionUser) {
-  const token = await new SignJWT({ name: user.name, email: user.email, role: user.role })
-    .setProtectedHeader({ alg: "HS256" })
-    .setSubject(user.id)
-    .setIssuedAt()
-    .setExpirationTime(`${SESSION_DAYS}d`)
-    .sign(secret());
+export async function createSession(user: SessionUser, device: { userAgent?: string | null; idleMinutes?: number | null } = {}) {
+  const sid = await openSession(user.id, device);
+  const token = await signSessionToken({ sub: user.id, name: user.name, email: user.email, role: user.role, ...(sid ? { sid } : {}) }, secret());
   const jar = await cookies();
   jar.set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: SESSION_DAYS * 86400,
+    maxAge: SESSION_MAX_AGE_S,
   });
 }
 
 export async function destroySession() {
   const jar = await cookies();
+  const token = jar.get(SESSION_COOKIE)?.value;
+  if (token) {
+    const sid = await jwtVerify(token, secret()).then((r) => r.payload.sid, () => null);
+    if (typeof sid === "string") await closeSession(sid);
+  }
   jar.delete(SESSION_COOKIE);
 }
 
@@ -53,6 +56,8 @@ export const getSession = cache(async (): Promise<SessionUser | null> => {
     // Colonnes explicites : `last_login_at` n'existe qu'après la migration 0012, un `select *` casserait la session avant.
     const u = (await db.select({ id: users.id, name: users.name, email: users.email, role: users.role, active: users.active }).from(users).where(eq(users.id, payload.sub)))[0];
     if (!u || !u.active) return null;
+    // Révocation à distance et inactivité : un jeton sans `sid` date d'avant la migration 0055 et expire de lui-même.
+    if (typeof payload.sid === "string" && !(await checkSession(payload.sid, u.id))) return null;
     return { id: u.id, name: u.name, email: u.email, role: u.role };
   } catch {
     return null;

@@ -20,6 +20,8 @@ export type TourClient = {
 };
 
 export type TourData = {
+  /** Compte connecté : porté par chaque action de la file (téléphone partagé). */
+  userId: string;
   day: string;
   monthLabel: string;
   accepted: boolean;
@@ -126,7 +128,7 @@ export function TourDay({ data, acceptNotice }: { data: TourData; acceptNotice: 
     const fix = await locate();
     const a: QueuedAction = { clientEventId: newId(), type: "START", clientId, plannedVisitId: plannedVisitId ?? null, deviceTime: new Date().toISOString(), label: clientName, ...fixFields(fix) };
     const v: RunningVisit = { startRef: a.clientEventId, visitId: null, doctorId: clientId, doctorName: clientName, startedAtMs: Date.now() };
-    await Q.enqueue(a);
+    await Q.enqueue({ ...a, userId: data.userId });
     await Q.setRunning(v);
     setRunningState(v);
     setBusy("send");
@@ -142,7 +144,7 @@ export function TourDay({ data, acceptNotice }: { data: TourData; acceptNotice: 
     setError(null); setInfo(null);
     const fix = await locate();
     const a: QueuedAction = { clientEventId: newId(), type: "STOP", startRef: running.startRef, visitId: running.visitId, deviceTime: new Date().toISOString(), label: running.doctorName, ...fixFields(fix) };
-    await Q.enqueue(a);
+    await Q.enqueue({ ...a, userId: data.userId });
     const ended = running;
     await Q.setRunning(null);
     setRunningState(null);
@@ -168,7 +170,7 @@ export function TourDay({ data, acceptNotice }: { data: TourData; acceptNotice: 
     const a: QueuedAction = target.running && running
       ? { ...base, startRef: running.startRef, visitId: running.visitId }
       : { ...base, clientId: target.clientId, plannedVisitId: target.plannedVisitId ?? null };
-    await Q.enqueue(a);
+    await Q.enqueue({ ...a, userId: data.userId });
     if (target.running) { await Q.setRunning(null); setRunningState(null); }
     setBusy("send");
     const r = await flush(a.clientEventId);

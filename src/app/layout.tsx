@@ -4,7 +4,8 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: { default: "COMANET OS", template: "%s · COMANET OS" },
   description: "Strategic, Marketing & Operational Intelligence Platform",
-  icons: { icon: "/icon.svg" },
+  icons: { icon: "/icon.svg", apple: "/icons/apple-touch-icon.png" },
+  appleWebApp: { capable: true, title: "COMANET OS", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {
