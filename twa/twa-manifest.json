@@ -1,6 +1,6 @@
 {
   "packageId": "ma.comanet.os",
-  "host": "comanet-os.vercel.app",
+  "host": "app.comanet.ma",
   "name": "COMANET OS",
   "launcherName": "COMANET",
   "display": "standalone",
@@ -14,11 +14,11 @@
   "backgroundColor": "#f5f5f3",
   "enableNotifications": true,
   "startUrl": "/m",
-  "iconUrl": "https://comanet-os.vercel.app/icons/icon-512.png",
-  "maskableIconUrl": "https://comanet-os.vercel.app/icons/icon-maskable-512.png",
+  "iconUrl": "https://app.comanet.ma/icons/icon-512.png",
+  "maskableIconUrl": "https://app.comanet.ma/icons/icon-maskable-512.png",
   "appVersionName": "1.0.0",
   "appVersionCode": 1,
-  "webManifestUrl": "https://comanet-os.vercel.app/manifest.webmanifest",
+  "webManifestUrl": "https://app.comanet.ma/manifest.webmanifest",
   "fallbackType": "customtabs",
   "features": {
     "locationDelegation": {

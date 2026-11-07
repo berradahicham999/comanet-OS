@@ -13,10 +13,28 @@ L'app est le site, installé. iPhone : PWA depuis Safari. Android : APK (Trusted
 | Package `ma.comanet.os` | Oui, c'est une autre app : à ne jamais changer |
 | Nouvelle permission Android | Oui (GPS et notifications sont déjà activés dans le premier APK) |
 
+## 0. Mettre le site sur app.comanet.ma, une seule fois
+
+Le domaine de l'app est **`app.comanet.ma`** (décision du 07/11/2026). Il est inscrit dans l'APK : tout le reste en dépend, à faire d'abord.
+
+1. **Vercel** → projet `comanet-os` → Settings → Domains → ajouter `app.comanet.ma`. Vercel affiche l'enregistrement DNS à créer.
+2. **DNS de `comanet.ma`** (serveurs `stackdns.com`, l'hébergeur du site) : créer pour `app` l'enregistrement exact donné par Vercel.
+   `app.comanet.ma` répond aujourd'hui par l'enregistrement général du domaine ; un enregistrement dédié prend le dessus,
+   sans toucher au site `comanet.ma` ni aux e-mails.
+3. Attendre que Vercel affiche **Valid Configuration**, puis vérifier :
+
+```bash
+curl -I https://app.comanet.ma/api/health
+```
+
+**Ne pas rediriger `comanet-os.vercel.app` tout de suite.** Pour un navigateur, ce sont deux sites distincts : la session et les saisies en attente
+d'un téléphone restent sur l'ancienne adresse. Elle reste donc active pendant que l'équipe passe à la nouvelle, et les liens `/d/…` déjà envoyés
+continuent de fonctionner. Avant de changer d'adresse, chaque téléphone ouvre l'ancienne une dernière fois avec du réseau, pour vider sa file.
+
 ## 1. Prérequis, une seule fois
 
 - Un Mac ou un PC avec Node. Bubblewrap installe lui-même le JDK et le SDK Android à sa première exécution.
-- Le **domaine définitif** : il s'écrit dans l'APK. S'il change, remplacer `comanet-os.vercel.app` dans `twa/twa-manifest.json`.
+- Le site répond sur `app.comanet.ma` (section 0) : Bubblewrap y lit le manifest et les icônes.
 
 ```bash
 npm i -g @bubblewrap/cli
@@ -63,12 +81,12 @@ Dans Vercel, variables d'environnement de production :
 - `TWA_SHA256_FINGERPRINTS` : la ligne `SHA256:` (publique, ce n'est pas un secret).
 - `APK_URL` : `/downloads/comanet-os.apk`.
 
-Vérifier : `https://<domaine>/.well-known/assetlinks.json` doit afficher l'empreinte.
+Vérifier : `https://app.comanet.ma/.well-known/assetlinks.json` doit afficher l'empreinte.
 
 ## 5. Publier l'APK
 
 Copier `app-release-signed.apk` vers `public/downloads/comanet-os.apk`, committer et déployer. Le fichier n'est pas secret.
-Le lien à partager est alors `https://<domaine>/app`.
+Le lien à partager est alors `https://app.comanet.ma/app`.
 
 ## 6. Changer de keystore
 
@@ -94,7 +112,7 @@ Augmenter `appVersionCode` et `appVersionName` dans `twa/twa-manifest.json`, rec
 ## Guide à envoyer à l'équipe par WhatsApp
 
 > 📱 *Installer l'app COMANET*
-> 1. Ouvrez ce lien : https://comanet-os.vercel.app/app
+> 1. Ouvrez ce lien : https://app.comanet.ma/app
 > 2. Android : touchez *Télécharger*, ouvrez le fichier, autorisez l'installation. iPhone : dans Safari, *Partager* → *Sur l'écran d'accueil*.
 > 3. Ouvrez *COMANET* et connectez-vous une fois : la session dure 30 jours.
 > 4. Acceptez la position quand le téléphone la demande : elle n'est lue qu'au moment d'enregistrer.

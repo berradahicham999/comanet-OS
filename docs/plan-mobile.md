@@ -1,7 +1,7 @@
 # App mobile COMANET OS — rapport d'inspection et plan (étape 0)
 
 Inspection du 07/11/2026, sur le commit `3cf4c65`. Aucun code applicatif modifié, rien écrit en production.
-Statut : **plan validé le 07/11/2026 avec les recommandations de la section 9. P1a livrée** (section 10), sauf l'APK : il attend le domaine et le keystore.
+Statut : **plan validé le 07/11/2026 avec les recommandations de la section 9. P1a livrée** (section 10), sauf l'APK : il attend le branchement de `app.comanet.ma` et le keystore.
 
 ---
 
@@ -209,7 +209,7 @@ son mot de passe ne doit passer ni par le chat, ni par le dépôt. Il faut aussi
 
 | # | Décision | Ma recommandation |
 |---|---|---|
-| 1 | **Domaine définitif de l'app**, à figer avant le premier APK | Un sous-domaine à toi (`app.comanet.ma`) si le DNS est accessible, sinon rester sur `comanet-os.vercel.app` en connaissance de cause |
+| 1 | **Domaine définitif de l'app**, à figer avant le premier APK | **Décidé le 07/11/2026 : `app.comanet.ma`.** À brancher sur Vercel avant le premier APK (`DEPLOY_MOBILE.md`, section 0) |
 | 2 | **Architecture `/m`** (section 6) et **découpage P1a / P1b** | Valider les deux |
 | 3 | **Points de vente en local pour l'animatrice.** Aujourd'hui elle voit tous les clients ; le brief interdit tout autre périmètre en cache | Ne stocker que les siens et ceux des 90 derniers jours ; les autres par recherche en ligne |
 | 4 | **Proposition IA**, qui n'existe pas | P1b : « pack conseillé » sans IA, à partir de `missingAssortment()` et `clientVisitBrief()`. Version IA en P3, si le pack est utilisé |

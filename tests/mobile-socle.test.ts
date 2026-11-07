@@ -1,5 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { SignJWT, jwtVerify } from "jose";
 import { isPublicPath } from "@/lib/public-paths";
 import { RENEW_AFTER_S, deviceLabel, isPhone, sessionVerdict, touchDue } from "@/lib/sessions-shared";
@@ -177,6 +178,25 @@ describe("manifest", () => {
     const sizes = (m.icons ?? []).map((i) => i.sizes);
     assert.ok(sizes.includes("192x192") && sizes.includes("512x512"));
     assert.ok((m.icons ?? []).some((i) => i.purpose === "maskable"));
+  });
+});
+
+describe("projet APK", () => {
+  const twa = JSON.parse(readFileSync("twa/twa-manifest.json", "utf8"));
+
+  test("package et domaine sont figés : les changer impose de tout réinstaller", () => {
+    assert.equal(twa.packageId, "ma.comanet.os");
+    assert.equal(twa.host, "app.comanet.ma");
+  });
+
+  test("toutes les adresses de l'APK pointent sur ce domaine et sur le point d'entrée du manifest", () => {
+    for (const k of ["iconUrl", "maskableIconUrl", "webManifestUrl"]) assert.equal(new URL(twa[k]).host, twa.host, k);
+    assert.equal(twa.startUrl, manifest().start_url);
+  });
+
+  test("GPS et notifications sont dans le premier APK : les ajouter plus tard ferait réinstaller", () => {
+    assert.equal(twa.features.locationDelegation.enabled, true);
+    assert.equal(twa.enableNotifications, true);
   });
 });
 
