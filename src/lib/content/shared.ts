@@ -228,3 +228,13 @@ export function briefMarkdown(b: {
   L.push("", "---", "Règles : ne rien inventer (ingrédient, chiffre, preuve, prix) au-delà de ce brief et des fiches produits ; respecter les allégations autorisées et les mentions obligatoires. Le livrable final est déposé dans COMANET OS (Planning éditorial → ce contenu → « Déposer le livrable ») pour validation.");
   return L.join("\n");
 }
+
+/** Transitions « valider » et « corriger » depuis le statut d'attente, lues dans le référentiel. */
+export function contentValidationKeys(refs: { statuses: { key: string; awaitingValidation: boolean; inProduction: boolean }[]; transitions: { fromKey: string; toKey: string; requiresValidator: boolean; requiresComment: boolean }[] }): { validate: string | null; correct: string | null } {
+  const from = refs.statuses.find((s) => s.awaitingValidation)?.key ?? "";
+  const outs = refs.transitions.filter((t) => t.fromKey === from && t.requiresValidator);
+  return {
+    validate: outs.find((t) => !t.requiresComment && !refs.statuses.find((s) => s.key === t.toKey)?.inProduction)?.toKey ?? null,
+    correct: outs.find((t) => t.requiresComment)?.toKey ?? null,
+  };
+}

@@ -1,3 +1,4 @@
+import type { DayData } from "@/components/medical/visit-day";
 import type { Persona } from "./persona";
 
 /** Ce que le téléphone garde pour travailler sans réseau. Aucun coût, aucune marge, aucune donnée d'un autre périmètre. */
@@ -84,6 +85,14 @@ export type ClientSheet = {
   salesUpTo: string | null;
 };
 
+export type MedicalSnapshot = {
+  day: Omit<DayData, "preselectDoctorId" | "flash">;
+  products: { id: string; name: string }[];
+  history: { visitId: string; date: string; doctorName: string; status: string; reportStatus: string | null }[];
+};
+
+export type DirectionSnapshot = { aiConfigured: boolean; pendingValidations: number };
+
 export type MobileSnapshot = {
   generatedAt: string;
   user: { id: string; name: string };
@@ -94,6 +103,8 @@ export type MobileSnapshot = {
   gpsTimeoutS: number;
   terrain: TerrainSnapshot | null;
   commercial: CommercialSnapshot | null;
+  medical: MedicalSnapshot | null;
+  direction: DirectionSnapshot | null;
 };
 
 /** Ordre du portefeuille : les visites du jour, puis les commandes en retard, puis le plus gros chiffre d'affaires. */

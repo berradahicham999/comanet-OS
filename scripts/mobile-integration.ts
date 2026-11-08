@@ -183,6 +183,90 @@ async function main() {
   assert.equal(((await applyMutation(com, event(id(), portfolio.id, { userId: sold.id }))).result as { code: string }).code, "FORBIDDEN");
   ok("un commercial sans droit Terrain ne peut pas saisir une animation");
 
+  /* -- Déléguée : compte rendu en file ----------------------------------------------- */
+  const { remindMissingEntries, alertStockTension } = await import("@/lib/mobile/reminders");
+  const push = await import("@/lib/mobile/push");
+  const del = await one<{ id: string; name: string }>(sql`insert into users(name,email,password_hash,role) values (${`Deleguee IT ${tag}`},${`mobile-it4-${tag}@test.ma`},'x','DELEGUE_MEDICAL') returning id, name`);
+  const pd = noPermissions();
+  pd.medical = { view: true, create: true, edit: true, validate: false };
+  const med = { user: { id: del.id, name: del.name, email: "", role: "DELEGUE_MEDICAL" }, perms: pd, scope: "OWN", flags: {}, brandIds: [], clientIds: [], home: "/medical/journee", preview: null } as never;
+  const doc = await one<{ id: string }>(sql`insert into doctors(first_name,last_name,city,delegate_id) values ('Salma',${`IT ${tag}`},'RABAT',${del.id}::uuid) returning id`);
+  const visit = await one<{ id: string }>(sql`insert into doctor_visits(doctor_id,date,delegate_id,status,report_status) values (${doc.id}::uuid, current_date, ${del.id}::uuid, 'REALISEE', 'A_COMPLETER') returning id`);
+  const report = (clientEventId: string, payload: object) => ({ clientEventId, kind: "VISIT_REPORT", userId: del.id, deviceTime: new Date().toISOString(), sentAt: new Date().toISOString(), payload, gps: {} }) as never;
+  const fields = [["objective", "Présenter la gamme"], ["productId", product.id], ["sampleCount", "1"], ["sample_product_0", product.id], ["sample_qty_0", "2"]];
+  const medSnap = await mobileSnapshot(med);
+  assert.equal(medSnap.persona, "DELEGUE");
+  assert.ok(medSnap.medical!.day.doctors.some((d) => d.id === doc.id));
+  assert.ok(medSnap.medical!.history.some((h) => h.visitId === visit.id));
+  ok("journée et historique de la déléguée disponibles sur le téléphone");
+
+  const r1 = id();
+  assert.equal((await applyMutation(med, report(r1, { visitId: visit.id, fields }))).result.ok, true);
+  assert.equal(((await applyMutation(med, report(r1, { visitId: visit.id, fields }))).result as { replayed?: boolean }).replayed, true);
+  assert.equal(await n(sql`select count(*)::int as n from visit_samples where visit_id = ${visit.id}::uuid`), 1);
+  assert.equal(await n(sql`select count(*)::int as n from sample_movements where visit_id = ${visit.id}::uuid`), 1);
+  assert.equal((await one<{ report_status: string }>(sql`select report_status from doctor_visits where id = ${visit.id}::uuid`)).report_status, "VALIDE");
+  ok("compte rendu rejoué : les échantillons ne sortent qu'une fois");
+
+  assert.equal(((await applyMutation(med, report(id(), { startRef: `pas-encore-${tag}`, fields }))).result as { code: string }).code, "WAIT");
+  ok("démarrage pas encore arrivé : le compte rendu attend, sans erreur");
+  const other2 = await one<{ id: string }>(sql`insert into doctor_visits(doctor_id,date,delegate_id,status) values (${doc.id}::uuid, current_date, ${other.id}::uuid, 'REALISEE') returning id`);
+  assert.equal(((await applyMutation(med, report(id(), { visitId: other2.id, fields }))).result as { code: string }).code, "FORBIDDEN");
+  ok("compte rendu sur la visite d'une autre : refusé");
+
+  /* -- Brouillon de commande --------------------------------------------------------- */
+  await db.execute(sql`update products set price_retail = 120, kind = 'PRODUIT' where id = ${product.id}::uuid`);
+  const order = (clientEventId: string, clientId: string, over: object = {}) => ({ clientEventId, kind: "ORDER_DRAFT", userId: sold.id, deviceTime: new Date().toISOString(), sentAt: new Date().toISOString(), payload: { clientId, date: day, notes: "Sous-sol", lines: [{ productId: product.id, qty: "4" }], ...over }, gps: {} }) as never;
+  const o1 = id();
+  const created = await applyMutation(com, order(o1, portfolio.id));
+  assert.equal(created.result.ok, true, JSON.stringify(created.result));
+  assert.equal(((await applyMutation(com, order(o1, portfolio.id))).result as { replayed?: boolean }).replayed, true);
+  const docRow = await one<{ n: number; status: string; type: string; ttc: string }>(sql`select count(*) over ()::int as n, status::text as status, type::text as type, ttc::text as ttc from sales_documents where client_event_id = ${o1}`);
+  assert.equal(docRow.n, 1);
+  assert.equal(docRow.status, "BROUILLON");
+  assert.equal(docRow.type, "COMMANDE");
+  assert.ok(Number(docRow.ttc) > 0, "prix fixé par le serveur");
+  ok("commande sans réseau : un seul brouillon au rejeu, prix fixé par le serveur, rien de confirmé");
+  assert.equal(await n(sql`select count(*)::int as n from notifications where user_id = ${sold.id}::uuid and type = 'ORDER_DRAFT'`), 1);
+  ok("le commercial est prévenu qu'une commande attend sa confirmation");
+  assert.equal(((await applyMutation(com, order(id(), portfolio.id))).result as { code: string }).code, "CONFLICT");
+  ok("seconde commande du même client dans la foulée : conflit, comme le double clic du bureau");
+  assert.equal(((await applyMutation(com, order(id(), client.id))).result as { code: string }).code, "FORBIDDEN");
+  ok("commande pour un client hors de sa portée : refusée");
+
+  /* -- Notifications et relances ------------------------------------------------------ */
+  await db.execute(sql`update users set active = false where email not like ${`%${tag}%`}`);
+  await db.execute(sql`insert into user_permissions(user_id,module,can_view,can_create,can_edit,can_validate) values (${user.id}::uuid,'terrain',true,true,true,false) on conflict do nothing`);
+  await db.execute(sql`insert into user_scope(user_id,scope) values (${user.id}::uuid,'OWN') on conflict do nothing`);
+  await db.execute(sql`delete from animations where animatrice_id = ${user.id}::uuid and date = ${day}::date`);
+  await db.execute(sql`insert into animations(date,client_id,animatrice_id,status,source) values (${day}::date, ${client.id}::uuid, ${user.id}::uuid, 'PLANNED', 'saisie')`);
+  assert.equal(await remindMissingEntries(), 1);
+  assert.equal(await remindMissingEntries(), 0);
+  ok("animatrice sans saisie du jour : relancée une seule fois");
+
+  assert.equal(await push.saveSubscription(user.id, null, { endpoint: "https://evil.example/x", keys: { p256dh: "a", auth: "b" } }, null), false);
+  const endpoint = `https://fcm.googleapis.com/fcm/send/${tag}`;
+  assert.equal(await push.saveSubscription(user.id, null, { endpoint, keys: { p256dh: "a", auth: "b" } }, "Android"), true);
+  assert.equal(await push.saveSubscription(other.id, null, { endpoint, keys: { p256dh: "a", auth: "b" } }, "Android"), true);
+  assert.equal(await n(sql`select count(*)::int as n from push_subscriptions where endpoint = ${endpoint}`), 1);
+  assert.equal(await push.pushCount(user.id), 0);
+  assert.equal(await push.pushCount(other.id), 1);
+  ok("abonnement : un seul par navigateur, celui du dernier compte connecté, adresse forgée refusée");
+  assert.equal(await push.sendPush([other.id], { title: "x" }), 0);
+  ok("sans clés VAPID, aucun envoi et aucune erreur");
+  const pSid = (await sessions.openSession(other.id, {}))!;
+  await db.execute(sql`update push_subscriptions set session_id = ${pSid}::uuid where endpoint = ${endpoint}`);
+  await sessions.revokeSessions({ id: user.id, name: user.name }, other.id, pSid);
+  assert.equal(await push.pushCount(other.id), 0);
+  ok("appareil révoqué : il ne reçoit plus aucune notification");
+
+  await db.execute(sql`update users set active = true where id = ${user.id}::uuid`);
+  await db.execute(sql`insert into user_permissions(user_id,module,can_view,can_create,can_edit,can_validate) values (${user.id}::uuid,'stock',true,true,true,true) on conflict do nothing`);
+  await db.execute(sql`insert into stock_alert_log(product_id,last_alert_at) values (${product.id}::uuid, now() - interval '1 day') on conflict (product_id) do update set last_alert_at = excluded.last_alert_at`);
+  const alerted = await alertStockTension();
+  assert.equal(await alertStockTension(), 0);
+  ok(`alerte de stock : ${alerted} référence(s), jamais deux fois dans la semaine`);
+
   /* -- Sessions --------------------------------------------------------------------- */
   const sid = (await sessions.openSession(user.id, { userAgent: "Mozilla/5.0 (Linux; Android 11) Chrome/130.0 Mobile" }))!;
   const sid2 = (await sessions.openSession(user.id, { userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Version/17.0 Mobile Safari/604.1", idleMinutes: 30 }))!;

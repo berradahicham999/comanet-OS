@@ -1,11 +1,11 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { SignJWT, jwtVerify } from "jose";
 import { isPublicPath } from "@/lib/public-paths";
 import { RENEW_AFTER_S, deviceLabel, isPhone, sessionVerdict, touchDue } from "@/lib/sessions-shared";
 import { renewedToken, signSessionToken } from "@/lib/session-token";
-import { hasMobileScreens, personaOf, screenAllowed } from "@/lib/mobile/persona";
+import { hasMobileScreens, homePathOf, personaOf, screenAllowed } from "@/lib/mobile/persona";
 import { noPermissions, type PermissionSet } from "@/lib/permissions-shared";
 import { MODULE_KEYS, type ModuleKey } from "@/lib/access-shared";
 import { ANIMATRICE_TABS, mobileTabsForPermissions } from "@/components/nav-config";
@@ -127,13 +127,14 @@ describe("persona et onglets", () => {
     for (const p of [anim, med, com]) {
       const hrefs = mobileTabsForPermissions(p, "OWN").map((t) => t.href);
       assert.ok(!hrefs.includes("/") && !hrefs.includes("/actions"), hrefs.join());
+      assert.ok(hrefs.every((h) => !h.startsWith("/m/") || SHELL_PAGES.includes(h)), hrefs.join());
     }
   });
 
   test("le commercial ouvre sur ses clients, sous /m", () => {
     assert.deepEqual(mobileTabsForPermissions(com, "OWN").map((t) => t.href), ["/m", "/clients/tournee", "/gestion/pieces?type=COMMANDE", "/taches"]);
     assert.equal(hasMobileScreens("COMMERCIAL"), true);
-    assert.equal(hasMobileScreens("DELEGUE"), false);
+    assert.equal(hasMobileScreens("AUTRE"), false);
   });
 
   test("l'écran d'un autre métier n'est jamais servi vide", () => {
@@ -146,6 +147,17 @@ describe("persona et onglets", () => {
       assert.equal(screenAllowed(p, "/m"), true);
       assert.equal(screenAllowed(p, "/m/a-corriger"), true);
     }
+    assert.equal(screenAllowed("DELEGUE", "/m"), false);
+    assert.equal(screenAllowed("DELEGUE", "/m/compte-rendu"), true);
+    assert.equal(screenAllowed("DIRECTION", "/m/validations"), true);
+    assert.equal(screenAllowed("DIRECTION", "/m/saisie"), false);
+  });
+
+  test("chaque métier a son écran d'accueil, qui fait partie de ses écrans", () => {
+    assert.equal(homePathOf("DELEGUE"), "/m/tournee");
+    assert.equal(homePathOf("DIRECTION"), "/m/brief");
+    assert.equal(homePathOf("ANIMATRICE"), "/m");
+    for (const p of ["ANIMATRICE", "COMMERCIAL", "DELEGUE", "DIRECTION"] as const) assert.equal(screenAllowed(p, homePathOf(p)), true, p);
   });
 
   test("un onglet n'apparaît que si le droit existe", () => {
@@ -174,6 +186,15 @@ describe("service worker", () => {
   test("la coquille ne précharge que les pages sans donnée", () => {
     assert.ok(SHELL_PAGES.every((p) => p === "/m" || p.startsWith("/m/")));
     assert.deepEqual(USER_PAGES, ["/medical/journee", "/clients/tournee"]);
+  });
+
+  test("il reçoit les notifications et n'ouvre que des liens internes fournis par le serveur", () => {
+    assert.ok(src.includes('addEventListener("push"'));
+    assert.ok(src.includes('addEventListener("notificationclick"'));
+  });
+
+  test("toutes les pages de la coquille mobile existent", () => {
+    for (const p of SHELL_PAGES) assert.ok(existsSync(`src/app${p}/page.tsx`), p);
   });
 
   test("l'API et les écritures ne passent jamais par le cache", () => {

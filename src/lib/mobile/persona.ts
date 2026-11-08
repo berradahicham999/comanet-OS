@@ -17,15 +17,23 @@ export function personaOf(perms: PermissionSet, scope: ScopeKey): Persona {
 
 /** Les métiers qui ont leurs écrans sous `/m`. Les autres gardent leur accueil habituel. */
 export function hasMobileScreens(p: Persona): boolean {
-  return p === "ANIMATRICE" || p === "COMMERCIAL";
+  return p !== "AUTRE";
 }
 
-const ANIMATRICE_ONLY = ["/m/saisie", "/m/mois"];
-const COMMERCIAL_ONLY = ["/m/client"];
+const SCREENS: Record<Persona, string[]> = {
+  ANIMATRICE: ["/m", "/m/saisie", "/m/stock", "/m/mois", "/m/a-corriger"],
+  COMMERCIAL: ["/m", "/m/client", "/m/commande", "/m/a-corriger"],
+  DELEGUE: ["/m/tournee", "/m/medecins", "/m/fiche-medecin", "/m/historique", "/m/compte-rendu", "/m/a-corriger"],
+  DIRECTION: ["/m/brief", "/m/validations"],
+  AUTRE: [],
+};
 
-/** Un écran de l'autre métier ramène à l'accueil plutôt que d'afficher un écran vide. */
+/** Premier écran du métier : chacun a sa propre page, donc seulement le code dont il a besoin. */
+export function homePathOf(p: Persona): string {
+  return SCREENS[p][0] ?? "/m";
+}
+
+/** Un écran d'un autre métier ramène à l'accueil plutôt que d'afficher un écran vide. */
 export function screenAllowed(p: Persona, path: string): boolean {
-  if (ANIMATRICE_ONLY.includes(path) || path === "/m/stock") return p === "ANIMATRICE";
-  if (COMMERCIAL_ONLY.includes(path)) return p === "COMMERCIAL";
-  return true;
+  return SCREENS[p].includes(path);
 }

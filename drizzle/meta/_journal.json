@@ -393,6 +393,13 @@
       "when": 1790001000000,
       "tag": "0055_mobile",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1790001100000,
+      "tag": "0056_mobile_p2",
+      "breakpoints": true
     }
   ]
 }

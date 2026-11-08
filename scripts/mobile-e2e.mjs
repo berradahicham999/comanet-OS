@@ -195,8 +195,9 @@ console.log("\n— Téléphone partagé");
   await ctx.setOffline(false);
   await page.goto(`${base}/m/mois`);
   await page.getByRole("heading", { level: 1 }).waitFor();
+  await page.evaluate(() => { localStorage.removeItem("comanet_user"); });
+  await page.goto("about:blank");
   await ctx.clearCookies();
-  await page.evaluate(async () => { localStorage.removeItem("comanet_user"); });
   await page.goto(`${base}/login?next=/m`);
   await page.fill("#email", imane.email);
   await page.fill("#password", PASSWORD);
@@ -270,7 +271,7 @@ console.log("\n— Commercial, 360×800");
   await page.getByRole("heading", { name: "Impayés" }).waitFor({ timeout: 15000 });
   await page.getByText(/Copie du/).waitFor();
   ok("mode avion : la fiche s'ouvre depuis le téléphone, datée");
-  check(await page.getByText("Commande", { exact: false }).first().getAttribute("aria-disabled") === "true" || (await page.locator('[aria-disabled="true"]').count()) === 2, "commande et visite signalées comme indisponibles sans réseau");
+  check((await page.locator('[aria-disabled="true"]').count()) === 1, "visite signalée comme indisponible sans réseau");
 
   await page.getByLabel("Chercher un produit").fill(tag);
   await page.getByLabel(/^Stock — /).first().fill("11");
@@ -285,12 +286,194 @@ console.log("\n— Commercial, 360×800");
   const readings = await q(`select channel::text as channel, quantity, user_id from client_stock_readings where client_id = $1`, [portfolio[2].id]);
   check(readings.length === 1 && readings[0].channel === "TOURNEE_COMMERCIALE" && readings[0].quantity === 11 && readings[0].user_id === u.id, "retour du réseau : un seul relevé, canal Tournée, à son nom");
 
+  await ctx.setOffline(true);
+  await page.goto(`${base}/m/client?id=${portfolio[1].id}`);
+  await page.getByRole("heading", { name: portfolio[1].name }).waitFor({ timeout: 15000 });
+  await page.getByRole("link", { name: "Commande", exact: true }).click();
+  await page.waitForURL((x) => x.pathname === "/m/commande", { timeout: 15000 });
+  await page.getByLabel("Chercher un produit").fill(tag);
+  await page.getByRole("button", { name: new RegExp(`réparateur ${tag} 1`) }).click();
+  await page.getByRole("button", { name: /Une unité de plus/ }).first().click();
+  if (shots) await page.screenshot({ path: `${shots}/commercial-3-commande.png` });
+  await page.getByRole("button", { name: "Enregistrer sur le téléphone" }).click();
+  await page.waitForURL((x) => x.pathname === "/m/client", { timeout: 15000 });
+  await page.getByText(/1 saisie en attente/).waitFor({ timeout: 8000 });
+  ok("commande prise sans réseau, en attente");
+  await ctx.setOffline(false);
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await page.getByText(/1 saisie en attente/).waitFor({ state: "detached", timeout: 30000 });
+  const orders = await q(`select status::text as status, type::text as type, (select count(*)::int from sales_document_lines l where l.document_id = d.id) as lines, (select quantity from sales_document_lines l where l.document_id = d.id limit 1) as qty from sales_documents d where client_id = $1`, [portfolio[1].id]);
+  check(orders.length === 1 && orders[0].status === "BROUILLON" && orders[0].type === "COMMANDE" && Number(orders[0].qty) === 2, "retour du réseau : un seul brouillon de commande, rien de confirmé");
+
   await page.goto(`${base}/m/saisie`);
   await page.waitForURL((x) => x.pathname === "/m", { timeout: 15000 });
   ok("un écran d'animatrice ramène à ses clients");
   await page.getByRole("link", { name: "Commandes", exact: true }).click();
   await page.waitForURL((x) => x.pathname === "/gestion/pieces", { timeout: 20000 });
   ok("onglet Commandes : la page existante, en ligne");
+  check(errors.length === 0, `aucune erreur JavaScript${errors.length ? " : " + errors[0] : ""}`);
+  await ctx.close();
+}
+
+/* -- Déléguée médicale -------------------------------------------------------------- */
+console.log("\n— Déléguée, 360×800");
+{
+  const hash = await bcrypt.hash(PASSWORD, 4);
+  const [u] = await q(`insert into users(name,email,password_hash,role) values ('Nadia',$1,$2,'DELEGUE_MEDICAL') returning id, email`, [`nadia-${tag}@e2e.ma`, hash]);
+  for (const m of ["medical", "taches"]) await q(`insert into user_permissions(user_id,module,can_view,can_create,can_edit,can_validate) values ($1,$2,true,true,true,false)`, [u.id, m]);
+  await q(`insert into user_scope(user_id,scope) values ($1,'OWN')`, [u.id]);
+  const [d] = await q(`insert into doctors(first_name,last_name,city,delegate_id) values ('Salma',$1,'RABAT',$2) returning id, last_name`, [`Bennani${tag}`, u.id]);
+  const [planned] = await q(`insert into doctor_visits(doctor_id,date,delegate_id) values ($1,current_date,$2) returning id`, [d.id, u.id]);
+
+  const ctx = await browser.newContext({ ...DEVICES["360×800"], permissions: ["geolocation"], geolocation: { latitude: 34.0209, longitude: -6.8416, accuracy: 12 } });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(`${base}/login`);
+  await page.fill("#email", u.email);
+  await page.fill("#password", PASSWORD);
+  await page.click("button[type=submit]");
+  await page.waitForURL((x) => x.pathname === "/m/tournee", { timeout: 40000 });
+  ok("téléphone de la déléguée : la connexion ouvre sa tournée");
+
+  await page.getByRole("button", { name: /J'ai compris/ }).click();
+  await page.getByText(`Dr Salma ${d.last_name}`).first().waitFor({ timeout: 20000 });
+  ok("avis GPS accepté, visite du jour affichée");
+  await page.waitForFunction(() => !!navigator.serviceWorker?.controller, null, { timeout: 30000 }).catch(() => page.reload());
+  await page.waitForFunction(() => !!navigator.serviceWorker?.controller, null, { timeout: 30000 });
+  await page.waitForTimeout(1500);
+
+  await page.goto(`${base}/m/medecins`);
+  await page.getByRole("link", { name: new RegExp(d.last_name) }).click();
+  await page.waitForURL((x) => x.pathname === "/m/fiche-medecin", { timeout: 15000 });
+  await page.getByRole("link", { name: "Démarrer une visite" }).waitFor({ timeout: 15000 });
+  ok("fiche médecin depuis la liste de ses secteurs");
+
+  await ctx.setOffline(true);
+  await page.goto(`${base}/m/tournee`);
+  await page.getByText(`Dr Salma ${d.last_name}`).first().waitFor({ timeout: 15000 });
+  ok("mode avion : la tournée s'ouvre depuis le téléphone");
+  await page.getByRole("button", { name: "Démarrer" }).first().click();
+  await page.getByRole("button", { name: "Terminer la visite" }).waitFor({ timeout: 25000 });
+  ok("Démarrer sans réseau : le chrono tourne");
+  check((await q(`select count(*)::int as n from visit_events where visit_id = $1`, [planned.id]))[0].n === 0, "rien en base tant que le téléphone est hors réseau");
+  await page.getByRole("button", { name: "Terminer la visite" }).click();
+  await page.waitForURL((x) => x.pathname === "/m/compte-rendu", { timeout: 25000 });
+  await page.fill('input[name="objective"]', "Présenter le sérum");
+  if (shots) await page.screenshot({ path: `${shots}/deleguee-1-compte-rendu.png` });
+  await page.getByRole("button", { name: "Valider le compte rendu" }).click();
+  await page.waitForURL((x) => x.pathname === "/m/tournee", { timeout: 15000 });
+  await page.getByText(/1 saisie en attente/).waitFor({ timeout: 8000 });
+  ok("Terminer puis compte rendu sans réseau : enregistrés sur le téléphone");
+  await page.reload();
+  await page.getByText(/1 saisie en attente/).waitFor({ timeout: 10000 });
+  ok("rechargement sans réseau : le compte rendu est toujours là");
+
+  await ctx.setOffline(false);
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await page.getByText(/1 saisie en attente/).waitFor({ state: "detached", timeout: 75000 });
+  const visits = await q(`select id, status::text as status, report_status, objective, started_at, ended_at from doctor_visits where doctor_id = $1`, [d.id]);
+  check(visits.length === 1, `0 doublon : une seule visite, la planifiée (${visits.length})`);
+  check(visits[0].status === "REALISEE" && !!visits[0].started_at && !!visits[0].ended_at, "visite réalisée, heures enregistrées");
+  check(visits[0].report_status === "VALIDE" && visits[0].objective === "Présenter le sérum", "compte rendu rattaché à la bonne visite");
+  const ev = await q(`select type::text as type, lat from visit_events where visit_id = $1 order by server_time`, [visits[0].id]);
+  check(ev.length === 2 && ev.every((e) => e.lat !== null), "Démarrer et Terminer horodatés avec position");
+
+  await page.goto(`${base}/m/historique`);
+  await page.getByText(new RegExp(d.last_name)).first().waitFor({ timeout: 15000 });
+  await page.getByText("Compte rendu ✓").first().waitFor({ timeout: 15000 });
+  ok("historique à jour");
+  check(errors.length === 0, `aucune erreur JavaScript${errors.length ? " : " + errors[0] : ""}`);
+  await ctx.close();
+}
+
+/* -- Direction ---------------------------------------------------------------------- */
+console.log("\n— Direction, 360×800");
+{
+  const hash = await bcrypt.hash(PASSWORD, 4);
+  const [u] = await q(`insert into users(name,email,password_hash,role) values ('Direction',$1,$2,'ADMIN') returning id, email`, [`dg-${tag}@e2e.ma`, hash]);
+  for (const m of ["produits","stock","reglementaire","ventes","clients","commandes","livraisons","facturation","reglements","achats","marketing","influence","budgets","terrain","medical","taches","assets","rapports","administration"]) {
+    await q(`insert into user_permissions(user_id,module,can_view,can_create,can_edit,can_validate) values ($1,$2,true,true,true,true)`, [u.id, m]);
+  }
+  await q(`insert into user_scope(user_id,scope) values ($1,'ALL')`, [u.id]);
+  await q(`insert into user_flags(user_id,override_commercial,approve_spend) values ($1,true,true)`, [u.id]);
+  // Base jetable, parcours rejouable : la file doit contenir exactement ce que ce parcours y met.
+  await q(`update content_items set status = 'IDEE' where status = 'A_VALIDER'`);
+  await q(`update sales_documents set approval_requested_at = null where approval_requested_at is not null`);
+  const [brand] = await q(`select id from brands limit 1`);
+  const content = [];
+  for (const t of ["Reel solaire", "Carrousel routine"]) {
+    const [c] = await q(`insert into content_items(date,brand_id,title,status,validator_id) values (current_date,$1,$2,'A_VALIDER',$3) returning id, title`, [brand.id, `${t} ${tag}`, u.id]);
+    content.push(c);
+  }
+  const [blocked] = await q(`insert into clients(name_key,name,city,type,blocked,blocked_reason) values ($1,$2,'FES','PHARMACIE',true,'Impayés') returning id, name`, [`e2e-dg-${tag}`, `Pharmacie Bloquée ${tag}`]);
+  const [piece] = await q(`insert into sales_documents(type,date,client_id,site,approval_requested_at,approval_requested_by_id,ttc) values ('BL',current_date,$1,'COMANET',now(),$2,1200) returning id`, [blocked.id, u.id]);
+
+  const ctx = await browser.newContext(DEVICES["360×800"]);
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(`${base}/login`);
+  await page.fill("#email", u.email);
+  await page.fill("#password", PASSWORD);
+  await page.click("button[type=submit]");
+  await page.waitForURL((x) => x.pathname === "/m/brief", { timeout: 40000 });
+  await page.getByText(/3 décisions à prendre/).waitFor({ timeout: 20000 });
+  ok("téléphone de la direction : le brief, avec le nombre de décisions");
+  await page.getByRole("link", { name: "Valider", exact: true }).click();
+  await page.waitForURL((x) => x.pathname === "/m/validations", { timeout: 15000 });
+
+  const swipe = async (dx) => {
+    const box = await page.locator("article").boundingBox();
+    const y = box.y + 30;
+    await page.mouse.move(box.x + box.width / 2, y);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + dx, y, { steps: 8 });
+    await page.mouse.up();
+  };
+  const statusOf = async (id) => (await q(`select status from content_items where id = $1`, [id]))[0].status;
+  const until = async (fn) => { for (let i = 0; i < 60; i++) { if (await fn()) return true; await page.waitForTimeout(250); } return false; };
+
+  await page.getByText(blocked.name).first().waitFor({ timeout: 15000 });
+  if (shots) await page.screenshot({ path: `${shots}/direction-1-validation.png` });
+  await swipe(-180);
+  await page.getByPlaceholder("Motif (obligatoire)").waitFor();
+  check(await page.getByRole("button", { name: "Envoyer" }).isDisabled(), "glisser à gauche : un motif est exigé");
+  await page.getByPlaceholder("Motif (obligatoire)").fill("Régler l'impayé d'abord");
+  await page.getByRole("button", { name: "Envoyer" }).click();
+  check(await until(async () => (await q(`select approval_requested_at from sales_documents where id = $1`, [piece.id]))[0].approval_requested_at === null), "blocage non levé : demande retirée après le délai d'annulation");
+  check((await q(`select status::text as s from sales_documents where id = $1`, [piece.id]))[0].s === "BROUILLON", "la pièce reste un brouillon");
+
+  // L'ordre de deux contenus du même instant n'est pas fixé : on suit celui qui s'affiche.
+  await page.locator("article h2").waitFor({ timeout: 15000 });
+  const shownTitle = (await page.locator("article h2").textContent())?.trim();
+  const [one, two] = shownTitle === content[0].title ? content : [content[1], content[0]];
+  await swipe(40);
+  await page.waitForTimeout(300);
+  check((await page.getByText(/^Validé :/).count()) === 0, "un petit mouvement ne valide rien");
+  await swipe(170);
+  await page.getByText(/^Validé :/).waitFor({ timeout: 4000 });
+  await page.getByRole("button", { name: "Annuler", exact: true }).click();
+  await page.getByText(one.title).first().waitFor({ timeout: 4000 });
+  await page.waitForTimeout(5600);
+  check((await statusOf(one.id)) === "A_VALIDER", "glisser puis Annuler : rien n'est parti");
+  await swipe(170);
+  check(await until(async () => (await statusOf(one.id)) === "VALIDE"), "glisser à droite : contenu validé par la transition officielle");
+
+  await page.getByText(two.title).first().waitFor({ timeout: 15000 });
+  await swipe(-180);
+  await page.getByPlaceholder("Motif (obligatoire)").fill("Revoir la légende");
+  await page.getByRole("button", { name: "Envoyer" }).click();
+  check(await until(async () => (await statusOf(two.id)) === "CORRECTIONS"), "glisser à gauche : renvoyé en corrections");
+  check((await q(`select comment from content_status_history where content_id = $1 order by created_at desc limit 1`, [two.id]))[0].comment === "Revoir la légende", "le motif est dans l'historique");
+  await page.getByText("Rien à valider.").waitFor({ timeout: 8000 });
+  ok("file vide");
+
+  for (const route of ["/actions", "/recherche?q=pharmacie"]) {
+    await page.goto(base + route, { waitUntil: "networkidle" });
+    const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    check(over === 0, `${route.split("?")[0]} : aucun débordement à 360 px (${over} px)`);
+  }
   check(errors.length === 0, `aucune erreur JavaScript${errors.length ? " : " + errors[0] : ""}`);
   await ctx.close();
 }

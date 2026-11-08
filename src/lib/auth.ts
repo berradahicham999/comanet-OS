@@ -34,6 +34,14 @@ export async function createSession(user: SessionUser, device: { userAgent?: str
   });
 }
 
+/** Identifiant de session du cookie courant : rattache un abonnement Web Push à cet appareil. */
+export async function currentSessionId(): Promise<string | null> {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  if (!token) return null;
+  const sid = await jwtVerify(token, secret()).then((r) => r.payload.sid, () => null);
+  return typeof sid === "string" ? sid : null;
+}
+
 export async function destroySession() {
   const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireActivationAccess, activationScope, canValidateActivation } from "@/lib/activations/access";
 import { activationRefs } from "@/lib/activations/refs";
 import { activationValidationQueue } from "@/lib/activations/queries";
-import { durationDays } from "@/lib/activations/shared";
+import { activationValidationKeys, durationDays } from "@/lib/activations/shared";
 import { PageHeader, Empty } from "@/components/ui";
 import { ValidationQueue, type QueueItem } from "@/components/validation-queue";
 import { fmtMAD, fmtDate } from "@/lib/format";
@@ -29,10 +29,7 @@ export default async function ActivationValidationPage(props: { searchParams: Pr
   const shown = readOnly ? items : visible;
 
   // Transitions « valider » / « refuser » depuis le statut d'attente, lues dans le référentiel.
-  const awaiting = refs.statuses.find((s) => s.awaitingValidation);
-  const outs = refs.transitions.filter((t) => t.fromKey === (awaiting?.key ?? "") && t.requiresValidator);
-  const validateKey = outs.find((t) => !t.requiresComment && refs.statuses.find((s) => s.key === t.toKey)?.isValidated)?.toKey ?? null;
-  const correctKey = outs.find((t) => t.requiresComment && !refs.statuses.find((s) => s.key === t.toKey)?.isCancelled)?.toKey ?? null;
+  const { validate: validateKey, correct: correctKey } = activationValidationKeys(refs);
   const typeLabel = (k: string) => refs.types.find((t) => t.key === k)?.label ?? k;
   const refLabel = (list: { key: string; label: string }[], k: string | null) => list.find((x) => x.key === k)?.label ?? null;
 

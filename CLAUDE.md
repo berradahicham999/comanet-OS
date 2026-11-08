@@ -43,7 +43,7 @@ MOBILE_E2E=1 BASE_URL=<next start> DATABASE_URL=<base jetable> PW_CHROMIUM=<chro
 ```
 
 Variables d'environnement : `DATABASE_URL`, `DATABASE_SSL`, `SESSION_SECRET`, `SETUP_KEY`,
-`BUSINESS_TZ`, `DATABASE_POOL_MAX`, `TWA_SHA256_FINGERPRINTS`, `APK_URL`. Voir `.env.example`, `DEPLOY.md` et `DEPLOY_MOBILE.md`.
+`BUSINESS_TZ`, `DATABASE_POOL_MAX`, `TWA_SHA256_FINGERPRINTS`, `APK_URL`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`. Voir `.env.example`, `DEPLOY.md` et `DEPLOY_MOBILE.md`.
 
 Sur Supabase, l'application utilise le **Transaction pooler (6543)** ; les scripts CLI
 (`db:push`, `db:import`) le **Session pooler (5432)**.
@@ -155,6 +155,9 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Métier sur le téléphone (déduit des droits, jamais de `users.role`) et onglets | `src/lib/mobile/persona.ts` + `src/components/nav-config.ts` | `personaOf()`, `mobileTabsForPermissions()` |
 | File d'envoi de l'app mobile (état d'une saisie, rejeu, conflit) et saisies rejouées | `src/lib/mobile/outbox-shared.ts` + `outbox.ts` + `mutations.ts` | `settle()`, `sendable()`, `flushOutbox()`, `applyMutation()` (seule entrée des saisies du téléphone) |
 | Référentiels gardés sur le téléphone (portée, durée de vie), fiche courte d'un client, pack conseillé | `src/lib/mobile/snapshot.ts` + `snapshot-shared.ts` + `outbox-shared.ts` | `mobileSnapshot()`, `clientSheet()`, `sortPortfolio()`, `deliverablePack()`, `snapshotExpired()` |
+| File unique de validation du téléphone (contenus, activations, pièces bloquées) | `src/lib/mobile/validations.ts` + `validations-shared.ts` | `listValidations()`, `decideValidation()`, `swipeDecision()` |
+| Web Push (abonnements, envoi) et relances | `src/lib/mobile/push.ts` + `push-shared.ts` + `reminders.ts` | `saveSubscription()`, `sendPush()` (seules écritures et seul envoi), `validEndpoint()`, `reminderDue()`, `runMobileCron()` |
+| Journée d'une déléguée (bureau et téléphone), lecture d'un compte rendu | `src/lib/medical/day.ts` + `report-input.ts` | `delegateDay()`, `visitHistory()`, `readReport()` |
 | Service worker (ce qui est mis en cache, et ce qui ne l'est jamais) | `src/lib/mobile/sw-source.ts` | `swSource()` |
 | Sessions par appareil (30 jours glissants, inactivité, révocation) | `src/lib/sessions.ts` + `sessions-shared.ts` + `session-token.ts` | `openSession()`, `checkSession()`, `revokeSessions()` (seules écritures de `user_sessions`), `sessionVerdict()`, `renewedToken()` |
 | Chemins ouverts sans session | `src/lib/public-paths.ts` | `isPublicPath()` |
@@ -350,7 +353,10 @@ depuis la fiche utilisateur ; `settings.mobile.adminIdleMinutes` déconnecte les
 P1b livrée : Commercial. `/m` dépend du métier (`HomeScreen`) : portefeuille (`/api/m/bootstrap`, sa portée seulement, visites du jour puis commandes en retard), fiche courte
 `/m/client?id=` = `clientVisitBrief()` réduite (`clientSheet()`, encours réservé à Règlements ou Facturation), les 40 premières fiches téléchargées à l'avance, une à la fois ; pack conseillé sans IA
 = `missingAssortment()` moins les produits sans stock à l'entrepôt, présenté comme une corrélation observée. Relevé de stock hors connexion, canal `TOURNEE_COMMERCIALE` ; Tournée, Commandes et
-Tâches restent les pages existantes, en ligne. Reste P2 (Déléguées sous `/m`, brief, validations, Web Push, brouillon de commande hors connexion), P3 (scan, adoption, mode sombre, Proposition IA).
+Tâches restent les pages existantes, en ligne. P2 livrée (migration 0056) : déléguées sous `/m/tournee` (`VisitDay` réutilisé, données `delegateDay()`, compte rendu en file `VISIT_REPORT` rattaché à la visite ou à son démarrage, `WAIT` tant que la visite n'est pas arrivée),
+médecins et historique ; direction sous `/m/brief` et `/m/validations` (`listValidations()` rassemble contenus, activations = dépenses, pièces bloquées ; chaque décision repasse par `transition()`, `transitionActivation()`, `validateAndRender()` ; geste + délai d'annulation de 5 s) ;
+brouillon de commande hors connexion (`ORDER_DRAFT` : BROUILLON au prix public et à la remise du client, confirmé ensuite dans l'éditeur) ; Web Push branché dans `notify()` (`src/lib/mobile/push.ts`, clés VAPID en variables d'environnement, abonnement lié à la session) et relances `/api/cron/mobile`
+(`settings.mobile.reminderHour`, `stockAlertHour`). Chaque métier a son écran d'accueil (`homePathOf()`) : `/m` reste le point d'entrée du manifest. Reste P3 (scan, adoption, mode sombre, Proposition IA).
 
 **P&L** (`/gestion/pnl`, section du `docs/guide-gestion-commerciale.md`, migration 0031). Réservé aux administrateurs
 (`requireAdmin()` : salaires). Compte de résultat mensuel HT : CA = ventes directes (sites de `settings.pnl.directSites`)

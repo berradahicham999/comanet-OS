@@ -1,7 +1,7 @@
 import "server-only";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { animations, clientStockReadings } from "@/db/schema";
+import { animations, clientStockReadings, doctorVisits, salesDocuments } from "@/db/schema";
 import type { Access } from "@/lib/access";
 import { can } from "@/lib/permissions-shared";
 import { ANIMATION_ERRORS } from "@/lib/animations-shared";
@@ -11,8 +11,15 @@ import { canRecordReading, parseReadingLines } from "@/lib/client-stock-shared";
 import { recordReadings } from "@/lib/client-stock";
 import { iso, today } from "@/lib/format";
 import { personaOf } from "./persona";
+import { formDataFromPairs, readReport } from "@/lib/medical/report-input";
+import { saveVisitReport } from "@/lib/medical/visits";
+import { baseUnitPriceHt } from "@/lib/gestion/calc";
+import { defaultDiscount } from "@/lib/gestion/documents-shared";
+import { DuplicateOrderError, saveDraft } from "@/lib/gestion/documents";
+import { editorData } from "@/lib/gestion/editor";
+import { notify } from "@/lib/content/notify";
 import { alignedDeviceTime, dateInWindow, gpsColumns, isUuid, rawLines } from "./mutations-shared";
-import type { AnimationPayload, MutationCode, MutationResult, StockPayload, WireEvent } from "./outbox-shared";
+import type { AnimationPayload, MutationCode, MutationResult, OrderDraftPayload, StockPayload, VisitReportPayload, WireEvent } from "./outbox-shared";
 
 /**
  * Enregistrement des saisies de la file hors connexion. Ne décide de rien sur le métier : la validation reste
@@ -116,6 +123,85 @@ async function saveStockEvent(access: Access, e: WireEvent): Promise<{ result: M
   return { result: { clientEventId: id, ok: true } };
 }
 
+/**
+ * Compte rendu rempli sans réseau. La visite peut ne pas être encore arrivée : son démarrage attend peut-être dans la file
+ * des visites. On répond alors WAIT, et le compte rendu repart au prochain passage, sans jamais être perdu.
+ */
+async function saveReportEvent(access: Access, e: WireEvent): Promise<{ result: MutationResult }> {
+  const id = e.clientEventId;
+  if (!can(access.perms, "medical", "create")) return { result: ko(id, "FORBIDDEN", "Vous n'avez plus le droit de saisir un compte rendu.") };
+  const done = await db.select({ id: doctorVisits.id }).from(doctorVisits).where(eq(doctorVisits.reportClientEventId, id));
+  if (done[0]) return { result: { clientEventId: id, ok: true, id: done[0].id, replayed: true } };
+
+  const p = e.payload as VisitReportPayload;
+  let visitId = isUuid(p?.visitId) ? p.visitId : null;
+  if (!visitId && p?.startRef) {
+    const r = await db.execute<{ visit_id: string | null }>(sql`select visit_id::text as visit_id from visit_events where client_event_id = ${String(p.startRef)} limit 1`);
+    visitId = r.rows[0]?.visit_id ?? null;
+  }
+  if (!visitId) return { result: ko(id, "WAIT", "La visite n'est pas encore arrivée.") };
+  const visit = (await db.select({ delegateId: doctorVisits.delegateId, status: doctorVisits.status }).from(doctorVisits).where(eq(doctorVisits.id, visitId)))[0];
+  if (!visit) return { result: ko(id, "INVALID", "Visite introuvable.") };
+  if (access.scope === "OWN" && visit.delegateId !== access.user.id) return { result: ko(id, "FORBIDDEN", "Cette visite n'est pas la vôtre.") };
+  if (visit.status === "EN_COURS") return { result: ko(id, "WAIT", "La fin de visite n'est pas encore arrivée.") };
+
+  const res = await saveVisitReport(visitId, readReport(formDataFromPairs(p.fields), access.user.id));
+  if (!res.ok) return { result: ko(id, "INVALID", res.message ?? "Compte rendu refusé.") };
+  await db.update(doctorVisits).set({ reportClientEventId: id }).where(eq(doctorVisits.id, visitId));
+  return { result: { clientEventId: id, ok: true, id: visitId } };
+}
+
+/**
+ * Commande prise sans réseau : elle devient un BROUILLON, au prix public et à la remise habituelle du client. La personne la
+ * confirme ensuite depuis le téléphone : c'est à ce moment que plafond de crédit, remises et stock sont contrôlés.
+ */
+async function saveOrderEvent(access: Access, e: WireEvent): Promise<{ result: MutationResult }> {
+  const id = e.clientEventId;
+  if (!can(access.perms, "commandes", "create")) return { result: ko(id, "FORBIDDEN", "Vous n'avez plus le droit de prendre une commande.") };
+  const replay = async () => (await db.select({ id: salesDocuments.id }).from(salesDocuments).where(eq(salesDocuments.clientEventId, id)))[0];
+  const known = await replay();
+  if (known) return { result: { clientEventId: id, ok: true, id: known.id, replayed: true } };
+
+  const p = e.payload as OrderDraftPayload;
+  if (!isUuid(p?.clientId)) return { result: ko(id, "INVALID", "Client manquant.") };
+  if (access.scope !== "ALL" && !access.clientIds.includes(p.clientId)) return { result: ko(id, "FORBIDDEN", "Ce client n'est pas dans votre périmètre.") };
+  if (!dateInWindow(p.date, iso(today()))) return { result: ko(id, "INVALID", "Date de commande trop ancienne ou dans le futur.") };
+
+  const data = await editorData({ clientIds: [p.clientId] });
+  const client = data.clients.find((c) => c.id === p.clientId);
+  if (!client) return { result: ko(id, "INVALID", "Client introuvable ou archivé.") };
+  const byId = new Map(data.products.map((x) => [x.id, x]));
+  const lines = [];
+  for (const l of rawLines(p.lines)) {
+    const product = byId.get(l.productId);
+    if (!product) return { result: ko(id, "INVALID", "Un produit de la commande n'est plus au catalogue.") };
+    const unitPriceHt = baseUnitPriceHt(product.publicPriceTtc, product.taxRate);
+    if (unitPriceHt === null) return { result: ko(id, "INVALID", `Prix manquant pour ${product.name}.`) };
+    lines.push({ productId: l.productId, quantity: l.qty, unitPriceHt, discountPct: defaultDiscount(client.defaultDiscountPct, product.brandId ? client.brandDiscounts[product.brandId] ?? null : null) });
+  }
+  if (!lines.length) return { result: ko(id, "INVALID", "Commande sans produit.") };
+
+  const actor = { id: access.user.id, name: access.user.name };
+  try {
+    const docId = await saveDraft({
+      id: null, type: "COMMANDE", clientId: p.clientId, date: p.date, site: data.sites[0], deliveryAddress: null, salesRepId: access.user.id,
+      paymentModeKey: client.paymentModeKey ?? null, globalDiscountPct: "0", notes: String(p.notes ?? "").trim().slice(0, 1000) || null, clientEventId: id, lines,
+    }, actor);
+    await notify([access.user.id], { type: "ORDER_DRAFT", title: `Commande à confirmer — ${client.name}`, body: "Saisie sans réseau : vérifiez-la et confirmez.", href: `/gestion/pieces/${docId}`, entityType: "sales_document", entityId: docId });
+    return { result: { clientEventId: id, ok: true, id: docId } };
+  } catch (err) {
+    if (err instanceof DuplicateOrderError) {
+      const same = await replay();
+      if (same) return { result: { clientEventId: id, ok: true, id: same.id, replayed: true } };
+      return { result: ko(id, "CONFLICT", "Une commande vient d'être créée pour ce client.", err.existingId) };
+    }
+    if (!isUniqueViolation(err)) throw err;
+    const again = await replay();
+    if (again) return { result: { clientEventId: id, ok: true, id: again.id, replayed: true } };
+    throw err;
+  }
+}
+
 /** Applique une saisie. Une erreur inattendue ne bloque pas les suivantes : la saisie reste en file et sera renvoyée. */
 export async function applyMutation(access: Access, e: WireEvent): Promise<{ result: MutationResult; eventId?: string | null }> {
   const id = String(e?.clientEventId ?? "");
@@ -125,6 +211,8 @@ export async function applyMutation(access: Access, e: WireEvent): Promise<{ res
   try {
     if (e.kind === "ANIMATION") return await saveAnimationEvent(access, e);
     if (e.kind === "STOCK") return await saveStockEvent(access, e);
+    if (e.kind === "VISIT_REPORT") return await saveReportEvent(access, e);
+    if (e.kind === "ORDER_DRAFT") return await saveOrderEvent(access, e);
     return { result: ko(id, "INVALID", "Type de saisie inconnu.") };
   } catch (err) {
     console.error("mobile/mutations", err);

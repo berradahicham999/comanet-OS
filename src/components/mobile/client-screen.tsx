@@ -102,7 +102,9 @@ function ClientBody({ id }: { id: string }) {
       </header>
 
       <div className="flex gap-2">
-        <NetLink href={`/gestion/pieces/nouveau?type=COMMANDE&client=${id}`} online={online} primary><ShoppingCart size={16} /> Commande</NetLink>
+        {online
+          ? <NetLink href={`/gestion/pieces/nouveau?type=COMMANDE&client=${id}`} online primary><ShoppingCart size={16} /> Commande</NetLink>
+          : <Link href={`/m/commande?id=${id}`} prefetch={false} className="btn-primary flex-1 h-12 text-[14px]"><ShoppingCart size={16} /> Commande</Link>}
         <NetLink href={`/clients/tournee?client=${id}`} online={online}><MapPinned size={16} /> Visite</NetLink>
         {sheet?.phone && <a href={`tel:${sheet.phone}`} className="btn-secondary h-12 w-12 p-0 shrink-0" aria-label={`Appeler ${name}`}><Phone size={17} /></a>}
       </div>

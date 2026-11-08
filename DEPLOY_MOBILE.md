@@ -109,6 +109,19 @@ Augmenter `appVersionCode` et `appVersionName` dans `twa/twa-manifest.json`, rec
 | Position refusée | Paramètres du téléphone → Applications → COMANET OS → Autorisations → Position |
 | « Reconnectez-vous » | Session expirée ou appareil révoqué. Les saisies en attente restent sur le téléphone et partent après la connexion |
 
+## 9. Activer les notifications (Web Push)
+
+Une seule fois, sur un poste de confiance :
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+Dans Vercel, variables de production : `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` (secrète : jamais dans un chat ni dans le dépôt), `VAPID_SUBJECT` (`mailto:` d'une adresse COMANET). Redéployer.
+
+Sans ces clés, tout fonctionne sauf l'envoi sur téléphone. Ne pas les changer ensuite : chaque téléphone devrait réactiver ses notifications.
+Sur iPhone, les notifications ne marchent que dans l'app installée depuis Safari.
+
 ## Guide à envoyer à l'équipe par WhatsApp
 
 > 📱 *Installer l'app COMANET*

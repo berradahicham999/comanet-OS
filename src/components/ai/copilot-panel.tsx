@@ -136,7 +136,7 @@ export function CopilotPanel({ enabled, configured }: { enabled: boolean; config
         aria-label="Demander au copilote (⌘K)"
         title="Demander au copilote (⌘K)"
       >
-        <Sparkles size={16} /> Copilote
+        <Sparkles size={16} /> <span className="hidden lg:inline">Copilote</span>
       </button>
 
       {open && (

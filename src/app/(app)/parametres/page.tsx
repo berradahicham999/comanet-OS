@@ -123,6 +123,8 @@ export default async function ParametresPage(props: { searchParams: Promise<{ ta
             <div className="grid grid-cols-2 gap-2">
               <Field name="mobile_adminIdleMinutes" label="Inactivité administrateur (min)" value={s.mobile.adminIdleMinutes} hint="Téléphones seulement, 0 = jamais. Vaut pour les prochaines connexions." />
               <Field name="mobile_gpsTimeoutS" label="Délai GPS à la saisie (s)" value={s.mobile.gpsTimeoutS} />
+              <Field name="mobile_reminderHour" label="Relance des animatrices (heure)" value={s.mobile.reminderHour} />
+              <Field name="mobile_stockAlertHour" label="Alerte de stock (heure)" value={s.mobile.stockAlertHour} />
             </div>
           </Card>
           <Card title="Réglementaire">

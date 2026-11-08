@@ -13,8 +13,10 @@ import { parseDecimal, SCALE } from "@/lib/gestion/money";
 import { can } from "@/lib/permissions-shared";
 import { getRefDate } from "@/lib/ref-date";
 import { productStocks } from "@/lib/stock";
+import { isAiConfigured } from "@/lib/ai/client";
+import { delegateDay, visitHistory } from "@/lib/medical/day";
 import { personaOf } from "./persona";
-import { monthFigures, sortPortfolio, type ClientSheet, type CommercialSnapshot, type LastStock, type MobileClient, type MobileMonth, type MobileSnapshot, type TerrainSnapshot } from "./snapshot-shared";
+import { monthFigures, sortPortfolio, type ClientSheet, type CommercialSnapshot, type DirectionSnapshot, type LastStock, type MedicalSnapshot, type MobileClient, type MobileMonth, type MobileSnapshot, type TerrainSnapshot } from "./snapshot-shared";
 
 /** Version de l'avis GPS de la saisie terrain, dans la table de consentement commune (médical, CRM). */
 export const TERRAIN_GPS_NOTICE_VERSION = "TERRAIN-1";
@@ -190,10 +192,27 @@ export async function clientSheet(access: Access, clientId: string): Promise<Cli
   };
 }
 
+async function medicalSnapshot(access: Access): Promise<MedicalSnapshot> {
+  const [day, history, products] = await Promise.all([
+    delegateDay(access.user.id, access.scope === "OWN"),
+    visitHistory(access.user.id),
+    db.execute<{ id: string; name: string }>(sql`select id::text as id, name from products where active order by name`),
+  ]);
+  return { day, history, products: products.rows };
+}
+
+async function directionSnapshot(access: Access): Promise<DirectionSnapshot> {
+  // À la demande : ce module tire les trois files de validation, inutiles aux autres métiers.
+  const { listValidations } = await import("./validations");
+  return { aiConfigured: isAiConfigured(), pendingValidations: (await listValidations(access)).length };
+}
+
 export async function mobileSnapshot(access: Access): Promise<MobileSnapshot> {
   const persona = personaOf(access.perms, access.scope);
   const terrain = persona === "ANIMATRICE";
   const commercial = persona === "COMMERCIAL" ? await commercialSnapshot(access) : null;
+  const medical = persona === "DELEGUE" ? await medicalSnapshot(access) : null;
+  const direction = persona === "DIRECTION" ? await directionSnapshot(access) : null;
   const [settings, gpsNoticeAccepted, data] = await Promise.all([
     getSettings(),
     terrain ? hasAcceptedTerrainNotice(access.user.id) : Promise.resolve(false),
@@ -208,5 +227,7 @@ export async function mobileSnapshot(access: Access): Promise<MobileSnapshot> {
     gpsTimeoutS: settings.mobile.gpsTimeoutS,
     terrain: data,
     commercial,
+    medical,
+    direction,
   };
 }

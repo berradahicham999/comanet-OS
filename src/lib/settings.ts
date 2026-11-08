@@ -486,9 +486,13 @@ export type MobileSettings = {
   adminIdleMinutes: number;
   /** Délai accordé au téléphone pour donner sa position à l'enregistrement d'une saisie terrain (secondes). */
   gpsTimeoutS: number;
+  /** Heure de la relance des animatrices sans saisie, dans le fuseau de l'entreprise. */
+  reminderHour: number;
+  /** Heure de l'alerte quotidienne de stock en tension. */
+  stockAlertHour: number;
 };
 
-export const DEFAULT_MOBILE: MobileSettings = { adminIdleMinutes: 30, gpsTimeoutS: 8 };
+export const DEFAULT_MOBILE: MobileSettings = { adminIdleMinutes: 30, gpsTimeoutS: 8, reminderHour: 18, stockAlertHour: 8 };
 
 export const DEFAULT_CRM: CrmSettings = {
   defaultFrequencyByType: { PHARMACIE: 1, PARAPHARMACIE: 1, GROSSISTE: 2, AUTRE: 0 },

@@ -122,6 +122,8 @@ export async function updateSettings(formData: FormData) {
     mobile: {
       adminIdleMinutes: Math.max(0, Math.round(num(formData, "mobile_adminIdleMinutes", cur.mobile.adminIdleMinutes))),
       gpsTimeoutS: Math.min(30, Math.max(3, Math.round(num(formData, "mobile_gpsTimeoutS", cur.mobile.gpsTimeoutS)))),
+      reminderHour: Math.min(23, Math.max(0, Math.round(num(formData, "mobile_reminderHour", cur.mobile.reminderHour)))),
+      stockAlertHour: Math.min(23, Math.max(0, Math.round(num(formData, "mobile_stockAlertHour", cur.mobile.stockAlertHour)))),
     },
     creative: {
       fatigueWindowDays: Math.max(7, Math.round(num(formData, "cr_fatigueWindowDays", cur.creative.fatigueWindowDays))),

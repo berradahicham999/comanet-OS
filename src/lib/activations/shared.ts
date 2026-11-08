@@ -351,3 +351,13 @@ export function roiVerdict(i: VerdictInput, s: Pick<ActivationSettings, "roiRepe
     : c && !c.comparable ? `Attendre la fin de la fenêtre « après » (${c.daysUntilComparable} j) puis revenir sur cette fiche.` : "Compléter la fiche : dépenses, résultats, points de vente concernés.";
   return { verdict, roi, data, analysis, hypotheses, recommendation };
 }
+
+/** Transitions « valider » et « à corriger » depuis le statut d'attente, lues dans le référentiel. */
+export function activationValidationKeys(refs: { statuses: { key: string; awaitingValidation: boolean; isValidated: boolean; isCancelled: boolean }[]; transitions: { fromKey: string; toKey: string; requiresValidator: boolean; requiresComment: boolean }[] }): { validate: string | null; correct: string | null } {
+  const from = refs.statuses.find((s) => s.awaitingValidation)?.key ?? "";
+  const outs = refs.transitions.filter((t) => t.fromKey === from && t.requiresValidator);
+  return {
+    validate: outs.find((t) => !t.requiresComment && refs.statuses.find((s) => s.key === t.toKey)?.isValidated)?.toKey ?? null,
+    correct: outs.find((t) => t.requiresComment && !refs.statuses.find((s) => s.key === t.toKey)?.isCancelled)?.toKey ?? null,
+  };
+}

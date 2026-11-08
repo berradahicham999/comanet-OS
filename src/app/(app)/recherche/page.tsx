@@ -54,7 +54,7 @@ export default async function RecherchePage(props: { searchParams: Promise<{ q?:
     <>
       <PageHeader eyebrow="Recherche universelle" title={`« ${q} »`} subtitle={`${total} résultat${total > 1 ? "s" : ""}`} />
       {total === 0 && <Card><div className="text-sm text-muted">Aucun résultat. Essayez un autre mot-clé (nom de produit, client, ville, code article…).</div></Card>}
-      <div className="grid lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {sections.filter((s) => s.rows.length).map((s) => (
           <section key={s.title}><h2 className="label mb-2">{s.title} · {s.rows.length}</h2><div className="space-y-2">{s.rows.map((r, i) => <div key={i}>{s.render(r)}</div>)}</div></section>
         ))}

@@ -441,6 +441,23 @@ export const userSessions = pgTable(
   (t) => [index("user_sessions_user_idx").on(t.userId, t.revokedAt)],
 );
 
+/** Un abonnement Web Push par navigateur. Seul `src/lib/mobile/push.ts` écrit ici. Disparaît avec sa session (révocation à distance). */
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    sessionId: uuid("session_id").references(() => userSessions.id, { onDelete: "cascade" }),
+    endpoint: text("endpoint").notNull(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    deviceLabel: text("device_label"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSuccessAt: timestamp("last_success_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("push_subscriptions_endpoint_uq").on(t.endpoint), index("push_subscriptions_user_idx").on(t.userId)],
+);
+
 export const roleTemplates = pgTable("role_templates", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
@@ -999,6 +1016,12 @@ export const stockLots = pgTable(
  * erreur se corrige par un contre-mouvement (`reversalOf`). Seul `src/lib/gestion/ledger.ts`
  * y écrit. Chaque mouvement pointe vers ce qui l'a créé (`sourceType` + `sourceId`).
  */
+/** Dernière alerte envoyée pour une référence en tension : pas plus d'une par semaine (`src/lib/mobile/reminders.ts`). */
+export const stockAlertLog = pgTable("stock_alert_log", {
+  productId: uuid("product_id").primaryKey().references(() => products.id, { onDelete: "cascade" }),
+  lastAlertAt: timestamp("last_alert_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const stockMovements = pgTable(
   "stock_movements",
   {
@@ -1089,6 +1112,8 @@ export const creditReasons = pgTable("credit_reasons", {
 export const salesDocuments = pgTable(
   "sales_documents",
   {
+    /** App mobile : brouillon de commande saisi hors connexion ; le rejouer ne crée pas une seconde pièce. */
+    clientEventId: text("client_event_id"),
     id: uuid("id").primaryKey().defaultRandom(),
     type: text("type").notNull(),
     status: text("status").notNull().default("BROUILLON"),
@@ -1880,6 +1905,8 @@ export const doctorVisits = pgTable(
     delegateLabel: text("delegate_label"),
     /** Compte rendu : A_COMPLETER après « Terminer », VALIDE une fois envoyé. */
     reportStatus: text("report_status").$type<"A_COMPLETER" | "VALIDE">(),
+    /** App mobile : un compte rendu rejoué par la file hors connexion ne réécrit rien. */
+    reportClientEventId: text("report_client_event_id"),
     autoClosed: boolean("auto_closed").notNull().default(false),
     syncedLate: boolean("synced_late").notNull().default(false),
     notDoneReason: text("not_done_reason"),

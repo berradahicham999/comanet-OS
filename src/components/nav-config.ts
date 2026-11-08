@@ -146,6 +146,11 @@ const ANY_TABS: NavItem[] = [
   { href: "/notifications", label: "Notifications", icon: "Bell", module: "any" },
   { href: "/recherche", label: "Recherche", icon: "Search", module: "any" },
   { href: "/m", label: "Clients", icon: "Users", module: "clients", exact: true },
+  { href: "/m/tournee", label: "Tournée", icon: "Timer", module: "medical" },
+  { href: "/m/medecins", label: "Médecins", icon: "UserRound", module: "medical" },
+  { href: "/m/historique", label: "Historique", icon: "CalendarCheck", module: "medical" },
+  { href: "/m/brief", label: "Brief", icon: "Sun", module: "any" },
+  { href: "/m/validations", label: "Valider", icon: "SquareCheck", module: "any" },
 ];
 
 /** L'animatrice a ses écrans sous `/m`, qui marchent sans réseau. */
@@ -157,8 +162,8 @@ export const ANIMATRICE_TABS: NavItem[] = [
 ];
 
 const TABS: Record<Exclude<Persona, "ANIMATRICE">, string[]> = {
-  DIRECTION: ["/", "/actions", "/taches", "/ventes"],
-  DELEGUE: ["/medical/journee", "/medical/medecins", "/medical/visites", "/taches"],
+  DIRECTION: ["/m/brief", "/actions", "/m/validations", "/recherche"],
+  DELEGUE: ["/m/tournee", "/m/medecins", "/m/historique", "/taches"],
   COMMERCIAL: ["/m", "/clients/tournee", "/gestion/pieces?type=COMMANDE", "/taches"],
   AUTRE: ["/taches", "/notifications", "/recherche"],
 };

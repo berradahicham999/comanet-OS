@@ -11,7 +11,7 @@
  *    leur passage sous `/m`), dans un cache vidé à la déconnexion (`clearUserCache()`) ;
  *  - `/api/*` et les server actions ne passent jamais par le worker : la file d'envoi vit dans IndexedDB.
  */
-export const SHELL_PAGES = ["/m", "/m/saisie", "/m/stock", "/m/mois", "/m/a-corriger", "/m/client"];
+export const SHELL_PAGES = ["/m", "/m/saisie", "/m/stock", "/m/mois", "/m/a-corriger", "/m/client", "/m/commande", "/m/tournee", "/m/medecins", "/m/fiche-medecin", "/m/historique", "/m/compte-rendu", "/m/brief", "/m/validations"];
 export const USER_PAGES = ["/medical/journee", "/clients/tournee"];
 export const USER_CACHE = "comanet-user";
 const ASSETS = ["/icon.svg", "/icons/icon-192.png", "/manifest.webmanifest"];
@@ -96,6 +96,24 @@ self.addEventListener("fetch", (event) => {
   }
   // Toute autre page : le réseau seul. Sans réseau, retour à la coquille plutôt qu'à l'erreur du navigateur.
   event.respondWith(fetch(req).catch(() => Response.redirect("/m", 302)));
+});
+
+self.addEventListener("push", (event) => {
+  let m = { title: "COMANET", body: "", href: "/notifications" };
+  try { m = { ...m, ...event.data.json() }; } catch {}
+  event.waitUntil(self.registration.showNotification(m.title, { body: m.body, icon: "/icons/icon-192.png", badge: "/icons/icon-192.png", lang: "fr", data: { href: m.href } }));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const href = (event.notification.data && event.notification.data.href) || "/notifications";
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      const open = list.find((c) => "focus" in c);
+      if (open) return open.navigate(href).then((c) => (c || open).focus());
+      return self.clients.openWindow(href);
+    }),
+  );
 });
 `;
 }

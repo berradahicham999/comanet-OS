@@ -1,6 +1,7 @@
 "use client";
 
 import { clearRefs, forgetUser, lastUser, rememberUser } from "./outbox";
+import { disablePush } from "./push-client";
 
 /** Même nom que `USER_CACHE` dans `sw-source.ts` : ce module reste côté client, sans importer la source du worker. */
 const USER_CACHE = "comanet-user";
@@ -16,6 +17,7 @@ export async function clearUserCache() {
  */
 export async function wipeSessionData() {
   const uid = lastUser();
+  await disablePush().catch(() => {});
   await clearUserCache();
   if (uid) await clearRefs(uid).catch(() => {});
   forgetUser();

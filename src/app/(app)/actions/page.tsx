@@ -70,7 +70,7 @@ export default async function ActionCenterPage(props: { searchParams: Promise<{ 
         <Tabs current={q({ cat })} tabs={[{ href: q({ cat: "" }), label: "Toutes", count: scoped.length }, ...counts.map((x) => ({ href: q({ cat: x.c }), label: CATEGORY_META[x.c].label, count: x.n }))]} />
       </PageHeader>
 
-      <div className="grid lg:grid-cols-[1fr_280px] gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px] gap-4">
         <div className="space-y-3">
           {list.length === 0 ? (
             showDismissed

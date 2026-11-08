@@ -3,6 +3,7 @@ import { PageHeader, Card, Empty, Badge } from "@/components/ui";
 import { listNotifications } from "@/lib/content/notify";
 import { fmtAgo } from "@/lib/format";
 import { markAllRead, openNotification } from "./actions";
+import { PushToggle } from "@/components/mobile/push-toggle";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Notifications" };
@@ -10,6 +11,7 @@ export const metadata = { title: "Notifications" };
 const TYPE_LABEL: Record<string, { label: string; tone: "gray" | "blue" | "yellow" | "orange" | "green" | "red" | "purple" }> = {
   BRIEF_ASSIGNED: { label: "Brief assigné", tone: "blue" }, BRIEF_UPDATED: { label: "Brief disponible", tone: "blue" }, DELIVERABLE_UPLOADED: { label: "Livrable déposé", tone: "purple" },
   VALIDATION_REQUESTED: { label: "À valider", tone: "yellow" }, CORRECTIONS_REQUESTED: { label: "Corrections", tone: "orange" },
+  TASK_ASSIGNED: { label: "Tâche", tone: "blue" }, STOCK_ALERT: { label: "Stock", tone: "orange" }, SAISIE_REMINDER: { label: "Saisie", tone: "yellow" }, ORDER_DRAFT: { label: "Commande", tone: "yellow" },
   CONTENT_VALIDATED: { label: "Validé", tone: "green" }, DEADLINE_PASSED: { label: "Retard", tone: "red" }, COMMENT: { label: "Commentaire", tone: "gray" },
 };
 
@@ -21,6 +23,7 @@ export default async function NotificationsPage() {
     <>
       <PageHeader eyebrow="Vous" title="Notifications" subtitle={unread ? `${unread} non lue${unread > 1 ? "s" : ""}` : "Tout est lu."}
         actions={unread > 0 ? <form action={markAllRead}><button className="btn-secondary btn-sm" type="submit">Tout marquer lu</button></form> : undefined} />
+      <div className="mb-4 lg:hidden"><PushToggle /></div>
       {items.length === 0 ? <Empty title="Aucune notification" hint="Vous serez prévenu ici quand un brief vous est assigné, qu'un livrable est déposé, qu'une validation est demandée ou qu'un contenu prend du retard." /> : (
         <Card pad={false}>
           <ul className="divide-y divide-line">
