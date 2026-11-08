@@ -33,9 +33,20 @@ export type DayData = {
   flash: string | null;
 };
 
+const defaultReportHref = (visitId: string) => `/medical/visites/${visitId}/compte-rendu`;
+
 const NOT_DONE_REASONS = ["Médecin absent", "Cabinet fermé", "Médecin indisponible (trop d'attente)", "Refus de recevoir"];
 
-export function VisitDay({ data, acceptNotice }: { data: DayData; acceptNotice: () => Promise<void> }) {
+export function VisitDay({ data, acceptNotice, reportHref = defaultReportHref, onChanged, onStoppedOffline }: {
+  data: DayData;
+  acceptNotice: () => void | Promise<void>;
+  /** Sous `/m`, le compte rendu se remplit aussi sans réseau. */
+  reportHref?: (visitId: string) => string;
+  /** Une action est arrivée au serveur : les listes affichées ont changé. */
+  onChanged?: () => void;
+  /** Terminée sans réseau : le compte rendu peut quand même se remplir, rattaché au démarrage. */
+  onStoppedOffline?: (ended: { startRef: string; visitId: string | null; doctorId: string; doctorName: string }) => void;
+}) {
   const router = useRouter();
   const [running, setRunningState] = useState<RunningVisit | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -131,6 +142,7 @@ export function VisitDay({ data, acceptNotice }: { data: DayData; acceptNotice: 
     setBusy(null);
     if (r.offline) setInfo("Pas de réseau : le démarrage est enregistré sur le téléphone et partira tout seul.");
     else if (r.rejected) setError(r.rejected.message);
+    else onChanged?.();
   }
 
   async function stop() {
@@ -147,7 +159,12 @@ export function VisitDay({ data, acceptNotice }: { data: DayData; acceptNotice: 
     setBusy(null);
     const visitId = r.visitId ?? ended.visitId;
     if (!r.offline && visitId) {
-      router.push(`/medical/visites/${visitId}/compte-rendu`);
+      onChanged?.();
+      router.push(reportHref(visitId));
+      return;
+    }
+    if (onStoppedOffline) {
+      onStoppedOffline({ startRef: ended.startRef, visitId: ended.visitId, doctorId: ended.doctorId, doctorName: ended.doctorName });
       return;
     }
     setInfo(`Visite chez Dr ${ended.doctorName} terminée et enregistrée sur le téléphone. Le compte rendu se remplira au retour du réseau (« À compléter »).`);
@@ -172,7 +189,7 @@ export function VisitDay({ data, acceptNotice }: { data: DayData; acceptNotice: 
     if (r.rejected) setError(r.rejected.message);
     else {
       setInfo(r.offline ? "Visite non effectuée enregistrée sur le téléphone (envoi au retour du réseau)." : `Visite non effectuée enregistrée (${why}).`);
-      if (!r.offline) router.refresh();
+      if (!r.offline) { router.refresh(); onChanged?.(); }
     }
   }
 
@@ -290,7 +307,7 @@ export function VisitDay({ data, acceptNotice }: { data: DayData; acceptNotice: 
         <section className="space-y-2">
           <h2 className="label">Comptes rendus à compléter</h2>
           {data.toComplete.map((v) => (
-            <Link key={v.visitId} href={`/medical/visites/${v.visitId}/compte-rendu`} className="flex items-center justify-between rounded-xl bg-orange-soft border border-orange/30 px-4 py-3 text-[14px]">
+            <Link key={v.visitId} href={reportHref(v.visitId)} className="flex items-center justify-between rounded-xl bg-orange-soft border border-orange/30 px-4 py-3 text-[14px]">
               <span>Dr {v.doctorName} · {new Date(v.date + "T12:00:00Z").toLocaleDateString("fr-FR")}</span><ChevronRight size={16} />
             </Link>
           ))}
@@ -308,7 +325,7 @@ export function VisitDay({ data, acceptNotice }: { data: DayData; acceptNotice: 
                 {v.status === "NON_EFFECTUEE" ? `Non effectuée · ${v.notDoneReason ?? ""} · ${v.endLabel}` : `${v.startLabel} → ${v.endLabel} · ${v.autoClosed ? "clôture automatique" : v.durationMinutes !== null ? `${v.durationMinutes} min` : "—"}`}
               </div>
             </div>
-            {v.reportStatus === "A_COMPLETER" && <Link href={`/medical/visites/${v.visitId}/compte-rendu`} className="btn-primary btn-sm shrink-0">Compte rendu</Link>}
+            {v.reportStatus === "A_COMPLETER" && <Link href={reportHref(v.visitId)} className="btn-primary btn-sm shrink-0">Compte rendu</Link>}
             {v.reportStatus === "VALIDE" && <span className="text-[12px] text-green shrink-0">Compte rendu ✓</span>}
           </div>
         ))}
@@ -342,8 +359,8 @@ function DoctorRow({ name, sub, onStart, onAbsent, busy, highlight }: { name: st
         <div className="text-[14px] font-medium text-ink truncate">Dr {name}</div>
         {sub && <div className="text-[12px] text-muted truncate">{sub}</div>}
       </div>
-      <button disabled={busy} onClick={onAbsent} className="btn-ghost h-10 w-10 p-0 rounded-lg shrink-0 disabled:opacity-50" aria-label="Visite non effectuée" title="Médecin absent / non effectuée"><UserX size={17} /></button>
-      <button disabled={busy} onClick={onStart} className="btn-primary h-10 px-3 shrink-0 disabled:opacity-50"><Play size={15} /> Démarrer</button>
+      <button disabled={busy} onClick={onAbsent} className="btn-ghost h-11 w-11 p-0 rounded-lg shrink-0 disabled:opacity-50" aria-label="Visite non effectuée" title="Médecin absent / non effectuée"><UserX size={17} /></button>
+      <button disabled={busy} onClick={onStart} className="btn-primary h-11 px-3 shrink-0 disabled:opacity-50"><Play size={15} /> Démarrer</button>
     </div>
   );
 }

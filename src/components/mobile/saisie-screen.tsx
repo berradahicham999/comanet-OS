@@ -9,6 +9,7 @@ import type { MobileClient, MobileProduct } from "@/lib/mobile/snapshot-shared";
 import { ClientPicker } from "./client-picker";
 import { useMobile } from "./mobile-app";
 import { NoData, Skeleton } from "./mobile-shell";
+import { localDay } from "./stock-editor";
 
 /**
  * SAISIE DES VENTES — le chemin court : point de vente repris du jour, produits habituels déjà à l'écran, boutons + et −.
@@ -18,7 +19,6 @@ import { NoData, Skeleton } from "./mobile-shell";
 type Row = { productId: string; name: string; qty: number; stock: string };
 type Draft = { clientId: string | null; rows: Row[] };
 
-export const localDay = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Casablanca", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 
 function Stepper({ row, onChange }: { row: Row; onChange: (qty: number) => void }) {
   return (

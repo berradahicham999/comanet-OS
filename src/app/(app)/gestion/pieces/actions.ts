@@ -10,6 +10,7 @@ import {
   requestApproval, saveDraft, validateDocument, type DraftInput,
 } from "@/lib/gestion/documents";
 import { storedPdf } from "@/lib/gestion/pdf";
+import { validateAndRender } from "@/lib/gestion/validate-render";
 
 function done(id?: string) {
   revalidatePath("/gestion/pieces");
@@ -28,23 +29,6 @@ async function docOrThrow(id: string | null) {
 /** Portée « ses données » : un commercial n'agit que sur les commandes qu'il a saisies ou qui lui sont attribuées. */
 async function assertOwnOrder(d: { createdById: string | null; salesRepId: string | null } | null, userId: string) {
   if (d && (await isOwnOnly()) && !isOwnOrder(d, userId)) throw new Error("Accès refusé : cette commande n'est pas la vôtre.");
-}
-
-/**
- * Validation + PDF figé. Le PDF est rendu hors transaction : s'il échoue, il sera rendu à la première ouverture.
- * Confirmer une commande client ne sort pas de stock : le droit « Créer » suffit (le commercial confirme
- * ce qu'il a saisi) ; BL, facture et avoir demandent « Valider ».
- */
-async function validateAndRender(id: string, type: DocType, override: boolean) {
-  const user = await requirePermission(moduleOf(type), type === "COMMANDE" ? "create" : "validate");
-  if (override && !(await hasFlag("overrideCommercial"))) throw new Error("Accès refusé : le droit « Lever un blocage commercial » n'est pas activé sur votre compte.");
-  const r = await validateDocument(id, { id: user.id, name: user.name }, { override });
-  try {
-    await storedPdf(id, user.id);
-  } catch (e) {
-    console.error("PDF de pièce", id, e);
-  }
-  return r;
 }
 
 export async function saveDocumentAction(fd: FormData) {

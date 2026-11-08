@@ -3,15 +3,50 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
-import { Bell, ClipboardList, CloudOff, RefreshCw, Store, Sun, Trophy, TriangleAlert } from "lucide-react";
+import { Bell, CalendarCheck, ClipboardList, CloudOff, MapPinned, RefreshCw, Search, ShoppingCart, SquareCheck, Store, Sun, Timer, Trophy, TriangleAlert, UserRound, Users, Zap } from "lucide-react";
+import type { Persona } from "@/lib/mobile/persona";
 import { MobileApp, useMobile } from "./mobile-app";
+import { PushPrompt } from "./push-toggle";
 
-const TABS = [
+const ANIMATRICE_TABS = [
   { href: "/m", label: "Aujourd'hui", Icon: Sun },
   { href: "/m/saisie", label: "Saisie", Icon: ClipboardList },
   { href: "/m/stock", label: "Stock", Icon: Store },
   { href: "/m/mois", label: "Mon mois", Icon: Trophy },
 ];
+
+/** Tournée, Commandes et Tâches restent les pages existantes : elles gardent la même barre basse. */
+const COMMERCIAL_TABS = [
+  { href: "/m", label: "Clients", Icon: Users },
+  { href: "/clients/tournee", label: "Tournée", Icon: MapPinned },
+  { href: "/gestion/pieces?type=COMMANDE", label: "Commandes", Icon: ShoppingCart },
+  { href: "/taches", label: "Tâches", Icon: SquareCheck },
+];
+
+const DELEGUE_TABS = [
+  { href: "/m/tournee", label: "Tournée", Icon: Timer },
+  { href: "/m/medecins", label: "Médecins", Icon: UserRound },
+  { href: "/m/historique", label: "Historique", Icon: CalendarCheck },
+  { href: "/taches", label: "Tâches", Icon: SquareCheck },
+];
+
+const DIRECTION_TABS = [
+  { href: "/m/brief", label: "Brief", Icon: Sun },
+  { href: "/actions", label: "Actions", Icon: Zap },
+  { href: "/m/validations", label: "Valider", Icon: SquareCheck },
+  { href: "/recherche", label: "Recherche", Icon: Search },
+];
+
+const TABS: Partial<Record<Persona, { href: string; label: string; Icon: typeof Sun }[]>> = { ANIMATRICE: ANIMATRICE_TABS, COMMERCIAL: COMMERCIAL_TABS, DELEGUE: DELEGUE_TABS, DIRECTION: DIRECTION_TABS };
+const tabsOf = (p: Persona | undefined) => (p ? TABS[p] ?? [] : []);
+
+/** L'écran ouvert appartient à quel onglet ? Les fiches restent sous l'onglet de leur liste. */
+function tabActive(href: string, path: string) {
+  if (href === "/m") return path === "/m" || path === "/m/client" || path === "/m/commande";
+  if (href === "/m/medecins") return path === "/m/medecins" || path === "/m/fiche-medecin";
+  if (href === "/m/tournee") return path === "/m/tournee" || path === "/m/compte-rendu";
+  return path.startsWith(href);
+}
 
 function SyncBadge() {
   const { pending, toFix, online, authLost, retry } = useMobile();
@@ -31,6 +66,7 @@ function SyncBadge() {
 
 function Frame({ children }: { children: React.ReactNode }) {
   const path = usePathname();
+  const { snapshot } = useMobile();
   return (
     <div className="min-h-dvh flex flex-col bg-bg">
       <header className="sticky top-0 z-30 bg-bg/90 backdrop-blur border-b border-line pt-[env(safe-area-inset-top)]">
@@ -41,11 +77,11 @@ function Frame({ children }: { children: React.ReactNode }) {
           <Link href="/notifications" prefetch={false} className="h-11 w-11 flex items-center justify-center text-muted" aria-label="Notifications"><Bell size={19} /></Link>
         </div>
       </header>
-      <main className="flex-1 px-4 pt-4 pb-[calc(84px+env(safe-area-inset-bottom))]">{children}</main>
+      <main className="flex-1 px-4 pt-4 pb-[calc(84px+env(safe-area-inset-bottom))]"><PushPrompt />{children}</main>
       <nav className="fixed bottom-0 inset-x-0 z-30 bg-surface/95 backdrop-blur border-t border-line pb-[env(safe-area-inset-bottom)]">
         <div className="grid grid-cols-4">
-          {TABS.map(({ href, label, Icon }) => {
-            const active = href === "/m" ? path === "/m" : path.startsWith(href);
+          {tabsOf(snapshot?.persona).map(({ href, label, Icon }) => {
+            const active = tabActive(href, path);
             return (
               <Link key={href} href={href} prefetch={false} className={clsx("flex flex-col items-center justify-center gap-1 min-h-[56px] text-[11px] font-medium", active ? "text-accent" : "text-muted")}>
                 <Icon size={21} strokeWidth={active ? 2.2 : 1.8} />

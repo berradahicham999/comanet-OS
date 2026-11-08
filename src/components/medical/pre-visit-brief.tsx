@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import type { DoctorBrief } from "@/lib/medical/prescriptions";
 import { BriefView } from "./brief-view";
+import { lastUser, readRef } from "@/lib/mobile/outbox";
 
 /** Fiche pré-visite chargée à la demande (au démarrage d'une visite). Hors connexion : indisponible, sans bloquer. */
 export function PreVisitBrief({ doctorId }: { doctorId: string }) {
@@ -19,7 +20,13 @@ export function PreVisitBrief({ doctorId }: { doctorId: string }) {
         setBrief(await r.json());
         setState("ok");
       })
-      .catch(() => alive && setState("offline"));
+      .catch(async () => {
+        // Sans réseau : la fiche téléchargée à l'avance, si elle existe.
+        const uid = lastUser();
+        const local = uid ? await readRef<DoctorBrief>(uid, `doctor:${doctorId}`).catch(() => null) : null;
+        if (!alive) return;
+        if (local) { setBrief(local); setState("ok"); } else setState("offline");
+      });
     return () => { alive = false; };
   }, [doctorId]);
   return (

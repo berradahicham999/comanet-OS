@@ -3,6 +3,7 @@ import { requireAccess, brandFilter } from "@/lib/access";
 import { PageHeader, Empty } from "@/components/ui";
 import { ValidationQueue } from "@/components/validation-queue";
 import { contentRefs } from "@/lib/content/refs";
+import { contentValidationKeys } from "@/lib/content/shared";
 import { validationQueue } from "@/lib/content/queries";
 import { canValidateBrand } from "@/lib/content/workflow";
 import { changeStatus } from "../actions";
@@ -22,11 +23,7 @@ export default async function ValidationPage(props: { searchParams: Promise<{ id
   const readOnly = visible.length === 0 && items.length > 0;
   const shown = readOnly ? items : visible;
   // Transitions « valider » / « corriger » depuis le statut d'attente, lues dans le référentiel.
-  const awaiting = refs.statuses.find((s) => s.awaitingValidation);
-  const from = awaiting?.key ?? "";
-  const outs = refs.transitions.filter((t) => t.fromKey === from && t.requiresValidator);
-  const validateKey = outs.find((t) => !t.requiresComment && !refs.statuses.find((s) => s.key === t.toKey)?.inProduction)?.toKey ?? null;
-  const correctKey = outs.find((t) => t.requiresComment)?.toKey ?? null;
+  const { validate: validateKey, correct: correctKey } = contentValidationKeys(refs);
 
   return (
     <>

@@ -2,6 +2,7 @@ import "server-only";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { notifications } from "@/db/schema";
+import { sendPush } from "@/lib/mobile/push";
 
 export type NotificationType =
   | "BRIEF_ASSIGNED" | "BRIEF_UPDATED" | "DELIVERABLE_UPLOADED" | "VALIDATION_REQUESTED"
@@ -12,7 +13,9 @@ export type NotificationType =
   // Copilote IA
   | "REPORT_DRAFT"
   // Gestion commerciale
-  | "APPROVAL_REQUESTED";
+  | "APPROVAL_REQUESTED"
+  // App mobile
+  | "TASK_ASSIGNED" | "STOCK_ALERT" | "SAISIE_REMINDER" | "ORDER_DRAFT";
 
 export type NotifyInput = { type: NotificationType; title: string; body?: string | null; href?: string | null; entityType?: string; entityId?: string | null };
 
@@ -24,6 +27,8 @@ export async function notify(userIds: (string | null | undefined)[], input: Noti
     userId, type: input.type, title: input.title, body: input.body ?? null, href: input.href ?? null,
     entityType: input.entityType ?? null, entityId: input.entityId ?? null,
   })));
+  // La notification est enregistrée : un envoi raté ne peut plus la défaire ni faire échouer l'action en cours.
+  await sendPush(ids, input).catch((e) => console.error("web-push", e));
 }
 
 export async function unreadCount(userId: string): Promise<number> {

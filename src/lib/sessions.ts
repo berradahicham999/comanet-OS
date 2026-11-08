@@ -1,8 +1,9 @@
 import "server-only";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { userSessions } from "@/db/schema";
+import { pushSubscriptions, userSessions } from "@/db/schema";
 import { audit } from "@/lib/audit";
+import { pgArray } from "@/lib/sql-array";
 import { deviceLabel, sessionVerdict, touchDue } from "./sessions-shared";
 
 /**
@@ -80,6 +81,7 @@ export async function revokeSessions(actor: { id: string; name: string }, userId
   return db.transaction(async (tx) => {
     const rows = await tx.update(userSessions).set({ revokedAt: new Date(), revokedById: actor.id, revokedReason: "ADMIN" }).where(where).returning({ id: userSessions.id, deviceLabel: userSessions.deviceLabel });
     if (rows.length) {
+      await tx.delete(pushSubscriptions).where(sql`session_id = any(${pgArray(rows.map((r) => r.id))})`).catch(() => {});
       await audit({ actor, action: "REVOQUER_SESSION", module: "administration", entity: "user", entityId: userId, label: rows.map((r) => r.deviceLabel ?? "Appareil").join(", ") }, tx);
     }
     return rows.length;

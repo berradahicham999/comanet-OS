@@ -1,17 +1,17 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { SignJWT, jwtVerify } from "jose";
 import { isPublicPath } from "@/lib/public-paths";
 import { RENEW_AFTER_S, deviceLabel, isPhone, sessionVerdict, touchDue } from "@/lib/sessions-shared";
 import { renewedToken, signSessionToken } from "@/lib/session-token";
-import { personaOf } from "@/lib/mobile/persona";
+import { hasMobileScreens, homePathOf, personaOf, screenAllowed } from "@/lib/mobile/persona";
 import { noPermissions, type PermissionSet } from "@/lib/permissions-shared";
 import { MODULE_KEYS, type ModuleKey } from "@/lib/access-shared";
 import { ANIMATRICE_TABS, mobileTabsForPermissions } from "@/components/nav-config";
 import { SHELL_PAGES, USER_PAGES, swSource } from "@/lib/mobile/sw-source";
 import manifest from "@/app/manifest";
-import { monthFigures } from "@/lib/mobile/snapshot-shared";
+import { SHEET_MAX_AGE_MS, SHEET_PRELOAD, deliverablePack, monthFigures, sheetsToPreload, sortPortfolio } from "@/lib/mobile/snapshot-shared";
 
 const secret = new TextEncoder().encode("secret-de-test-0123456789");
 
@@ -127,7 +127,37 @@ describe("persona et onglets", () => {
     for (const p of [anim, med, com]) {
       const hrefs = mobileTabsForPermissions(p, "OWN").map((t) => t.href);
       assert.ok(!hrefs.includes("/") && !hrefs.includes("/actions"), hrefs.join());
+      assert.ok(hrefs.every((h) => !h.startsWith("/m/") || SHELL_PAGES.includes(h)), hrefs.join());
     }
+  });
+
+  test("le commercial ouvre sur ses clients, sous /m", () => {
+    assert.deepEqual(mobileTabsForPermissions(com, "OWN").map((t) => t.href), ["/m", "/clients/tournee", "/gestion/pieces?type=COMMANDE", "/taches"]);
+    assert.equal(hasMobileScreens("COMMERCIAL"), true);
+    assert.equal(hasMobileScreens("AUTRE"), false);
+  });
+
+  test("l'écran d'un autre métier n'est jamais servi vide", () => {
+    assert.equal(screenAllowed("COMMERCIAL", "/m/saisie"), false);
+    assert.equal(screenAllowed("COMMERCIAL", "/m/stock"), false);
+    assert.equal(screenAllowed("COMMERCIAL", "/m/client"), true);
+    assert.equal(screenAllowed("ANIMATRICE", "/m/client"), false);
+    assert.equal(screenAllowed("ANIMATRICE", "/m/saisie"), true);
+    for (const p of ["ANIMATRICE", "COMMERCIAL"] as const) {
+      assert.equal(screenAllowed(p, "/m"), true);
+      assert.equal(screenAllowed(p, "/m/a-corriger"), true);
+    }
+    assert.equal(screenAllowed("DELEGUE", "/m"), false);
+    assert.equal(screenAllowed("DELEGUE", "/m/compte-rendu"), true);
+    assert.equal(screenAllowed("DIRECTION", "/m/validations"), true);
+    assert.equal(screenAllowed("DIRECTION", "/m/saisie"), false);
+  });
+
+  test("chaque métier a son écran d'accueil, qui fait partie de ses écrans", () => {
+    assert.equal(homePathOf("DELEGUE"), "/m/tournee");
+    assert.equal(homePathOf("DIRECTION"), "/m/brief");
+    assert.equal(homePathOf("ANIMATRICE"), "/m");
+    for (const p of ["ANIMATRICE", "COMMERCIAL", "DELEGUE", "DIRECTION"] as const) assert.equal(screenAllowed(p, homePathOf(p)), true, p);
   });
 
   test("un onglet n'apparaît que si le droit existe", () => {
@@ -156,6 +186,15 @@ describe("service worker", () => {
   test("la coquille ne précharge que les pages sans donnée", () => {
     assert.ok(SHELL_PAGES.every((p) => p === "/m" || p.startsWith("/m/")));
     assert.deepEqual(USER_PAGES, ["/medical/journee", "/clients/tournee"]);
+  });
+
+  test("il reçoit les notifications et n'ouvre que des liens internes fournis par le serveur", () => {
+    assert.ok(src.includes('addEventListener("push"'));
+    assert.ok(src.includes('addEventListener("notificationclick"'));
+  });
+
+  test("toutes les pages de la coquille mobile existent", () => {
+    for (const p of SHELL_PAGES) assert.ok(existsSync(`src/app${p}/page.tsx`), p);
   });
 
   test("l'API et les écritures ne passent jamais par le cache", () => {
@@ -197,6 +236,29 @@ describe("projet APK", () => {
   test("GPS et notifications sont dans le premier APK : les ajouter plus tard ferait réinstaller", () => {
     assert.equal(twa.features.locationDelegation.enabled, true);
     assert.equal(twa.enableNotifications, true);
+  });
+});
+
+describe("portefeuille du commercial", () => {
+  const c = (id: string, orderLate: boolean, revenue12: number) => ({ id, orderLate, revenue12 });
+
+  test("d'abord les visites du jour, puis les commandes en retard, puis le plus gros chiffre d'affaires", () => {
+    const sorted = sortPortfolio([c("gros", false, 900), c("retard", true, 10), c("moyen", false, 300), c("visite", false, 1)], ["visite"]);
+    assert.deepEqual(sorted.map((x) => x.id), ["visite", "retard", "gros", "moyen"]);
+  });
+
+  test("un pack ne propose jamais un produit sans stock à l'entrepôt", () => {
+    assert.deepEqual(deliverablePack([{ productId: "a" }, { productId: "b" }], ["b"]), { items: [{ productId: "a" }], removed: 1 });
+    assert.deepEqual(deliverablePack([{ productId: "a" }], []), { items: [{ productId: "a" }], removed: 0 });
+  });
+
+  test("seules les fiches absentes ou anciennes sont retéléchargées, dans la limite prévue", () => {
+    const now = new Date("2026-11-08T12:00:00Z").getTime();
+    const fresh = new Date(now - 3600000).toISOString();
+    const old = new Date(now - SHEET_MAX_AGE_MS - 1000).toISOString();
+    const at: Record<string, string> = { a: fresh, b: old };
+    assert.deepEqual(sheetsToPreload(["a", "b", "c"], (id) => at[id] ?? null, now), ["b", "c"]);
+    assert.equal(sheetsToPreload(Array.from({ length: 200 }, (_, i) => `x${i}`), () => null, now).length, SHEET_PRELOAD);
   });
 });
 

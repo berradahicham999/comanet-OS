@@ -90,6 +90,8 @@ export type DraftInput = {
   originDocumentId?: string | null;
   /** Activation alimentée par ce BL (sorties marketing). */
   activationId?: string | null;
+  /** Brouillon de commande venu de la file hors connexion : le rejouer ne crée pas une seconde pièce. */
+  clientEventId?: string | null;
   lines: DraftLineInput[];
 };
 
@@ -316,7 +318,7 @@ export async function saveDraft(input: DraftInput, actor: AuditActor): Promise<s
            order by created_at desc limit 1`)).rows[0];
         if (dup) throw new DuplicateOrderError(dup.id, dup.number);
       }
-      const [row] = await tx.insert(salesDocuments).values({ ...header, createdById: actor.id }).returning({ id: salesDocuments.id });
+      const [row] = await tx.insert(salesDocuments).values({ ...header, clientEventId: input.clientEventId ?? null, createdById: actor.id }).returning({ id: salesDocuments.id });
       id = row.id;
     }
     if (lines.length) {
@@ -509,6 +511,16 @@ export async function requestApproval(id: string, actor: AuditActor): Promise<vo
     body: issues.map((i) => i.label).join(" "), href: `/gestion/pieces/${id}`, entityType: "sales_document", entityId: id,
   }, { except: actor.id });
   await audit({ actor, action: "APPROVAL_REQUESTED", module: moduleOf(doc.type as DocType), entity: "sales_document", entityId: id, label: doc.client.name, after: { issues } });
+}
+
+/** Refus de lever un blocage : la pièce reste un brouillon, la demande est retirée, son auteur est prévenu du motif. */
+export async function declineApproval(id: string, reason: string, actor: AuditActor): Promise<void> {
+  const doc = await getDocument(id);
+  if (!doc || doc.status !== "BROUILLON") throw new DocumentError("Seul un brouillon peut être refusé.");
+  const asker = (await db.execute<{ id: string | null }>(sql`select approval_requested_by_id::text as id from sales_documents where id = ${id}::uuid`)).rows[0]?.id ?? null;
+  await db.update(salesDocuments).set({ approvalRequestedAt: null, approvalRequestedById: null, updatedAt: new Date() }).where(eq(salesDocuments.id, id));
+  await notify([asker], { type: "APPROVAL_REQUESTED", title: `Blocage non levé — ${doc.client.name}`, body: reason, href: `/gestion/pieces/${id}`, entityType: "sales_document", entityId: id }, { except: actor.id });
+  await audit({ actor, action: "APPROVAL_DECLINED", module: moduleOf(doc.type as DocType), entity: "sales_document", entityId: id, label: doc.client.name, after: { reason } });
 }
 
 /* ------------------------------------------------------------------ */

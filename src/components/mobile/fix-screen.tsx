@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { CheckCircle2 } from "lucide-react";
 import type { OutboxItem } from "@/lib/mobile/outbox-shared";
@@ -17,7 +18,7 @@ function Item({ item }: { item: OutboxItem }) {
     <li className="card p-4 space-y-2">
       <div className="font-medium text-ink text-[14.5px]">{item.label}</div>
       <p className="text-[13.5px] text-red">{item.error?.message ?? "Saisie refusée."}</p>
-      {item.error?.existingId && <a href={`/terrain/${item.error.existingId}`} className="btn-secondary w-full h-12 text-[14px]">Ouvrir la saisie existante</a>}
+      {item.error?.existingId && <Link href={item.kind === "ORDER_DRAFT" ? `/gestion/pieces/${item.error.existingId}` : `/terrain/${item.error.existingId}`} prefetch={false} className="btn-secondary w-full h-12 text-[14px]">Ouvrir la saisie existante</Link>}
       {confirming ? (
         <div className="flex gap-2">
           <button type="button" onClick={() => setConfirming(false)} className="btn-secondary flex-1 h-12">Garder</button>

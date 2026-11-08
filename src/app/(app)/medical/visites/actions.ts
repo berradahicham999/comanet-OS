@@ -5,32 +5,9 @@ import { redirect } from "next/navigation";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { requireAccess, isOwnOnly, canDo } from "@/lib/access";
-import { saveVisit, saveVisitReport, deleteVisit, type VisitInput, type ReportInput } from "@/lib/medical/visits";
-import type { DoctorInterest, MedicalVisitStatus } from "@/db/schema";
-
-function readReport(formData: FormData, createdById: string): ReportInput {
-  const sampleCount = Number(formData.get("sampleCount") ?? 0) || 0;
-  const samples: { productId: string; quantity: number }[] = [];
-  for (let i = 0; i < sampleCount; i++) {
-    const productId = String(formData.get(`sample_product_${i}`) ?? "");
-    const qty = Number(formData.get(`sample_qty_${i}`) ?? 0) || 0;
-    if (productId && qty > 0) samples.push({ productId, quantity: Math.round(qty) });
-  }
-  return {
-    visitType: String(formData.get("visitType") ?? "VISITE").trim() || "VISITE",
-    objective: String(formData.get("objective") ?? "").trim() || null,
-    result: String(formData.get("result") ?? "").trim() || null,
-    doctorInterest: (String(formData.get("doctorInterest") ?? "") || null) as DoctorInterest | null,
-    comment: String(formData.get("comment") ?? "").trim() || null,
-    nextAction: String(formData.get("nextAction") ?? "").trim() || null,
-    nextVisitDate: String(formData.get("nextVisitDate") ?? "") || null,
-    objections: String(formData.get("objections") ?? "").trim() || null,
-    documentation: String(formData.get("documentation") ?? "").trim() || null,
-    productIds: formData.getAll("productId").map(String).filter(Boolean),
-    samples,
-    createdById,
-  };
-}
+import { saveVisit, saveVisitReport, deleteVisit, type VisitInput } from "@/lib/medical/visits";
+import type { MedicalVisitStatus } from "@/db/schema";
+import { readReport } from "@/lib/medical/report-input";
 
 function revalidateMedical(doctorId: string) {
   revalidatePath("/medical", "layout");

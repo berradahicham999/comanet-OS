@@ -4,7 +4,7 @@
  * Une saisie ne disparaît jamais en silence : elle sort de la file parce que le serveur l'a enregistrée, ou parce que la
  * personne l'abandonne elle-même depuis « À corriger ». Tout le reste reste sur le téléphone.
  */
-export type OutboxKind = "ANIMATION" | "STOCK";
+export type OutboxKind = "ANIMATION" | "STOCK" | "VISIT_REPORT" | "ORDER_DRAFT";
 
 export type GpsFix = { lat: number | null; lng: number | null; accuracyM: number | null; error: string | null };
 
@@ -26,11 +26,17 @@ export type StockPayload = {
   comment?: string;
 };
 
+/** Compte rendu : rattaché à la visite, ou à son démarrage si la visite n'est pas encore arrivée au serveur. */
+export type VisitReportPayload = { visitId?: string | null; startRef?: string | null; fields: [string, string][] };
+
+/** Brouillon de commande : prix et remises sont fixés par le serveur à l'arrivée, puis contrôlés à la confirmation. */
+export type OrderDraftPayload = { clientId: string; date: string; notes?: string; lines: { productId: string; qty: string }[] };
+
 export type OutboxItem = {
   clientEventId: string;
   kind: OutboxKind;
   userId: string;
-  payload: AnimationPayload | StockPayload;
+  payload: AnimationPayload | StockPayload | VisitReportPayload | OrderDraftPayload;
   /** Libellé affiché dans la file (« Pharmacie X — 5 produits »). Jamais envoyé au serveur. */
   label: string;
   deviceTime: string;
@@ -45,10 +51,10 @@ export type MutationOk = { clientEventId: string; ok: true; id?: string; replaye
 export type MutationKo = { clientEventId: string; ok: false; code: MutationCode; message: string; existingId?: string };
 export type MutationResult = MutationOk | MutationKo;
 
-export type MutationCode = "CONFLICT" | "INVALID" | "FORBIDDEN" | "WRONG_USER" | "SERVER";
+export type MutationCode = "CONFLICT" | "INVALID" | "FORBIDDEN" | "WRONG_USER" | "SERVER" | "WAIT";
 
 /** Le serveur n'a pas pu trancher, ou la saisie appartient à un autre compte : elle reste en file, sans déranger personne. */
-const RETRYABLE: MutationCode[] = ["WRONG_USER", "SERVER"];
+const RETRYABLE: MutationCode[] = ["WRONG_USER", "SERVER", "WAIT"];
 
 /** Au-delà, on envoie sans position plutôt que de retenir la saisie. */
 export const GPS_WAIT_MS = 30000;

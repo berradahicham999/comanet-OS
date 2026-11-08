@@ -1,7 +1,7 @@
 # App mobile COMANET OS — rapport d'inspection et plan (étape 0)
 
 Inspection du 07/11/2026, sur le commit `3cf4c65`. Aucun code applicatif modifié, rien écrit en production.
-Statut : **plan validé le 07/11/2026 avec les recommandations de la section 9. P1a livrée** (section 10), sauf l'APK : il attend le branchement de `app.comanet.ma` et le keystore.
+Statut : **plan validé le 07/11/2026 avec les recommandations de la section 9. P1a, P1b et P2 livrées** (section 10), sauf l'APK : il attend le branchement de `app.comanet.ma` et le keystore.
 
 ---
 
@@ -246,6 +246,20 @@ Preuves : 39 contrôles du parcours en mode avion (`scripts/mobile-e2e.mjs`), 15
 
 **Ce qui reste à prouver sur téléphone** : APK sur Android physique, PWA sur iPhone physique, saisie chronométrée de 5 produits, GPS réel.
 Le gabarit iPhone 13 du parcours tourne dans Chrome : il vérifie la mise en page, pas le comportement de Safari.
+
+### P1b, Commercial
+
+Portefeuille lisible sans réseau, fiche courte (CA 12 mois, tendance, segment, impayés, stock modifiable, pack conseillé), recherche instantanée. Tournée, Commandes et Tâches
+restent les pages existantes, dans la même barre basse et en ligne, comme décidé. Le pack est sans IA (décision 4).
+
+### P2, Déléguées, direction, notifications
+
+- **Déléguées** : tournée, visite chronométrée, compte rendu, médecins (produits à présenter) et historique, utilisables sans réseau.
+- **Direction** : brief du jour, Action Center, file unique de validation par geste, avec 5 secondes pour annuler. Les dépenses se valident par leur activation, qui engage le budget poste par poste.
+- **Commande sans réseau** : un brouillon, confirmé ensuite avec du réseau, car le plafond de crédit et les remises se contrôlent à ce moment-là.
+- **Web Push** : tâche assignée, validation demandée, stock en tension, saisie manquante à 18 h. Exige les clés VAPID (`DEPLOY_MOBILE.md`, section 9).
+
+**Limite connue** : le formulaire de commande existant garde des cibles sous 44 px. Il n'a pas été refait : il sert aussi au bureau.
 
 ---
 

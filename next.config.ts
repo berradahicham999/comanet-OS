@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "4mb",
     },
   },
-  serverExternalPackages: ["pg", "@react-pdf/renderer"],
+  serverExternalPackages: ["pg", "@react-pdf/renderer", "web-push"],
   // Sans ce type, certains téléphones enregistrent l'APK comme un fichier ordinaire et refusent de l'installer.
   async headers() {
     return [{ source: "/downloads/:file*.apk", headers: [{ key: "Content-Type", value: "application/vnd.android.package-archive" }, { key: "Content-Disposition", value: "attachment" }] }];
