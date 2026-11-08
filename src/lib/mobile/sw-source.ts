@@ -11,7 +11,7 @@
  *    leur passage sous `/m`), dans un cache vidé à la déconnexion (`clearUserCache()`) ;
  *  - `/api/*` et les server actions ne passent jamais par le worker : la file d'envoi vit dans IndexedDB.
  */
-export const SHELL_PAGES = ["/m", "/m/saisie", "/m/stock", "/m/mois", "/m/a-corriger"];
+export const SHELL_PAGES = ["/m", "/m/saisie", "/m/stock", "/m/mois", "/m/a-corriger", "/m/client"];
 export const USER_PAGES = ["/medical/journee", "/clients/tournee"];
 export const USER_CACHE = "comanet-user";
 const ASSETS = ["/icon.svg", "/icons/icon-192.png", "/manifest.webmanifest"];

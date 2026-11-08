@@ -145,6 +145,7 @@ export function navForPermissions(perms: PermissionSet, flags?: FlagSet): NavGro
 const ANY_TABS: NavItem[] = [
   { href: "/notifications", label: "Notifications", icon: "Bell", module: "any" },
   { href: "/recherche", label: "Recherche", icon: "Search", module: "any" },
+  { href: "/m", label: "Clients", icon: "Users", module: "clients", exact: true },
 ];
 
 /** L'animatrice a ses écrans sous `/m`, qui marchent sans réseau. */
@@ -158,7 +159,7 @@ export const ANIMATRICE_TABS: NavItem[] = [
 const TABS: Record<Exclude<Persona, "ANIMATRICE">, string[]> = {
   DIRECTION: ["/", "/actions", "/taches", "/ventes"],
   DELEGUE: ["/medical/journee", "/medical/medecins", "/medical/visites", "/taches"],
-  COMMERCIAL: ["/clients/tournee", "/clients", "/gestion/pieces?type=COMMANDE", "/taches"],
+  COMMERCIAL: ["/m", "/clients/tournee", "/gestion/pieces?type=COMMANDE", "/taches"],
   AUTRE: ["/taches", "/notifications", "/recherche"],
 };
 

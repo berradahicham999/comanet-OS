@@ -1,5 +1,5 @@
-import { TodayScreen } from "@/components/mobile/today-screen";
+import { HomeScreen } from "@/components/mobile/home-screen";
 
 export default function Page() {
-  return <TodayScreen />;
+  return <HomeScreen />;
 }

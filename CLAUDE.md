@@ -154,7 +154,7 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Chronologie et fiche pré-visite d'un client (lecture seule) | `src/lib/crm/timeline.ts` + `intelligence.ts` | `clientTimeline()`, `clientVisitBrief()`, `missingAssortment()`, `clientReceivables()` |
 | Métier sur le téléphone (déduit des droits, jamais de `users.role`) et onglets | `src/lib/mobile/persona.ts` + `src/components/nav-config.ts` | `personaOf()`, `mobileTabsForPermissions()` |
 | File d'envoi de l'app mobile (état d'une saisie, rejeu, conflit) et saisies rejouées | `src/lib/mobile/outbox-shared.ts` + `outbox.ts` + `mutations.ts` | `settle()`, `sendable()`, `flushOutbox()`, `applyMutation()` (seule entrée des saisies du téléphone) |
-| Référentiels gardés sur le téléphone (portée, durée de vie) | `src/lib/mobile/snapshot.ts` + `outbox-shared.ts` | `mobileSnapshot()`, `snapshotExpired()` |
+| Référentiels gardés sur le téléphone (portée, durée de vie), fiche courte d'un client, pack conseillé | `src/lib/mobile/snapshot.ts` + `snapshot-shared.ts` + `outbox-shared.ts` | `mobileSnapshot()`, `clientSheet()`, `sortPortfolio()`, `deliverablePack()`, `snapshotExpired()` |
 | Service worker (ce qui est mis en cache, et ce qui ne l'est jamais) | `src/lib/mobile/sw-source.ts` | `swSource()` |
 | Sessions par appareil (30 jours glissants, inactivité, révocation) | `src/lib/sessions.ts` + `sessions-shared.ts` + `session-token.ts` | `openSession()`, `checkSession()`, `revokeSessions()` (seules écritures de `user_sessions`), `sessionVerdict()`, `renewedToken()` |
 | Chemins ouverts sans session | `src/lib/public-paths.ts` | `isPublicPath()` |
@@ -347,7 +347,10 @@ la saisie passe, marquée. Service worker : `/sw.js` est une route (`src/app/sw.
 que la coquille ; Ma journée et Ma tournée, seules pages authentifiées gardées, vont dans le cache `comanet-user`, vidé à la déconnexion. Les visites gardent
 `fieldQueue()`, qui porte désormais `userId` (`WRONG_USER` côté serveur). Session 30 jours glissants (`src/proxy.ts`), une ligne par appareil, révocation
 depuis la fiche utilisateur ; `settings.mobile.adminIdleMinutes` déconnecte les téléphones des administrateurs, jamais le poste de bureau. P1a livrée : Animatrice.
-Reste P1b (Commercial), P2 (Déléguées sous `/m`, brief, validations, Web Push), P3 (scan, adoption, mode sombre).
+P1b livrée : Commercial. `/m` dépend du métier (`HomeScreen`) : portefeuille (`/api/m/bootstrap`, sa portée seulement, visites du jour puis commandes en retard), fiche courte
+`/m/client?id=` = `clientVisitBrief()` réduite (`clientSheet()`, encours réservé à Règlements ou Facturation), les 40 premières fiches téléchargées à l'avance, une à la fois ; pack conseillé sans IA
+= `missingAssortment()` moins les produits sans stock à l'entrepôt, présenté comme une corrélation observée. Relevé de stock hors connexion, canal `TOURNEE_COMMERCIALE` ; Tournée, Commandes et
+Tâches restent les pages existantes, en ligne. Reste P2 (Déléguées sous `/m`, brief, validations, Web Push, brouillon de commande hors connexion), P3 (scan, adoption, mode sombre, Proposition IA).
 
 **P&L** (`/gestion/pnl`, section du `docs/guide-gestion-commerciale.md`, migration 0031). Réservé aux administrateurs
 (`requireAdmin()` : salaires). Compte de résultat mensuel HT : CA = ventes directes (sites de `settings.pnl.directSites`)

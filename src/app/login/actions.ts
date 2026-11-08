@@ -7,6 +7,7 @@ import { homeForUser, isAdmin } from "@/lib/access";
 import { resolveAccessFor } from "@/lib/permissions";
 import { getSettings } from "@/lib/settings";
 import { isPhone } from "@/lib/sessions-shared";
+import { hasMobileScreens, personaOf } from "@/lib/mobile/persona";
 
 export type LoginState = { error?: string };
 
@@ -20,11 +21,11 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   const userAgent = (await headers()).get("user-agent");
   const phone = isPhone(userAgent);
   // Limite d'inactivité : téléphones des administrateurs seulement (un téléphone perdu ouvre tout), jamais le poste de bureau.
-  const idleMinutes = phone && isAdmin((await resolveAccessFor(user.id, user.role)).perms) ? (await getSettings()).mobile.adminIdleMinutes : null;
+  const access = phone ? await resolveAccessFor(user.id, user.role) : null;
+  const idleMinutes = access && isAdmin(access.perms) ? (await getSettings()).mobile.adminIdleMinutes : null;
   await createSession(user, { userAgent, idleMinutes });
   if (next.startsWith("/") && !next.startsWith("//")) redirect(next);
-  const home = await homeForUser();
-  redirect(phone && home === "/terrain/saisie" ? "/m" : home);
+  redirect(access && hasMobileScreens(personaOf(access.perms, access.scope)) ? "/m" : await homeForUser());
 }
 
 export async function logoutAction() {

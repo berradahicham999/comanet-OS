@@ -21,7 +21,7 @@ if (process.env.MOBILE_IT !== "1" || /supabase|pooler/i.test(url)) {
 async function main() {
   const { db } = await import("@/db");
   const { applyMutation } = await import("@/lib/mobile/mutations");
-  const { mobileSnapshot, acceptTerrainNotice, hasAcceptedTerrainNotice } = await import("@/lib/mobile/snapshot");
+  const { mobileSnapshot, acceptTerrainNotice, hasAcceptedTerrainNotice, clientSheet } = await import("@/lib/mobile/snapshot");
   const sessions = await import("@/lib/sessions");
   const { noPermissions } = await import("@/lib/permissions-shared");
   const { iso, today } = await import("@/lib/format");
@@ -141,6 +141,47 @@ async function main() {
   await acceptTerrainNotice(user.id, "test");
   assert.equal(await n(sql`select count(*)::int as n from medical_gps_consents where user_id = ${user.id}::uuid`), 1);
   ok("avis GPS de la saisie terrain accepté une seule fois, horodaté");
+
+  /* -- Commercial ------------------------------------------------------------------- */
+  const sold = await one<{ id: string; name: string }>(sql`insert into users(name,email,password_hash,role) values (${`Commercial IT ${tag}`},${`mobile-it3-${tag}@test.ma`},'x','TRADE') returning id, name`);
+  const pc = noPermissions();
+  pc.clients = { view: true, create: true, edit: true, validate: false };
+  pc.commandes = { view: true, create: true, edit: false, validate: false };
+  const portfolio = await one<{ id: string }>(sql`insert into clients(name_key,name,city,type,account_manager_id) values (${`it5-${tag}`},${`Pharmacie Portefeuille ${tag}`},'CASABLANCA','PHARMACIE',${sold.id}::uuid) returning id`);
+  await db.execute(sql`update products set cost_price = 42 where id = ${product.id}::uuid`);
+  await db.execute(sql`insert into sales(date,client_id,product_id,quantity,amount,line_hash,site) values (current_date - 10, ${portfolio.id}::uuid, ${product.id}::uuid, 3, 300, ${`it-${tag}`}, 'COMANET')`);
+  const com = { user: { id: sold.id, name: sold.name, email: "", role: "TRADE" }, perms: pc, scope: "OWN", flags: {}, brandIds: [], clientIds: [portfolio.id], home: "/gestion/pieces?type=COMMANDE", preview: null } as never;
+
+  const comSnap = await mobileSnapshot(com);
+  assert.equal(comSnap.persona, "COMMERCIAL");
+  assert.equal(comSnap.terrain, null);
+  assert.deepEqual(comSnap.commercial!.clients.map((c) => c.id), [portfolio.id]);
+  assert.equal(comSnap.commercial!.clients[0].revenue12, 300);
+  assert.ok(!/cost|price|margin/i.test(JSON.stringify(comSnap.commercial!.products)), "aucun prix d'achat dans le téléphone");
+  ok("portefeuille du commercial : ses clients seulement, avec le CA 12 mois réel, aucun coût");
+
+  const sheet = await clientSheet(com, portfolio.id);
+  assert.equal(sheet?.revenue12, 300);
+  assert.equal(sheet?.receivables, null);
+  ok("fiche courte : sans droit Règlements ni Facturation, l'encours n'est pas transmis");
+  const pm = { ...pc, reglements: { view: true, create: false, edit: false, validate: false } };
+  assert.equal((await clientSheet({ ...(com as object), perms: pm } as never, portfolio.id))?.receivables?.outstanding, 0);
+  ok("fiche courte : avec le droit Règlements, l'encours est lu par la fonction officielle");
+  assert.equal(await clientSheet(com, client.id), null);
+  ok("fiche d'un client hors de sa portée : refusée côté serveur");
+
+  const comStock = (clientEventId: string, clientId: string) => ({ clientEventId, kind: "STOCK", userId: sold.id, deviceTime: new Date().toISOString(), sentAt: new Date().toISOString(), payload: { clientId, date: day, lines: [{ productId: product.id, qty: "4" }] }, gps: {} }) as never;
+  const cs = id();
+  assert.equal((await applyMutation(com, comStock(cs, portfolio.id))).result.ok, true);
+  await applyMutation(com, comStock(cs, portfolio.id));
+  const reading = await one<{ channel: string; n: number }>(sql`select min(channel::text) as channel, count(*)::int as n from client_stock_readings where client_event_id = ${cs}`);
+  assert.equal(reading.channel, "TOURNEE_COMMERCIALE");
+  assert.equal(reading.n, 1);
+  ok("relevé du commercial : canal Tournée, rejeu sans doublon");
+  assert.equal(((await applyMutation(com, comStock(id(), client.id))).result as { code: string }).code, "FORBIDDEN");
+  ok("relevé chez un client hors de sa portée : refusé");
+  assert.equal(((await applyMutation(com, event(id(), portfolio.id, { userId: sold.id }))).result as { code: string }).code, "FORBIDDEN");
+  ok("un commercial sans droit Terrain ne peut pas saisir une animation");
 
   /* -- Sessions --------------------------------------------------------------------- */
   const sid = (await sessions.openSession(user.id, { userAgent: "Mozilla/5.0 (Linux; Android 11) Chrome/130.0 Mobile" }))!;

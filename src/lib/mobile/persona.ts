@@ -14,3 +14,18 @@ export function personaOf(perms: PermissionSet, scope: ScopeKey): Persona {
   if (can(perms, "clients", "create") && can(perms, "commandes", "create")) return "COMMERCIAL";
   return "AUTRE";
 }
+
+/** Les métiers qui ont leurs écrans sous `/m`. Les autres gardent leur accueil habituel. */
+export function hasMobileScreens(p: Persona): boolean {
+  return p === "ANIMATRICE" || p === "COMMERCIAL";
+}
+
+const ANIMATRICE_ONLY = ["/m/saisie", "/m/mois"];
+const COMMERCIAL_ONLY = ["/m/client"];
+
+/** Un écran de l'autre métier ramène à l'accueil plutôt que d'afficher un écran vide. */
+export function screenAllowed(p: Persona, path: string): boolean {
+  if (ANIMATRICE_ONLY.includes(path) || path === "/m/stock") return p === "ANIMATRICE";
+  if (COMMERCIAL_ONLY.includes(path)) return p === "COMMERCIAL";
+  return true;
+}

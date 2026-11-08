@@ -10,6 +10,7 @@ import { saveAnimation } from "@/lib/terrain/save-animation";
 import { canRecordReading, parseReadingLines } from "@/lib/client-stock-shared";
 import { recordReadings } from "@/lib/client-stock";
 import { iso, today } from "@/lib/format";
+import { personaOf } from "./persona";
 import { alignedDeviceTime, dateInWindow, gpsColumns, isUuid, rawLines } from "./mutations-shared";
 import type { AnimationPayload, MutationCode, MutationResult, StockPayload, WireEvent } from "./outbox-shared";
 
@@ -89,9 +90,11 @@ async function saveStockEvent(access: Access, e: WireEvent): Promise<{ result: M
   const id = e.clientEventId;
   const p = e.payload as StockPayload;
   if (!isUuid(p?.clientId)) return { result: ko(id, "INVALID", "Point de vente manquant ou inconnu.") };
+  // Même table, deux canaux : l'animatrice relève en animation, le commercial en tournée (droits propres à chaque canal).
+  const channel = personaOf(access.perms, access.scope) === "ANIMATRICE" ? "ANIMATION" : "TOURNEE_COMMERCIALE";
   const allowed = canRecordReading(
     { userId: access.user.id, perms: access.perms, scope: access.scope, clientIds: access.clientIds },
-    { channel: "ANIMATION", clientId: p.clientId, animatriceId: access.user.id },
+    { channel, clientId: p.clientId, animatriceId: access.user.id },
   );
   if (!allowed) return { result: ko(id, "FORBIDDEN", "Vous n'avez plus le droit de relever ce stock.") };
 
@@ -104,7 +107,7 @@ async function saveStockEvent(access: Access, e: WireEvent): Promise<{ result: M
   await recordReadings({
     clientId: p.clientId,
     userId: access.user.id,
-    channel: "ANIMATION",
+    channel,
     readAt: p.date,
     comment: String(p.comment ?? "").trim().slice(0, 500) || null,
     clientEventId: id,

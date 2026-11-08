@@ -214,6 +214,87 @@ console.log("\n— Téléphone partagé");
 /* -- iPhone ------------------------------------------------------------------------ */
 await (await run("Gabarit iPhone 13", DEVICES["iPhone 13"], salma, clients[2], "iphone")).ctx.close();
 
+/* -- Commercial -------------------------------------------------------------------- */
+console.log("\n— Commercial, 360×800");
+{
+  const hash = await bcrypt.hash(PASSWORD, 4);
+  const [u] = await q(`insert into users(name,email,password_hash,role) values ('Karim',$1,$2,'TRADE') returning id, email`, [`karim-${tag}@e2e.ma`, hash]);
+  for (const [m, c] of [["clients", true], ["commandes", true], ["taches", true], ["reglements", false]]) {
+    await q(`insert into user_permissions(user_id,module,can_view,can_create,can_edit,can_validate) values ($1,$2,true,$3,$3,false)`, [u.id, m, c]);
+  }
+  await q(`insert into user_scope(user_id,scope) values ($1,'OWN')`, [u.id]);
+  const portfolio = [];
+  for (let i = 0; i < 3; i++) {
+    const [c] = await q(`insert into clients(name_key,name,city,type,account_manager_id) values ($1,$2,'RABAT','PHARMACIE',$3) returning id, name`, [`e2e-com-${tag}-${i}`, `Pharmacie Agdal ${tag} ${i}`, u.id]);
+    portfolio.push(c);
+    await q(`insert into user_client_assignments(user_id,client_id) values ($1,$2)`, [u.id, c.id]);
+    await q(`insert into sales(date,client_id,product_id,quantity,amount,line_hash,site) values (current_date - 20,$1,$2,3,$3,$4,'COMANET')`, [c.id, products[0].id, 1000 * (i + 1), `e2e-${tag}-${i}`]);
+  }
+  await q(`insert into client_visits(client_id,date,user_id) values ($1,current_date,$2)`, [portfolio[0].id, u.id]);
+
+  const ctx = await browser.newContext(DEVICES["360×800"]);
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(`${base}/login`);
+  await page.fill("#email", u.email);
+  await page.fill("#password", PASSWORD);
+  await page.click("button[type=submit]");
+  await page.waitForURL((x) => x.pathname === "/m", { timeout: 30000 });
+  ok("téléphone du commercial : la connexion ouvre l'app, pas la liste des commandes");
+  await page.getByRole("heading", { name: "Mes clients" }).waitFor({ timeout: 20000 });
+  const firstRow = page.locator("main ul li").first();
+  check((await firstRow.innerText()).includes(portfolio[0].name) && (await firstRow.innerText()).includes("Visite aujourd'hui"), "le client à visiter aujourd'hui ouvre la liste");
+  if (shots) await page.screenshot({ path: `${shots}/commercial-1-clients.png` });
+
+  await page.getByLabel("Rechercher un client").fill(`agdal ${tag} 2`);
+  await page.getByRole("link", { name: new RegExp(`${portfolio[2].name}`) }).waitFor();
+  check((await page.locator("main ul li").count()) === 1, "recherche instantanée, sans accents ni majuscules");
+  await page.getByRole("link", { name: new RegExp(`${portfolio[2].name}`) }).click();
+  await page.getByRole("heading", { name: portfolio[2].name }).waitFor({ timeout: 15000 });
+  await page.getByRole("heading", { name: "Impayés" }).waitFor({ timeout: 15000 });
+  await page.getByRole("heading", { name: "Pack conseillé" }).waitFor();
+  ok("fiche courte : CA, tendance, segment, impayés, pack conseillé");
+  if (shots) await page.screenshot({ path: `${shots}/commercial-2-fiche.png`, fullPage: true });
+  const size = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, small: [...document.querySelectorAll("main a, main button, main input")].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height < 44; }).map((e) => (e.textContent || e.getAttribute("aria-label") || "").trim().slice(0, 30)) }));
+  check(size.overflow === 0 && size.small.length === 0, `fiche à 360 px : aucun débordement, aucune cible sous 44 px${size.small.length ? " : " + size.small.join(", ") : ""}`);
+
+  await page.waitForFunction(() => !!navigator.serviceWorker?.controller, null, { timeout: 30000 }).catch(() => page.reload());
+  await page.waitForFunction(() => !!navigator.serviceWorker?.controller, null, { timeout: 30000 });
+  await page.goto(`${base}/m/client?id=${portfolio[2].id}`);
+  await page.getByRole("heading", { name: "Pack conseillé" }).waitFor({ timeout: 15000 });
+
+  await ctx.setOffline(true);
+  await page.reload();
+  await page.getByRole("heading", { name: portfolio[2].name }).waitFor({ timeout: 15000 });
+  await page.getByRole("heading", { name: "Impayés" }).waitFor({ timeout: 15000 });
+  await page.getByText(/Copie du/).waitFor();
+  ok("mode avion : la fiche s'ouvre depuis le téléphone, datée");
+  check(await page.getByText("Commande", { exact: false }).first().getAttribute("aria-disabled") === "true" || (await page.locator('[aria-disabled="true"]').count()) === 2, "commande et visite signalées comme indisponibles sans réseau");
+
+  await page.getByLabel("Chercher un produit").fill(tag);
+  await page.getByLabel(/^Stock — /).first().fill("11");
+  await page.getByRole("button", { name: "Enregistrer le relevé" }).click();
+  await page.getByText(/1 saisie en attente/).waitFor({ timeout: 8000 });
+  ok("stock chez le client modifié sans réseau, en attente");
+  check((await q(`select count(*)::int as n from client_stock_readings where client_id = $1`, [portfolio[2].id]))[0].n === 0, "rien en base tant que le téléphone est hors réseau");
+
+  await ctx.setOffline(false);
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await page.getByText(/1 saisie en attente/).waitFor({ state: "detached", timeout: 30000 });
+  const readings = await q(`select channel::text as channel, quantity, user_id from client_stock_readings where client_id = $1`, [portfolio[2].id]);
+  check(readings.length === 1 && readings[0].channel === "TOURNEE_COMMERCIALE" && readings[0].quantity === 11 && readings[0].user_id === u.id, "retour du réseau : un seul relevé, canal Tournée, à son nom");
+
+  await page.goto(`${base}/m/saisie`);
+  await page.waitForURL((x) => x.pathname === "/m", { timeout: 15000 });
+  ok("un écran d'animatrice ramène à ses clients");
+  await page.getByRole("link", { name: "Commandes", exact: true }).click();
+  await page.waitForURL((x) => x.pathname === "/gestion/pieces", { timeout: 20000 });
+  ok("onglet Commandes : la page existante, en ligne");
+  check(errors.length === 0, `aucune erreur JavaScript${errors.length ? " : " + errors[0] : ""}`);
+  await ctx.close();
+}
+
 await browser.close();
 await db.end();
 console.log(`\n${step} contrôles passés.`);

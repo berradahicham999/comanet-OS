@@ -6,7 +6,8 @@ import { capturePosition, newId } from "@/lib/medical/field-client";
 import { clearUserCache, syncLocalUser, wipeSessionData } from "@/lib/mobile/local-data";
 import { clearRefs, flushOutbox, lastUser, listOutbox, putOutbox, readRef, removeOutbox, writeRef } from "@/lib/mobile/outbox";
 import { snapshotExpired, type AnimationPayload, type OutboxItem, type OutboxKind, type StockPayload } from "@/lib/mobile/outbox-shared";
-import type { MobileSnapshot } from "@/lib/mobile/snapshot-shared";
+import { hasMobileScreens, screenAllowed } from "@/lib/mobile/persona";
+import { sheetsToPreload, type ClientSheet, type MobileSnapshot } from "@/lib/mobile/snapshot-shared";
 
 /**
  * Cœur de l'app mobile : ce que le téléphone sait, ce qu'il doit encore envoyer.
@@ -37,6 +38,38 @@ export function useMobile(): Mobile {
   return v;
 }
 
+/** Fiche courte d'un client : réseau, puis copie locale. `null` : ni réseau, ni copie. */
+export async function loadClientSheet(userId: string, clientId: string): Promise<ClientSheet | null> {
+  try {
+    const res = await fetch(`/api/m/clients/${clientId}`, { cache: "no-store", credentials: "same-origin" });
+    if (res.ok) {
+      const sheet = (await res.json()) as ClientSheet;
+      await writeRef(userId, `client:${clientId}`, sheet);
+      return sheet;
+    }
+    if (res.status === 403 || res.status === 404) return null;
+  } catch { /* pas de réseau : copie locale */ }
+  return readRef<ClientSheet>(userId, `client:${clientId}`).catch(() => null);
+}
+
+let preloading = false;
+
+/** Fiches du début du portefeuille, une à la fois : un téléphone en 3G ne doit jamais attendre ce téléchargement. */
+async function preloadSheets(userId: string, clientIds: string[]) {
+  if (preloading) return;
+  preloading = true;
+  try {
+    const known = new Map<string, string | null>();
+    for (const id of clientIds) known.set(id, (await readRef<ClientSheet>(userId, `client:${id}`).catch(() => null))?.fetchedAt ?? null);
+    for (const id of sheetsToPreload(clientIds, (x) => known.get(x) ?? null, Date.now())) {
+      if (!navigator.onLine) break;
+      await loadClientSheet(userId, id);
+    }
+  } finally {
+    preloading = false;
+  }
+}
+
 export function MobileApp({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const [phase, setPhase] = useState<Phase>("LOADING");
@@ -45,6 +78,9 @@ export function MobileApp({ children }: { children: React.ReactNode }) {
   const [online, setOnline] = useState(true);
   const [authLost, setAuthLost] = useState(false);
   const uid = useRef<string | null>(null);
+  // Lu au moment voulu : changer d'écran ne doit pas retélécharger les référentiels.
+  const pathRef = useRef(path);
+  useEffect(() => { pathRef.current = path; }, [path]);
 
   const reload = useCallback(async () => {
     if (uid.current) setItems(await listOutbox(uid.current));
@@ -75,7 +111,7 @@ export function MobileApp({ children }: { children: React.ReactNode }) {
       // Session expirée ou appareil révoqué : plus aucune donnée lisible, mais les saisies en attente restent en file.
       await clearUserCache();
       if (uid.current) await clearRefs(uid.current).catch(() => {});
-      window.location.replace(`/login?next=${encodeURIComponent(path)}`);
+      window.location.replace(`/login?next=${encodeURIComponent(pathRef.current)}`);
       return;
     }
     if (!res.ok) {
@@ -84,7 +120,7 @@ export function MobileApp({ children }: { children: React.ReactNode }) {
     }
     const fresh = (await res.json()) as MobileSnapshot;
     // Les autres métiers n'ont pas encore leurs écrans ici : ils gardent leur accueil habituel.
-    if (fresh.persona !== "ANIMATRICE") {
+    if (!hasMobileScreens(fresh.persona)) {
       await syncLocalUser(fresh.user.id);
       window.location.replace(fresh.home);
       return;
@@ -95,8 +131,10 @@ export function MobileApp({ children }: { children: React.ReactNode }) {
     setSnapshot(fresh);
     setAuthLost(false);
     setPhase("READY");
+    if (!screenAllowed(fresh.persona, pathRef.current)) window.location.replace("/m");
     await flush();
-  }, [flush, path]);
+    if (fresh.commercial) void preloadSheets(fresh.user.id, fresh.commercial.clients.map((c) => c.id));
+  }, [flush]);
 
   useEffect(() => { refreshRef.current = refresh; }, [refresh]);
 
