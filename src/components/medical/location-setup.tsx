@@ -94,8 +94,8 @@ export function LocationSetup({ timeoutS }: { timeoutS: number }) {
       )}
       {msg && <p className="font-medium">{msg}</p>}
       <div className="flex flex-wrap gap-2">
-        <button onClick={test} disabled={busy} className="btn-primary h-10 px-4 disabled:opacity-60">{busy ? "Localisation…" : iphone ? "Vérifier" : "Activer maintenant"}</button>
-        <button onClick={hide} className="btn-ghost h-10 px-3">C&apos;est fait, masquer</button>
+        <button onClick={test} disabled={busy} className="btn-primary h-11 px-4 disabled:opacity-60">{busy ? "Localisation…" : iphone ? "Vérifier" : "Activer maintenant"}</button>
+        <button onClick={hide} className="btn-ghost h-11 px-3">C&apos;est fait, masquer</button>
       </div>
     </div>
   );

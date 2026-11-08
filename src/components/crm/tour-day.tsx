@@ -427,8 +427,8 @@ function ClientRow({ name, sub, onStart, onAbsent, busy, highlight }: { name: st
         <div className="text-[14px] font-medium text-ink truncate">{name}</div>
         {sub && <div className="text-[12px] text-muted line-clamp-2">{sub}</div>}
       </div>
-      <button disabled={busy} onClick={onAbsent} className="btn-ghost h-10 w-10 p-0 rounded-lg shrink-0 disabled:opacity-50" aria-label="Visite non effectuée" title="Responsable absent / non effectuée"><UserX size={17} /></button>
-      <button disabled={busy} onClick={onStart} className="btn-primary h-10 px-3 shrink-0 disabled:opacity-50"><Play size={15} /> Démarrer</button>
+      <button disabled={busy} onClick={onAbsent} className="btn-ghost h-11 w-11 p-0 rounded-lg shrink-0 disabled:opacity-50" aria-label="Visite non effectuée" title="Responsable absent / non effectuée"><UserX size={17} /></button>
+      <button disabled={busy} onClick={onStart} className="btn-primary h-11 px-3 shrink-0 disabled:opacity-50"><Play size={15} /> Démarrer</button>
     </div>
   );
 }
@@ -450,7 +450,7 @@ function PortfolioRow({ c, onStart, onAbsent, busy }: { c: TourClient; onStart: 
         <Link href={`/clients/${c.id}?tab=crm`} className="text-[14px] font-medium text-ink truncate block">{c.name}</Link>
         <div className="text-[12px] text-muted line-clamp-2"><span className={done ? "text-green font-medium" : c.remaining > 0 ? "text-ink-2 font-medium" : ""}>{badge}</span>{extras ? ` · ${extras}` : ""}</div>
       </div>
-      <button disabled={busy} onClick={onAbsent} className="btn-ghost h-10 w-10 p-0 rounded-lg shrink-0 disabled:opacity-50" aria-label="Visite non effectuée" title="Responsable absent / non effectuée"><UserX size={17} /></button>
+      <button disabled={busy} onClick={onAbsent} className="btn-ghost h-11 w-11 p-0 rounded-lg shrink-0 disabled:opacity-50" aria-label="Visite non effectuée" title="Responsable absent / non effectuée"><UserX size={17} /></button>
       <button disabled={busy} onClick={onStart} className={`${done ? "btn-secondary" : "btn-primary"} h-10 px-3 shrink-0 disabled:opacity-50`}><Play size={15} /> Démarrer</button>
     </div>
   );

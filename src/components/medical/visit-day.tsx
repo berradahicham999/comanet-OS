@@ -359,8 +359,8 @@ function DoctorRow({ name, sub, onStart, onAbsent, busy, highlight }: { name: st
         <div className="text-[14px] font-medium text-ink truncate">Dr {name}</div>
         {sub && <div className="text-[12px] text-muted truncate">{sub}</div>}
       </div>
-      <button disabled={busy} onClick={onAbsent} className="btn-ghost h-10 w-10 p-0 rounded-lg shrink-0 disabled:opacity-50" aria-label="Visite non effectuée" title="Médecin absent / non effectuée"><UserX size={17} /></button>
-      <button disabled={busy} onClick={onStart} className="btn-primary h-10 px-3 shrink-0 disabled:opacity-50"><Play size={15} /> Démarrer</button>
+      <button disabled={busy} onClick={onAbsent} className="btn-ghost h-11 w-11 p-0 rounded-lg shrink-0 disabled:opacity-50" aria-label="Visite non effectuée" title="Médecin absent / non effectuée"><UserX size={17} /></button>
+      <button disabled={busy} onClick={onStart} className="btn-primary h-11 px-3 shrink-0 disabled:opacity-50"><Play size={15} /> Démarrer</button>
     </div>
   );
 }
