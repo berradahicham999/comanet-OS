@@ -14,6 +14,8 @@ import { LocationSetup, askLocationOnce } from "./location-setup";
 import { PreVisitBrief } from "./pre-visit-brief";
 
 export type DayData = {
+  /** Compte connecté : porté par chaque action de la file (téléphone partagé). */
+  userId: string;
   day: string;
   accepted: boolean;
   gpsTimeoutS: number;
@@ -121,7 +123,7 @@ export function VisitDay({ data, acceptNotice }: { data: DayData; acceptNotice: 
     const deviceTime = new Date().toISOString();
     const a: QueuedAction = { clientEventId: newId(), type: "START", doctorId, plannedVisitId: plannedVisitId ?? null, deviceTime, label: doctorName, ...fixFields(fix) };
     const v: RunningVisit = { startRef: a.clientEventId, visitId: null, doctorId, doctorName, startedAtMs: Date.now() };
-    await enqueue(a);
+    await enqueue({ ...a, userId: data.userId });
     await setRunning(v);
     setRunningState(v);
     setBusy("send");
@@ -136,7 +138,7 @@ export function VisitDay({ data, acceptNotice }: { data: DayData; acceptNotice: 
     setError(null); setInfo(null);
     const fix = await locate();
     const a: QueuedAction = { clientEventId: newId(), type: "STOP", startRef: running.startRef, visitId: running.visitId, deviceTime: new Date().toISOString(), label: running.doctorName, ...fixFields(fix) };
-    await enqueue(a);
+    await enqueue({ ...a, userId: data.userId });
     const ended = running;
     await setRunning(null);
     setRunningState(null);
@@ -162,7 +164,7 @@ export function VisitDay({ data, acceptNotice }: { data: DayData; acceptNotice: 
     const a: QueuedAction = target.running && running
       ? { ...base, startRef: running.startRef, visitId: running.visitId }
       : { ...base, doctorId: target.doctorId, plannedVisitId: target.plannedVisitId ?? null };
-    await enqueue(a);
+    await enqueue({ ...a, userId: data.userId });
     if (target.running) { await setRunning(null); setRunningState(null); }
     setBusy("send");
     const r = await flush(a.clientEventId);

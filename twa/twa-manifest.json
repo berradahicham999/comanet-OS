@@ -1,0 +1,33 @@
+{
+  "packageId": "ma.comanet.os",
+  "host": "app.comanet.ma",
+  "name": "COMANET OS",
+  "launcherName": "COMANET",
+  "display": "standalone",
+  "orientation": "portrait",
+  "themeColor": "#0f766e",
+  "themeColorDark": "#0f766e",
+  "navigationColor": "#ffffff",
+  "navigationColorDark": "#ffffff",
+  "navigationDividerColor": "#e5e5e0",
+  "navigationDividerColorDark": "#e5e5e0",
+  "backgroundColor": "#f5f5f3",
+  "enableNotifications": true,
+  "startUrl": "/m",
+  "iconUrl": "https://app.comanet.ma/icons/icon-512.png",
+  "maskableIconUrl": "https://app.comanet.ma/icons/icon-maskable-512.png",
+  "appVersionName": "1.0.0",
+  "appVersionCode": 1,
+  "webManifestUrl": "https://app.comanet.ma/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "features": {
+    "locationDelegation": {
+      "enabled": true
+    }
+  },
+  "signingKey": {
+    "path": "./comanet-os.keystore",
+    "alias": "comanet"
+  },
+  "minSdkVersion": 21
+}

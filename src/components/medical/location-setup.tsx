@@ -22,6 +22,11 @@ export async function askLocationOnce(timeoutS: number): Promise<boolean> {
   return !("error" in fix);
 }
 
+/** App installée (écran d'accueil, APK) : pas de barre d'adresse, l'autorisation se règle dans les réglages du téléphone. */
+export function isInstalled(): boolean {
+  return typeof window !== "undefined" && window.matchMedia?.("(display-mode: standalone)").matches;
+}
+
 const HIDE_KEY = "comanet-gps-setup-hidden";
 
 export function LocationSetup({ timeoutS }: { timeoutS: number }) {
@@ -81,7 +86,9 @@ export function LocationSetup({ timeoutS }: { timeoutS: number }) {
         <>
           <p>Touchez « Activer maintenant ». Quand le téléphone demande l&apos;accès à la position, choisissez <b>Autoriser lorsque vous consultez le site</b> (pas « Uniquement cette fois »). Il ne vous le redemandera plus.</p>
           {state === "denied" && (
-            <p className="text-red">La position a été refusée pour ce site : touchez l&apos;icône à gauche de l&apos;adresse → <b>Autorisations</b> → <b>Position</b> → <b>Autoriser</b>, puis revenez ici.</p>
+            <p className="text-red">{isInstalled()
+              ? <>La position a été refusée : ouvrez les <b>Paramètres</b> du téléphone → <b>Applications</b> → <b>COMANET OS</b> → <b>Autorisations</b> → <b>Position</b> → <b>Autoriser</b>, puis revenez ici.</>
+              : <>La position a été refusée pour ce site : touchez l&apos;icône à gauche de l&apos;adresse → <b>Autorisations</b> → <b>Position</b> → <b>Autoriser</b>, puis revenez ici.</>}</p>
           )}
         </>
       )}

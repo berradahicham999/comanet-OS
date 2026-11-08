@@ -22,7 +22,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <AppShell
       groups={navForPermissions(access.perms, access.flags)}
-      tabs={mobileTabsForPermissions(access.perms, access.home, access.flags)}
+      tabs={mobileTabsForPermissions(access.perms, access.scope, access.flags)}
       user={access.user}
       logout={logoutAction}
       canSearch={hasAnyModule(access.perms)}

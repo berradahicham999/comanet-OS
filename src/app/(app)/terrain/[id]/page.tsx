@@ -3,13 +3,13 @@ import { notFound } from "next/navigation";
 import { sql, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { animations as animationsTable } from "@/db/schema";
-import { requireAccess, isOwnOnly, canDo, hasFlag } from "@/lib/access";
+import { requireAccess, isOwnOnly, canDo, hasFlag, getAccess, isAdmin } from "@/lib/access";
 import { animationImpact } from "@/lib/terrain";
 import { listBrands, listAnimatrices } from "@/lib/users";
 import { PageHeader, Card, Badge, Delta } from "@/components/ui";
 import { AnimationForm } from "@/components/animation-form";
 import { saveAnimation, deleteAnimation } from "../actions";
-import { fmtMAD, fmtNum, fmtDate, iso, delta, today } from "@/lib/format";
+import { fmtMAD, fmtNum, fmtDate, fmtTime, iso, delta, today } from "@/lib/format";
 import { ANIMATION_ERRORS, ANIMATION_WARNINGS } from "@/lib/animations-shared";
 import { pointsOfSale } from "@/lib/terrain/points-of-sale";
 import { animationHistory } from "@/lib/terrain/reports";
@@ -25,6 +25,9 @@ export default async function AnimationPage(props: { params: Promise<{ id: strin
   const anim = await db.query.animations.findFirst({ where: eq(animationsTable.id, id), with: { client: true, animatrice: true, brand: true, lines: { with: { product: true } } } });
   if (!anim) notFound();
   if (ownOnly && anim.animatriceId !== user.id) notFound();
+  // Position de la saisie mobile : la direction seule, comme les positions de visites.
+  const access = await getAccess();
+  const seePosition = !!access && isAdmin(access.perms) && !!anim.clientEventId;
   const [impact, clients, products, brands, history] = await Promise.all([
     animationImpact(id),
     pointsOfSale({ include: [anim.clientId] }),
@@ -46,6 +49,11 @@ export default async function AnimationPage(props: { params: Promise<{ id: strin
       {sp.warn?.split(",").map((w) => <div key={w} className="mb-4 rounded-2xl bg-orange-soft border border-orange/30 px-4 py-3 text-[13px] text-orange font-medium">{ANIMATION_WARNINGS[w] ?? "Animation enregistrée avec des réserves."}</div>)}
       <PageHeader eyebrow={<Link href={back} className="hover:underline">Rapports d&apos;animation</Link>} title={`${anim.client.name} — ${anim.startDate && anim.startDate !== anim.date ? `du ${fmtDate(anim.startDate)} au ${fmtDate(anim.date)}` : fmtDate(anim.date)}`} subtitle={[anim.animatrice?.name, anim.brand?.name ?? "Multi-marques", anim.client.city, anim.days > 1 ? `${anim.days} jours d'animation` : null].filter(Boolean).join(" · ")}
         actions={<>{anim.status === "PLANNED" && <Badge tone="blue">Prévue</Badge>}{canValidate && !sp.supprimer && <Link href={`${self}${self.includes("?") ? "&" : "?"}supprimer=1`} className="btn-ghost btn-sm text-red">Supprimer</Link>}</>} />
+      {seePosition && (
+        <div className="mb-4 text-[13px] text-muted">
+          Saisie depuis l&apos;app mobile{anim.deviceTime ? ` à ${fmtTime(anim.deviceTime)}` : ""} · {anim.gpsLat ? <>position enregistrée ({anim.gpsLat}, {anim.gpsLng}{anim.gpsAccuracyM ? `, ±${anim.gpsAccuracyM} m` : ""})</> : <b className="text-orange">sans position</b>}
+        </div>
+      )}
 
       {canValidate && sp.supprimer && (
         <div className="mb-4 rounded-2xl bg-red-soft border border-red/30 px-4 py-3 text-[13px]">

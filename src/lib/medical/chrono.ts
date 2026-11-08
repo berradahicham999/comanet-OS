@@ -49,7 +49,7 @@ export type ActionInput = {
 
 export type ActionResult =
   | { ok: true; visitId: string; duplicate?: boolean; message?: string }
-  | { ok: false; code: "RUNNING" | "NOT_FOUND" | "FORBIDDEN" | "WAIT_START" | "INVALID"; message: string };
+  | { ok: false; code: "RUNNING" | "NOT_FOUND" | "FORBIDDEN" | "WAIT_START" | "INVALID" | "WRONG_USER"; message: string };
 
 const ymd = new Intl.DateTimeFormat("en-CA", { timeZone: BUSINESS_TZ, year: "numeric", month: "2-digit", day: "2-digit" });
 /** Jour d'un instant dans le fuseau de l'entreprise (AAAA-MM-JJ). */

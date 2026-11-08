@@ -1,5 +1,6 @@
 "use client";
 
+import { wipeSessionData } from "@/lib/mobile/local-data";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -106,7 +107,7 @@ export function Sidebar({ groups, user, logout, onNavigate }: {
           <div className="text-[13px] font-medium truncate">{user.name}</div>
           <div className="text-[11px] text-muted truncate">{user.email}</div>
         </div>
-        <form action={logout}>
+        <form action={logout} onSubmit={() => { void wipeSessionData(); }}>
           <button className="btn-ghost h-8 w-8 p-0 rounded-lg" title="Se déconnecter" aria-label="Se déconnecter">
             <LogOut size={16} />
           </button>

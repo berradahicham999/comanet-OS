@@ -1,22 +1,30 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { isPublicPath } from "@/lib/public-paths";
+import { renewedToken } from "@/lib/session-token";
+import { SESSION_MAX_AGE_S } from "@/lib/sessions-shared";
 
-// `/api/cron` est public au niveau du filtre, mais pas ouvert : la route exige l'en-tête
-// `Authorization: Bearer CRON_SECRET`. Vercel appelle ses crons avec cet en-tête et SANS
-// cookie de session — sans cette exception, le cron serait redirigé vers /login et la
-// synchronisation ne tournerait jamais, sans le moindre message.
-const PUBLIC = ["/login", "/api/auth", "/api/health", "/api/cron", "/installation", "/d/", "/sw.js"];
+const COOKIE = "comanet_session";
 
-/** Contrôle optimiste : présence du cookie de session. La vérification réelle a lieu côté serveur. */
-export function proxy(request: NextRequest) {
+/**
+ * Contrôle optimiste : présence du cookie de session. La vérification réelle a lieu côté serveur.
+ * Le jeton d'une personne active est prolongé (une fois par jour au plus) : la session de 30 jours est glissante.
+ */
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  if (PUBLIC.some((p) => pathname.startsWith(p))) return NextResponse.next();
-  const hasSession = Boolean(request.cookies.get("comanet_session")?.value);
-  if (!hasSession) {
+  if (isPublicPath(pathname)) return NextResponse.next();
+  const token = request.cookies.get(COOKIE)?.value;
+  if (!token) {
     const url = new URL("/login", request.url);
     if (pathname !== "/") url.searchParams.set("next", pathname);
     return NextResponse.redirect(url);
   }
-  return NextResponse.next();
+  const res = NextResponse.next();
+  const s = process.env.SESSION_SECRET;
+  if (s && s.length >= 16) {
+    const renewed = await renewedToken(token, new TextEncoder().encode(s));
+    if (renewed) res.cookies.set(COOKIE, renewed, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: SESSION_MAX_AGE_S });
+  }
+  return res;
 }
 
 export const config = {

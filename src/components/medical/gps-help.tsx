@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { isInstalled } from "./location-setup";
 import { MapPinOff, X } from "lucide-react";
 
 /** Aide pour réactiver la localisation (Android / Chrome et iPhone / Safari). La visite reste possible sans. */
@@ -21,7 +22,9 @@ export function GpsHelp({ onClose }: { onClose: () => void }) {
       {tab === "android" ? (
         <ol className="list-decimal pl-5 space-y-1">
           <li>Vérifiez que la <b>Localisation</b> du téléphone est activée (volet du haut, icône de position).</li>
-          <li>Dans Chrome, touchez l&apos;icône à gauche de l&apos;adresse (cadenas ou réglages) → <b>Autorisations</b> → <b>Position</b> → <b>Autoriser</b>.</li>
+          {isInstalled()
+            ? <li>Paramètres du téléphone → <b>Applications</b> → <b>COMANET OS</b> → <b>Autorisations</b> → <b>Position</b> → <b>Autoriser</b>.</li>
+            : <li>Dans Chrome, touchez l&apos;icône à gauche de l&apos;adresse (cadenas ou réglages) → <b>Autorisations</b> → <b>Position</b> → <b>Autoriser</b>.</li>}
           <li>Sinon : Paramètres du téléphone → Applications → Chrome → Autorisations → Position → <b>Autoriser seulement si l&apos;appli est en cours d&apos;utilisation</b>, et activez <b>Utiliser la position exacte</b>.</li>
           <li>Rechargez la page, puis refaites l&apos;action.</li>
         </ol>

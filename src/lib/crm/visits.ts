@@ -50,7 +50,7 @@ export type CrmActionInput = {
 
 export type CrmActionResult =
   | { ok: true; visitId: string; duplicate?: boolean; message?: string }
-  | { ok: false; code: "RUNNING" | "NOT_FOUND" | "FORBIDDEN" | "WAIT_START" | "INVALID"; message: string };
+  | { ok: false; code: "RUNNING" | "NOT_FOUND" | "FORBIDDEN" | "WAIT_START" | "INVALID" | "WRONG_USER"; message: string };
 
 const UUID = /^[0-9a-f-]{36}$/i;
 const num = (v: unknown) => (v === null || v === undefined || v === "" ? null : Number(v));

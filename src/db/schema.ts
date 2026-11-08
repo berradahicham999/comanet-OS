@@ -418,6 +418,29 @@ export const userFlags = pgTable("user_flags", {
  * l'administrateur. Appliquer un modèle cumule (OR) ses cases avec la matrice
  * courante ; aucun lien n'est conservé ensuite avec l'utilisateur.
  */
+/**
+ * Une session par appareil (migration 0055) : le jeton porte son identifiant, ce qui permet de révoquer un téléphone
+ * à distance sans toucher au compte. Seul `src/lib/sessions.ts` écrit ici.
+ */
+export const userSessions = pgTable(
+  "user_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    deviceLabel: text("device_label"),
+    userAgent: text("user_agent"),
+    /** Minutes d'inactivité tolérées, figées à la connexion (`settings.mobile`). NULL = pas de limite. */
+    idleMinutes: integer("idle_minutes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedById: uuid("revoked_by_id").references(() => users.id, { onDelete: "set null" }),
+    /** DECONNEXION, ADMIN ou INACTIVITE. */
+    revokedReason: text("revoked_reason"),
+  },
+  (t) => [index("user_sessions_user_idx").on(t.userId, t.revokedAt)],
+);
+
 export const roleTemplates = pgTable("role_templates", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
@@ -1483,9 +1506,19 @@ export const animations = pgTable(
      */
     source: text("source").notNull().default("import"),
     importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
+    /** App mobile : identifiant posé par le téléphone. Rejouer la même saisie ne crée rien (`src/lib/mobile/mutations.ts`). */
+    clientEventId: text("client_event_id"),
+    /** App mobile : heure du téléphone à l'enregistrement (la saisie peut arriver plus tard, au retour du réseau). */
+    deviceTime: timestamp("device_time", { withTimezone: true }),
+    /** Position lue une seule fois, au moment d'enregistrer. Sans position : `gps_error` dit pourquoi. */
+    gpsLat: numeric("gps_lat", { precision: 9, scale: 6 }),
+    gpsLng: numeric("gps_lng", { precision: 9, scale: 6 }),
+    gpsAccuracyM: integer("gps_accuracy_m"),
+    gpsError: text("gps_error"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    uniqueIndex("animations_client_event_uq").on(t.clientEventId).where(sql`client_event_id is not null`),
     index("animations_date_idx").on(t.date),
     index("animations_city_idx").on(t.city),
     uniqueIndex("animations_dedupe_uq").on(t.dedupeKey).where(sql`dedupe_key is not null`),
@@ -1582,9 +1615,12 @@ export const clientStockReadings = pgTable(
     /** Journée d'animation d'origine : une correction de l'animation remplace SES relevés, pas ceux des autres. */
     animationId: uuid("animation_id").references(() => animations.id, { onDelete: "set null" }),
     comment: text("comment"),
+    /** App mobile : un relevé rejoué par la file hors connexion n'ajoute pas de ligne. */
+    clientEventId: text("client_event_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    uniqueIndex("client_stock_readings_event_uq").on(t.clientEventId, t.productId).where(sql`client_event_id is not null`),
     index("client_stock_readings_client_product_date_idx").on(t.clientId, t.productId, t.readAt),
     index("client_stock_readings_animation_idx").on(t.animationId),
     index("client_stock_readings_user_idx").on(t.userId),

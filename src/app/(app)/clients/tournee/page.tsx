@@ -55,6 +55,7 @@ export default async function TourPage(props: { searchParams: Promise<{ client?:
 
   const suggestions = tourSuggestions(portfolio, day, settings.crm);
   const data: TourData = {
+    userId: user.id,
     day,
     monthLabel: monthLabel(month),
     accepted,

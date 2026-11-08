@@ -119,6 +119,12 @@ export default async function ParametresPage(props: { searchParams: Promise<{ ta
               <Field name="crm_gpsTimeoutS" label="Attente de la position (s)" value={s.crm.gpsTimeoutS} />
             </div>
           </Card>
+          <Card title="App mobile">
+            <div className="grid grid-cols-2 gap-2">
+              <Field name="mobile_adminIdleMinutes" label="Inactivité administrateur (min)" value={s.mobile.adminIdleMinutes} hint="Téléphones seulement, 0 = jamais. Vaut pour les prochaines connexions." />
+              <Field name="mobile_gpsTimeoutS" label="Délai GPS à la saisie (s)" value={s.mobile.gpsTimeoutS} />
+            </div>
+          </Card>
           <Card title="Réglementaire">
             <Field name="regulatoryAlertDays" label="Alertes (jours avant expiration)" value={s.regulatoryAlertDays.join(" / ")} hint="Séparés par / ou virgule" />
             <div className="mt-2"><Field name="regulatoryRenewalDays" label="Lancer le renouvellement à J- (tâche automatique)" value={s.regulatoryRenewalDays} /></div>

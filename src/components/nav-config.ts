@@ -1,5 +1,7 @@
 import { type FlagKey, type ModuleKey } from "@/lib/access-shared";
+import { type ScopeKey } from "@/lib/access-shared";
 import { can, hasAnyModule, isAdmin, type FlagSet, type PermissionAction, type PermissionSet } from "@/lib/permissions-shared";
+import { personaOf, type Persona } from "@/lib/mobile/persona";
 
 /**
  * Page « Préparation » de la gestion commerciale (état des fiches, chiffre d'affaires de tous les clients) :
@@ -139,20 +141,43 @@ export function navForPermissions(perms: PermissionSet, flags?: FlagSet): NavGro
   })).filter((g) => g.items.length > 0);
 }
 
-/**
- * Onglets de la barre mobile (4 max). La page d'accueil de la personne vient en
- * premier : c'est ce qui donne sa saisie à une animatrice ou à un délégué médical,
- * sans avoir à tester leur rôle.
- */
-export function mobileTabsForPermissions(perms: PermissionSet, homePath: string, flags?: FlagSet): NavItem[] {
-  const all = navForPermissions(perms, flags).flatMap((g) => g.items);
-  // Commerciale (accueil = ses commandes) : Ma tournée juste après.
-  const prefer = [homePath, ...(homePath.startsWith("/gestion/pieces") ? ["/clients/tournee"] : []), "/", "/actions", "/taches", "/ventes", "/marketing", "/reglementaire", "/terrain", "/medical"];
-  const picked: NavItem[] = [];
-  for (const href of prefer) {
-    if (picked.length >= 4) break;
+/** Hors du menu : la barre mobile y mène quand même. */
+const ANY_TABS: NavItem[] = [
+  { href: "/notifications", label: "Notifications", icon: "Bell", module: "any" },
+  { href: "/recherche", label: "Recherche", icon: "Search", module: "any" },
+];
+
+/** L'animatrice a ses écrans sous `/m`, qui marchent sans réseau. */
+export const ANIMATRICE_TABS: NavItem[] = [
+  { href: "/m", label: "Aujourd'hui", icon: "Sun", module: "terrain", exact: true },
+  { href: "/m/saisie", label: "Saisie", icon: "ClipboardList", module: "terrain" },
+  { href: "/m/stock", label: "Stock", icon: "Store", module: "terrain" },
+  { href: "/m/mois", label: "Mon mois", icon: "Trophy", module: "terrain" },
+];
+
+const TABS: Record<Exclude<Persona, "ANIMATRICE">, string[]> = {
+  DIRECTION: ["/", "/actions", "/taches", "/ventes"],
+  DELEGUE: ["/medical/journee", "/medical/medecins", "/medical/visites", "/taches"],
+  COMMERCIAL: ["/clients/tournee", "/clients", "/gestion/pieces?type=COMMANDE", "/taches"],
+  AUTRE: ["/taches", "/notifications", "/recherche"],
+};
+
+/** Libellés courts : la barre fait 72 px par onglet sur un téléphone de 360 px. */
+const SHORT: Record<string, string> = {
+  "/gestion/pieces?type=COMMANDE": "Commandes",
+  "/medical/medecins": "Médecins",
+  "/actions": "Actions",
+  "/clients/tournee": "Tournée",
+  "/medical/journee": "Journée",
+};
+
+/** Onglets de la barre mobile (4 au plus) : ceux du métier de la personne, filtrés par ses droits. */
+export function mobileTabsForPermissions(perms: PermissionSet, scope: ScopeKey, flags?: FlagSet): NavItem[] {
+  const persona = personaOf(perms, scope);
+  if (persona === "ANIMATRICE") return ANIMATRICE_TABS;
+  const all = [...navForPermissions(perms, flags).flatMap((g) => g.items), ...ANY_TABS];
+  return TABS[persona].flatMap((href) => {
     const it = all.find((i) => i.href === href);
-    if (it && !picked.some((p) => p.href === it.href)) picked.push(it);
-  }
-  return picked;
+    return it ? [{ ...it, label: SHORT[href] ?? it.label }] : [];
+  });
 }

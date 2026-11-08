@@ -36,10 +36,14 @@ MEDICAL_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import
                                          # intégration Médical v2 (chrono, GPS, hors connexion, corrections, ordonnances) — jamais sur la prod
 CRM_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/crm-integration.ts
                                          # intégration CRM commercial (portefeuilles, chrono, GPS, objectifs client, fusion, règles, imports) — jamais sur la prod
+MOBILE_IT=1 DATABASE_POOL_MAX=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/mobile-integration.ts
+                                         # intégration app mobile (rejeu sans doublon, conflit, téléphone partagé, droits, sessions, révocation) — jamais sur la prod
+MOBILE_E2E=1 BASE_URL=<next start> DATABASE_URL=<base jetable> PW_CHROMIUM=<chrome> node scripts/mobile-e2e.mjs [captures]
+                                         # parcours réel 360×800 et iPhone 13 : mode avion pendant une saisie, retour réseau, 0 doublon — jamais sur la prod
 ```
 
 Variables d'environnement : `DATABASE_URL`, `DATABASE_SSL`, `SESSION_SECRET`, `SETUP_KEY`,
-`BUSINESS_TZ`, `DATABASE_POOL_MAX`. Voir `.env.example` et `DEPLOY.md`.
+`BUSINESS_TZ`, `DATABASE_POOL_MAX`, `TWA_SHA256_FINGERPRINTS`, `APK_URL`. Voir `.env.example`, `DEPLOY.md` et `DEPLOY_MOBILE.md`.
 
 Sur Supabase, l'application utilise le **Transaction pooler (6543)** ; les scripts CLI
 (`db:push`, `db:import`) le **Session pooler (5432)**.
@@ -64,6 +68,8 @@ src/lib/medical/      médical (médecins, visites, chrono et GPS, ordonnances, 
 src/lib/gestion/      gestion commerciale (montants exacts, numérotation, journal de stock, clients, fournisseurs, préparation de la bascule)
 src/lib/crm/          CRM commercial (portefeuilles, fréquence, visites chronométrées, objectifs client, chronologie, assortiment manquant)
 src/lib/creative/     Studio créatif / Intelligence contenu (tensions, territoires, opportunités, concepts, package, brief, apprentissage, étapes IA)
+src/lib/mobile/       app mobile (persona, file hors connexion, référentiels locaux, saisies rejouables, service worker)
+src/app/m/            écrans mobiles hors connexion (statiques, aucune donnée dans le HTML)
 drizzle/              migrations SQL + meta/_journal.json
 ```
 
@@ -146,6 +152,12 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Visite commerciale (Démarrer / Terminer / non effectuée, hors connexion, clôture auto, correction, position du point de vente, commande déduite) | `src/lib/crm/visits.ts` + `visits-shared.ts` | `recordClientVisitAction()` (seule écriture des heures, du statut et du contrôle de `client_visits`, et de `visit_events.client_visit_id`), `planClientVisit()`, `logClientContact()`, `saveClientVisitReport()`, `autoCloseStaleClientVisits()`, `correctClientVisit()`, `validatePointOfSale()`, `visitOutcomes()`, `countsInProgress()` |
 | Objectif client (CA HT sell-in, table `objectives.client_id`) | `src/lib/crm/objectives.ts` | `clientObjectives()`, `clientObjectiveProgress()`, `saveClientObjective()`, `deleteClientObjective()` ; toute lecture d'objectif de marque filtre `client_id is null` |
 | Chronologie et fiche pré-visite d'un client (lecture seule) | `src/lib/crm/timeline.ts` + `intelligence.ts` | `clientTimeline()`, `clientVisitBrief()`, `missingAssortment()`, `clientReceivables()` |
+| Métier sur le téléphone (déduit des droits, jamais de `users.role`) et onglets | `src/lib/mobile/persona.ts` + `src/components/nav-config.ts` | `personaOf()`, `mobileTabsForPermissions()` |
+| File d'envoi de l'app mobile (état d'une saisie, rejeu, conflit) et saisies rejouées | `src/lib/mobile/outbox-shared.ts` + `outbox.ts` + `mutations.ts` | `settle()`, `sendable()`, `flushOutbox()`, `applyMutation()` (seule entrée des saisies du téléphone) |
+| Référentiels gardés sur le téléphone (portée, durée de vie) | `src/lib/mobile/snapshot.ts` + `outbox-shared.ts` | `mobileSnapshot()`, `snapshotExpired()` |
+| Service worker (ce qui est mis en cache, et ce qui ne l'est jamais) | `src/lib/mobile/sw-source.ts` | `swSource()` |
+| Sessions par appareil (30 jours glissants, inactivité, révocation) | `src/lib/sessions.ts` + `sessions-shared.ts` + `session-token.ts` | `openSession()`, `checkSession()`, `revokeSessions()` (seules écritures de `user_sessions`), `sessionVerdict()`, `renewedToken()` |
+| Chemins ouverts sans session | `src/lib/public-paths.ts` | `isPublicPath()` |
 | Client prêt à facturer, doublons de clients, groupe (enseigne), raisons sociales facturables, fusion de fiches | `src/lib/gestion/clients-shared.ts` + `clients.ts` | `billingReadiness()`, `duplicateCandidates()`, `createClient()`, `updateClientLegal()` (seule écriture de `group_id`), `listClientGroups()`, `clientLinks()`, `billingIdentity()` (identité imprimée), `saveLegalEntity()`, `mergePreview()`, `mergeClients()` (seule fusion) |
 
 | Studio créatif : catégorie créative et discipline des allégations d'un produit, tensions consommateur activées par la fiche, taxonomie des mécaniques, empreinte et fatigue, apprentissage créatif (corrélation observée), scores explicables, opportunités, squelettes déterministes, brief | `src/lib/creative/` (`product-intel.ts`, `consumer.ts`, `territories.ts`, `fingerprint.ts`, `learning.ts`, `scoring.ts`, `opportunities.ts`, `rules.ts`, `brief.ts`, `compliance.ts`) | `creativeCategoryOf()`, `buildProductIntelligence()`, `matchTensions()`, `MECHANICS`, `creativeFingerprint()`, `similarity()`, `territoryUsage()`, `creativeLearning()`, `historicalFit()`, `scoreOpportunity()`, `scoreConcept()`, `buildOpportunities()`, `rankMechanics()`, `rulesConcepts()`, `draftPackage()`, `draftVariations()`, `buildBrief()`, `checkText()` / `checkPackage()` (seul contrôle des allégations) |
@@ -322,6 +334,20 @@ seuils de `settings.crm`. Heures et positions : direction et manager seulement (
 détail, carte, export), `/clients/portefeuilles` (affectation en masse, reprise depuis les droits), onglet « Suivi commercial » de la
 fiche client. Aucun nouveau module de droits : tout sur `clients`. Règles Action Center : `src/lib/rules/crm-rules.ts` (alertes de
 contrôle portées par `crmUserId`). Copilote : `get_client_portfolio`, `get_client_visits`.
+
+**App mobile** (`docs/plan-mobile.md`, déploiement `DEPLOY_MOBILE.md`, migration 0055). Une seule base de code : le site, installable
+(PWA sur iPhone, APK TWA sur Android, `ma.comanet.os`). Écrans terrain sous `/m` : coquille **statique**, sans lecture de session ni donnée dans
+le HTML, ce qui permet de l'ouvrir sans réseau ; données par `/api/m/bootstrap`, gardées dans une base IndexedDB **par compte** (`comanet-m-<id>`),
+14 jours au plus sans contact serveur. Le manifest est unique : `start_url` = `/m`, c'est l'écran qui s'adapte. `/m` et `/api/m` sont hors du filtre
+de session ; chaque route vérifie la session et répond 401, jamais une redirection. Saisies par la file (`outbox.ts`), routes et non server actions :
+`client_event_id` sur `animations` et `client_stock_readings`, rejouer ne crée rien ; même clé métier sous un autre identifiant = conflit, écran
+« À corriger », jamais d'effacement sans décision de la personne. La validation reste `parseAnimationInput()` / `parseReadingLines()`. Position lue à
+l'enregistrement seulement (`capturePosition()`), avis `TERRAIN-1` à accepter, visible par les administrateurs seuls sur `/terrain/[id]` ; sans position,
+la saisie passe, marquée. Service worker : `/sw.js` est une route (`src/app/sw.js/route.ts`), même adresse que l'ancien fichier statique ; il ne précharge
+que la coquille ; Ma journée et Ma tournée, seules pages authentifiées gardées, vont dans le cache `comanet-user`, vidé à la déconnexion. Les visites gardent
+`fieldQueue()`, qui porte désormais `userId` (`WRONG_USER` côté serveur). Session 30 jours glissants (`src/proxy.ts`), une ligne par appareil, révocation
+depuis la fiche utilisateur ; `settings.mobile.adminIdleMinutes` déconnecte les téléphones des administrateurs, jamais le poste de bureau. P1a livrée : Animatrice.
+Reste P1b (Commercial), P2 (Déléguées sous `/m`, brief, validations, Web Push), P3 (scan, adoption, mode sombre).
 
 **P&L** (`/gestion/pnl`, section du `docs/guide-gestion-commerciale.md`, migration 0031). Réservé aux administrateurs
 (`requireAdmin()` : salaires). Compte de résultat mensuel HT : CA = ventes directes (sites de `settings.pnl.directSites`)

@@ -91,6 +91,8 @@ export type ComanetSettings = {
   medicalField: MedicalFieldSettings;
   /** CRM commercial : fréquences par défaut, alertes de visite et d'objectif client, contrôle de présence des visites. */
   crm: CrmSettings;
+  /** App mobile : déconnexion après inactivité, contrôle de la position à la saisie terrain. */
+  mobile: MobileSettings;
   /** Gestion commerciale : identité de la société imprimée sur les pièces, politiques, bascule depuis Sage. */
   gestion: GestionSettings;
   /** P&L de gestion : quels sites de vente sont du CA COMANET, lesquels sont des prestations commissionnées. */
@@ -479,6 +481,15 @@ export type CrmSettings = {
   gpsTimeoutS: number;
 };
 
+export type MobileSettings = {
+  /** Déconnexion du téléphone d'un administrateur après N minutes sans activité. 0 = jamais. Vaut pour les connexions suivantes. */
+  adminIdleMinutes: number;
+  /** Délai accordé au téléphone pour donner sa position à l'enregistrement d'une saisie terrain (secondes). */
+  gpsTimeoutS: number;
+};
+
+export const DEFAULT_MOBILE: MobileSettings = { adminIdleMinutes: 30, gpsTimeoutS: 8 };
+
 export const DEFAULT_CRM: CrmSettings = {
   defaultFrequencyByType: { PHARMACIE: 1, PARAPHARMACIE: 1, GROSSISTE: 2, AUTRE: 0 },
   countedKinds: ["VISITE"],
@@ -819,6 +830,7 @@ export const DEFAULT_SETTINGS: ComanetSettings = {
   clientStock: DEFAULT_CLIENT_STOCK,
   medicalField: DEFAULT_MEDICAL_FIELD,
   crm: DEFAULT_CRM,
+  mobile: DEFAULT_MOBILE,
   gestion: DEFAULT_GESTION,
   pnl: DEFAULT_PNL,
   forecast: DEFAULT_FORECAST,
@@ -850,6 +862,7 @@ export function mergeSettings(stored: Partial<ComanetSettings> | null | undefine
     clientStock: { ...DEFAULT_CLIENT_STOCK, ...(stored.clientStock ?? {}) },
     medicalField: { ...DEFAULT_MEDICAL_FIELD, ...(stored.medicalField ?? {}), tourWeights: { ...DEFAULT_MEDICAL_FIELD.tourWeights, ...(stored.medicalField?.tourWeights ?? {}) } },
     crm: mergeCrm(stored.crm),
+    mobile: { ...DEFAULT_MOBILE, ...(stored.mobile ?? {}) },
     gestion: mergeGestion(stored.gestion),
     pnl: { ...DEFAULT_PNL, ...(stored.pnl ?? {}) },
     forecast: mergeForecast(stored.forecast),

@@ -10,6 +10,7 @@ import type { SessionUser } from "@/lib/auth";
 import { Sidebar, isActive } from "./sidebar";
 import { NavIcon } from "./nav-icons";
 import { CopilotPanel } from "@/components/ai/copilot-panel";
+import { SessionGuard } from "@/components/mobile/session-guard";
 
 export function AppShell({ groups, tabs, user, logout, canSearch, preview, unread = 0, copilot, children }: {
   groups: NavGroup[];
@@ -44,6 +45,7 @@ export function AppShell({ groups, tabs, user, logout, canSearch, preview, unrea
 
   return (
     <div className="min-h-dvh flex">
+      {!preview && <SessionGuard userId={user.id} />}
       {/* Sidebar desktop */}
       <aside className="hidden lg:flex w-[248px] shrink-0 border-r border-line bg-surface sticky top-0 h-dvh">
         <div className="w-full"><Sidebar groups={groups} user={user} logout={logout} /></div>
@@ -112,13 +114,13 @@ export function AppShell({ groups, tabs, user, logout, canSearch, preview, unrea
             {tabs.map((t) => {
               const active = isActive(pathname, t.href, t.exact);
               return (
-                <Link key={t.href} href={t.href} className={clsx("flex flex-col items-center gap-1 py-2 text-[10.5px] font-medium", active ? "text-accent" : "text-muted")}>
+                <Link key={t.href} href={t.href} className={clsx("flex flex-col items-center justify-center gap-1 min-h-[52px] py-1.5 text-[10.5px] font-medium whitespace-nowrap", active ? "text-accent" : "text-muted")}>
                   <NavIcon name={t.icon} size={20} strokeWidth={active ? 2.2 : 1.8} />
                   {t.label}
                 </Link>
               );
             })}
-            <button onClick={() => setOpen(true)} className="flex flex-col items-center gap-1 py-2 text-[10.5px] font-medium text-muted">
+            <button onClick={() => setOpen(true)} className="flex flex-col items-center justify-center gap-1 min-h-[52px] py-1.5 text-[10.5px] font-medium text-muted">
               <Menu size={20} strokeWidth={1.8} />
               Plus
             </button>

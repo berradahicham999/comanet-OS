@@ -7,7 +7,8 @@ import { describeMatrix } from "@/lib/permissions-shared";
 import { PageHeader, Card, Badge } from "@/components/ui";
 import { PermissionMatrix } from "@/components/permission-matrix";
 import { fmtDate } from "@/lib/format";
-import { saveConfigAction, updateProfileAction, setActiveAction, duplicateUserAction, previewAsAction } from "../actions";
+import { saveConfigAction, updateProfileAction, setActiveAction, duplicateUserAction, previewAsAction, revokeSessionAction } from "../actions";
+import { activeSessions } from "@/lib/sessions";
 import { ChangeDetail } from "@/components/permission-change";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +20,7 @@ const OK: Record<string, string> = {
   suspendu: "Compte suspendu : il ne peut plus se connecter, ses données et sa configuration sont conservées.",
   reactive: "Compte réactivé.",
   duplique: "Compte créé à partir de la configuration source.",
+  appareil: "Appareil déconnecté. Les données locales s'effacent à son prochain contact avec le serveur.",
 };
 
 export default async function UserAdminPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ ok?: string; error?: string }> }) {
@@ -27,7 +29,7 @@ export default async function UserAdminPage(props: { params: Promise<{ id: strin
   const sp = await props.searchParams;
   const cfg = await getUserConfig(id);
   if (!cfg) notFound();
-  const [templates, options, history, all] = await Promise.all([listTemplates(), assignmentOptions(), listPermissionAudit({ targetId: id, limit: 30 }), listAdminUsers({ includeSuspended: false })]);
+  const [templates, options, history, all, devices] = await Promise.all([listTemplates(), assignmentOptions(), listPermissionAudit({ targetId: id, limit: 30 }), listAdminUsers({ includeSuspended: false }), activeSessions(id)]);
   const isSelf = me.id === id;
   const otherAdmins = all.filter((u) => u.isAdmin && u.id !== id).length;
   const lastAdmin = cfg.perms.administration.validate && otherAdmins === 0;
@@ -97,6 +99,29 @@ export default async function UserAdminPage(props: { params: Promise<{ id: strin
               <label className="block"><span className="label block mb-1">Nouveau mot de passe</span><input name="password" type="password" className="input h-9" placeholder="(inchangé)" minLength={8} /></label>
               <div className="text-right"><button className="btn-secondary btn-sm" type="submit">Enregistrer le profil</button></div>
             </form>
+          </Card>
+
+          <Card title="Appareils connectés">
+            {devices.length === 0 ? <p className="text-[12.5px] text-muted">Aucun appareil connecté depuis la mise en service de cette liste.</p> : (
+              <ul className="space-y-2">
+                {devices.map((d) => (
+                  <li key={d.id} className="flex items-center justify-between gap-2 text-[12.5px]">
+                    <span className="min-w-0"><span className="block truncate font-medium">{d.deviceLabel ?? "Appareil"}</span><span className="text-muted">Dernier passage le {fmtDate(d.lastSeenAt)}</span></span>
+                    <form action={revokeSessionAction}>
+                      <input type="hidden" name="id" value={id} />
+                      <input type="hidden" name="sessionId" value={d.id} />
+                      <button className="btn-secondary btn-sm text-red" type="submit">Déconnecter</button>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {devices.length > 1 && (
+              <form action={revokeSessionAction} className="mt-2">
+                <input type="hidden" name="id" value={id} />
+                <button className="btn-secondary btn-sm text-red w-full" type="submit">Déconnecter tous les appareils</button>
+              </form>
+            )}
           </Card>
 
           {!isSelf && (

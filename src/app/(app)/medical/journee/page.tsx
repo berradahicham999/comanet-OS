@@ -59,6 +59,7 @@ export default async function JourneePage(props: { searchParams: Promise<{ docto
 
   const r = runningRes.rows[0] as { id: string; doctor_id: string; doctor_name: string; started_at: string; start_ref: string | null } | undefined;
   const data: DayData = {
+    userId: user.id,
     day,
     accepted,
     gpsTimeoutS: settings.gpsTimeoutS,

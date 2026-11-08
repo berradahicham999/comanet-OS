@@ -49,3 +49,9 @@ next-env.d.ts
 
 # Claude desktop app
 /Claude outputs/
+
+# App Android (DEPLOY_MOBILE.md) : le keystore ne quitte jamais le poste, le projet généré se recrée depuis twa/twa-manifest.json
+*.keystore
+*.jks
+/twa/*
+!/twa/twa-manifest.json
