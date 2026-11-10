@@ -216,7 +216,7 @@ maison. Écritures autorisées : tables `ai_*` et une tâche au statut `PROPOSED
 Réponses en quatre blocs Donnée / Analyse / Hypothèse / Recommandation ; zéro chiffre hors `tool_result` ; sell-in et
 sell-out toujours nommés, jamais additionnés. System prompt versionné dans `src/lib/ai/prompts/copilot.md` (bloc mis en
 cache), clé et modèles en variables d'environnement, limites dans `settings.ai` (`/parametres/ia`). Surfaces : panneau
-⌘K (`/api/ai/chat`, SSE), « Expliquer » sur les cartes (`explain.ts`, cache 1 h), brief du matin (`brief.ts`, cache
+⌘K (`/api/ai/chat`, SSE), « Expliquer » sur les cartes (`explain.ts`, cache 1 h), brief du matin (`brief.ts`, désactivé par défaut : `settings.ai.morningBrief`, cache
 quotidien, administrateurs), « Détailler » sur l'Action Center (`plans.ts`), rapports (`reports.ts`, module `rapports`).
 Ouvert aux profils hors portée OWN (`copilotAllowed()`).
 

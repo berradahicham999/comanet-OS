@@ -15,6 +15,7 @@ import { isAiConfigured } from "@/lib/ai/client";
 import { getMorningBrief } from "@/lib/ai/brief";
 import { listPlans } from "@/lib/ai/plans";
 import { isAdmin } from "@/lib/permissions-shared";
+import { getSettings } from "@/lib/settings";
 import { canDismiss } from "@/lib/rules/dismissals-shared";
 
 export const dynamic = "force-dynamic";
@@ -36,8 +37,9 @@ export default async function CockpitPage() {
   const explain = (card: string, title: string, values: { label: string; value: string }[], period: string, tools: string[]) =>
     explainOn ? <ExplainButton context={{ surface: "cockpit", card, title, values, period: { label: period, start: d.monthRange.start, end: d.monthRange.end }, tools }} /> : undefined;
   const toDate = `${monthLabel} — à date (${d.proj.day}/${d.proj.daysInMonth} jours)`;
-  // Brief du matin (direction) : on ne lit ici que le cache du jour ; la génération, plus lente, se fait côté client à l'ouverture.
-  const briefOn = isAdmin(perms) && isAiConfigured();
+  // Brief du matin (direction), seulement s'il est activé dans Paramètres → Copilote IA : on ne lit ici que le
+  // cache du jour ; la génération, plus lente, se fait côté client à l'ouverture.
+  const briefOn = isAdmin(perms) && isAiConfigured() && (await getSettings()).ai.morningBrief;
   const brief = briefOn ? await getMorningBrief({ generate: false }).catch(() => null) : null;
   const plans = explainOn ? await listPlans(topRecs.map((r) => r.key)) : new Map();
 
