@@ -13,6 +13,7 @@ import { getAccess } from "@/lib/permissions";
 import { isAdmin } from "@/lib/permissions-shared";
 import { MODULE_KEYS } from "@/lib/access-shared";
 import { addDays, iso, today } from "@/lib/format";
+import { getSettings } from "@/lib/settings";
 import { isAiConfigured } from "./client";
 import { askCopilot, CopilotError } from "./service";
 import { parseBrief, type BriefResult, type MorningBrief } from "./brief-shared";
@@ -56,6 +57,7 @@ export async function briefAllowed(): Promise<{ ok: boolean; userId: string | nu
 
 export async function getMorningBrief(opts: { generate?: boolean; force?: boolean } = {}): Promise<BriefResult> {
   if (!isAiConfigured()) return { ok: false, error: "Copilote non configuré (ANTHROPIC_API_KEY absente).", configured: false };
+  if (!(await getSettings()).ai.morningBrief) return { ok: false, error: "Le brief du matin est désactivé (Paramètres → Copilote IA).", configured: false };
   const who = await briefAllowed();
   if (!who.ok || !who.userId) return { ok: false, error: "Le brief du matin est réservé à la direction.", configured: true };
   const key = briefCacheKey(who.userId, iso(today()));

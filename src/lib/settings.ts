@@ -583,6 +583,11 @@ export type AiSettings = {
   timeoutSeconds: number;
   /** Durée de cache d'une explication de carte, en minutes. */
   explainCacheMinutes: number;
+  /**
+   * Brief du matin en haut du Cockpit (administrateurs). Désactivé par défaut : sa génération (appel IA de
+   * plusieurs dizaines de secondes) bloquait les autres actions du Cockpit à l'ouverture.
+   */
+  morningBrief: boolean;
 };
 
 export const DEFAULT_AI_SETTINGS: AiSettings = {
@@ -592,6 +597,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   maxToolCalls: 8,
   timeoutSeconds: 60,
   explainCacheMinutes: 60,
+  morningBrief: false,
 };
 
 /**

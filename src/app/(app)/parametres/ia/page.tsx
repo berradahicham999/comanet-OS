@@ -77,7 +77,7 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ ta
               <thead><tr><th>Variable</th><th>Valeur active</th><th>Rôle</th><th className="num">Entrée $/M</th><th className="num">Sortie $/M</th></tr></thead>
               <tbody>
                 <tr><td><code>ANTHROPIC_API_KEY</code></td><td>{configured ? "présente" : <span className="text-orange">absente</span>}</td><td>Clé d&apos;accès à l&apos;API Anthropic</td><td className="num">—</td><td className="num">—</td></tr>
-                <tr><td><code>AI_MODEL_FAST</code></td><td>{fast}</td><td>Explications de cartes, brief du matin</td><td className="num">{priceFor(fast).input}</td><td className="num">{priceFor(fast).output}</td></tr>
+                <tr><td><code>AI_MODEL_FAST</code></td><td>{fast}</td><td>Explications de cartes, brief du matin (s'il est activé)</td><td className="num">{priceFor(fast).input}</td><td className="num">{priceFor(fast).output}</td></tr>
                 <tr><td><code>AI_MODEL_ADVANCED</code></td><td>{advanced}</td><td>Questions libres, plans d&apos;exécution, rapports</td><td className="num">{priceFor(advanced).input}</td><td className="num">{priceFor(advanced).output}</td></tr>
               </tbody>
             </table>
@@ -96,6 +96,10 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ ta
               <Field name="maxToolCalls" label="Appels d'outils par question (max)" value={ai.maxToolCalls} hint="1 à 12." />
               <Field name="timeoutSeconds" label="Délai maximal d'une réponse (s)" value={ai.timeoutSeconds} hint="15 à 120." />
               <Field name="explainCacheMinutes" label="Cache d'une explication de carte (min)" value={ai.explainCacheMinutes} />
+              <label className="sm:col-span-2 lg:col-span-3 flex items-start gap-2 text-[13px]">
+                <input type="checkbox" name="morningBrief" defaultChecked={ai.morningBrief} className="mt-0.5" />
+                <span><span className="font-medium">Brief du matin sur le Cockpit</span><span className="text-[11px] text-faint block">Administrateurs uniquement. Généré à la première ouverture du Cockpit de la journée : un appel IA de plusieurs dizaines de secondes, qui ralentit les autres actions de la page pendant ce temps. Désactivé par défaut.</span></span>
+              </label>
               <div className="sm:col-span-2 lg:col-span-3"><button type="submit" className="btn-primary btn-sm">Enregistrer</button></div>
             </form>
           </Card>

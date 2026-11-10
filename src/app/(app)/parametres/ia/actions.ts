@@ -18,6 +18,7 @@ export async function saveAiSettings(formData: FormData) {
     maxToolCalls: Math.max(1, Math.min(12, Math.round(num(formData, "maxToolCalls", a.maxToolCalls)))),
     timeoutSeconds: Math.max(15, Math.min(120, Math.round(num(formData, "timeoutSeconds", a.timeoutSeconds)))),
     explainCacheMinutes: Math.max(1, Math.round(num(formData, "explainCacheMinutes", a.explainCacheMinutes))),
+    morningBrief: formData.get("morningBrief") === "on",
   };
   await saveSettings({ ...cur, ai: next });
   revalidatePath("/parametres/ia");

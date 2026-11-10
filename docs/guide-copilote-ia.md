@@ -29,7 +29,7 @@ Pour une question purement factuelle, le bloc Donnée porte la réponse et les a
 
 **« Expliquer » ✦ sur les cartes du Cockpit.** L'icône en haut à droite de chaque carte envoie au copilote exactement ce que la carte affiche (valeurs, période). Il relit la donnée par les outils et rend une explication courte. L'explication est conservée une heure pour la même combinaison de valeurs et de droits ; « Regénérer » force un recalcul.
 
-**Le brief du matin** (direction uniquement, en haut du Cockpit). Généré à la première ouverture du jour : ce qui a bougé, ce qui est à risque, les trois actions du jour. Chaque action a un bouton « Créer la tâche » : la tâche naît active, source « Copilote IA », avec le pourquoi et le résultat attendu dans sa description. Le brief est conservé la journée ; « Regénérer » le refait.
+**Le brief du matin** (direction uniquement, en haut du Cockpit). **Désactivé par défaut** : il s'active dans Paramètres → Copilote IA → Limites (« Brief du matin sur le Cockpit »). Sa génération prend plusieurs dizaines de secondes et ralentit les autres actions du Cockpit pendant ce temps. Généré à la première ouverture du jour : ce qui a bougé, ce qui est à risque, les trois actions du jour. Chaque action a un bouton « Créer la tâche » : la tâche naît active, source « Copilote IA », avec le pourquoi et le résultat attendu dans sa description. Le brief est conservé la journée ; « Regénérer » le refait.
 
 **« Détailler » sur l'Action Center.** Sur chaque recommandation, le copilote produit un plan d'exécution : pourquoi, étapes avec responsable et échéance, budget, résultat attendu, indicateur de mesure et écran où le lire. Le plan reste enregistré sur la recommandation.
 
