@@ -5,6 +5,7 @@ import { CheckCircle2 } from "lucide-react";
 import { normKey } from "@/lib/import/normalize";
 import type { LastStock, MobileProduct } from "@/lib/mobile/snapshot-shared";
 import { useMobile } from "./mobile-app";
+import { StockStepper } from "./stock-stepper";
 
 const shortDate = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
 
@@ -52,7 +53,7 @@ export function StockEditor({ client, products, favoriteIds, last }: { client: {
               <div className="text-[14px] leading-snug line-clamp-2">{p.name}</div>
               <div className="text-[12px] text-muted">{last[p.id] ? `${last[p.id].quantity} u. le ${shortDate(last[p.id].readAt)}` : "Jamais relevé"}</div>
             </div>
-            <input value={qty[p.id] ?? ""} onChange={(e) => setQty((s) => ({ ...s, [p.id]: e.target.value.replace(/\D/g, "") }))} inputMode="numeric" pattern="[0-9]*" placeholder="—" aria-label={`Stock — ${p.name}`} className="input h-12 w-16 px-1 text-center text-[16px] font-semibold shrink-0" />
+            <StockStepper value={qty[p.id] ?? ""} onChange={(v) => setQty((s) => ({ ...s, [p.id]: v }))} last={last[p.id]?.quantity ?? null} label={p.name} />
           </li>
         ))}
       </ul>
