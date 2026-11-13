@@ -10,6 +10,7 @@ import { ClientPicker } from "./client-picker";
 import { useMobile } from "./mobile-app";
 import { NoData, Skeleton } from "./mobile-shell";
 import { localDay } from "./stock-editor";
+import { StockStepper } from "./stock-stepper";
 
 /**
  * SAISIE DES VENTES — le chemin court : point de vente repris du jour, produits habituels déjà à l'écran, boutons + et −.
@@ -151,10 +152,10 @@ export function SaisieScreen() {
                 <Stepper row={r} onChange={(qty) => patch(r.productId, { qty })} />
               </div>
               {r.qty > 0 && (
-                <label className="mt-1.5 flex items-center justify-between gap-2 text-[12.5px] text-muted">
-                  <span>Reste en rayon{last[r.productId] ? ` (dernier relevé : ${last[r.productId].quantity})` : ""}</span>
-                  <input value={r.stock} onChange={(e) => patch(r.productId, { stock: e.target.value.replace(/\D/g, "") })} inputMode="numeric" pattern="[0-9]*" placeholder="—" aria-label={`Reste en rayon — ${r.name}`} className="input h-11 w-16 px-1 text-center text-[15px]" />
-                </label>
+                <div className="mt-1.5 flex items-center justify-between gap-2 text-[12.5px] text-muted">
+                  <span>Reste en rayon</span>
+                  <StockStepper size="sm" value={r.stock} onChange={(stock) => patch(r.productId, { stock })} last={last[r.productId]?.quantity ?? null} label={r.name} />
+                </div>
               )}
             </li>
           ))}
