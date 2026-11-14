@@ -4,18 +4,20 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, CloudOff, X, Check } from "lucide-react";
 import { fmtMad } from "@/lib/mobile/format";
-import { swipeDecision, UNDO_DELAY_MS, type ValidationDecision, type ValidationItem } from "@/lib/mobile/validations-shared";
+import { fmtDate } from "@/lib/format";
+import { swipeDecision, UNDO_DELAY_MS, type ValidationDecision, type ValidationItem } from "@/lib/validations/shared";
 import { useMobile } from "./mobile-app";
 import { Skeleton } from "./mobile-shell";
 
 type Pending = { item: ValidationItem; decision: "OK" | "KO"; comment: string | null };
 
-async function send(p: Pending): Promise<string | null> {
+/** `stale` : déjà tranchée ailleurs (bureau, autre téléphone) ou disparue ; la carte ne revient pas dans la file. */
+async function send(p: Pending): Promise<{ error: string; stale: boolean } | null> {
   const body: ValidationDecision = { kind: p.item.kind, id: p.item.id, decision: p.decision, comment: p.comment };
   const res = await fetch("/api/m/validations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
-  if (!res) return "Pas de réseau : décision non envoyée.";
-  const r = (await res.json().catch(() => ({ ok: false, error: "Réponse illisible." }))) as { ok: boolean; error?: string };
-  return r.ok ? null : r.error ?? "Décision refusée.";
+  if (!res) return { error: "Pas de réseau : décision non envoyée.", stale: false };
+  const r = (await res.json().catch(() => ({ ok: false, error: "Réponse illisible." }))) as { ok: boolean; error?: string; stale?: boolean };
+  return r.ok ? null : { error: r.error ?? "Décision refusée.", stale: !!r.stale };
 }
 
 /** Une décision à la fois. Glisser vers la droite valide, vers la gauche renvoie ; les boutons font la même chose. */
@@ -42,6 +44,8 @@ function Card({ item, onDecide }: { item: ValidationItem; onDecide: (d: "OK" | "
       <div className="text-[12.5px] text-muted">{item.context}</div>
       <h2 className="text-[17px] font-semibold text-ink leading-snug">{item.title}</h2>
       {item.amountMad !== null && <div className="text-[20px] font-semibold text-ink">{fmtMad(item.amountMad)}</div>}
+      {item.dueDate && <div className="text-[13.5px] text-ink-2">Échéance : {fmtDate(item.dueDate)}</div>}
+      {item.why && item.why !== item.detail && <p className="text-[14px] text-ink">{item.why}</p>}
       {item.detail && <p className="text-[14px] text-ink-2 whitespace-pre-wrap">{item.detail}</p>}
       {item.lines.length > 0 && <ul className="text-[13.5px] text-ink-2 space-y-0.5">{item.lines.map((l) => <li key={l}>{l}</li>)}</ul>}
       <Link href={item.href} prefetch={false} className="min-h-11 inline-flex items-center text-[13.5px] text-accent">Voir le détail</Link>
@@ -82,8 +86,8 @@ export function ValidationsScreen() {
     if (!p) return;
     const err = await send(p);
     if (err) {
-      setError(`${p.item.title} : ${err}`);
-      setItems((list) => (list ? [p.item, ...list] : [p.item]));
+      setError(`${p.item.title} : ${err.error}`);
+      if (!err.stale) setItems((list) => (list ? [p.item, ...list] : [p.item]));
     }
   }, []);
 
@@ -99,7 +103,9 @@ export function ValidationsScreen() {
   }
 
   function decide(item: ValidationItem, d: "OK" | "KO") {
-    if (d === "KO") { setComment(""); setAsking(item); return; }
+    // Un motif est demandé pour tout refus ; archiver un rapport lu n'en est pas un.
+    if (d === "KO" && item.needsReason) { setComment(""); setAsking(item); return; }
+    if (d === "KO") { queue({ item, decision: "KO", comment: null }); return; }
     queue({ item, decision: "OK", comment: null });
   }
 
@@ -137,7 +143,7 @@ export function ValidationsScreen() {
 
       {undo && (
         <div className="fixed inset-x-4 bottom-[calc(72px+env(safe-area-inset-bottom))] z-40 rounded-xl bg-ink text-white px-4 min-h-12 py-2 flex items-center justify-between gap-3 text-[14px]">
-          <span className="min-w-0 truncate">{undo.decision === "OK" ? "Validé" : "Renvoyé"} : {undo.item.title}</span>
+          <span className="min-w-0 truncate">{undo.decision === "OK" ? "Validé" : undo.item.kind === "RAPPORT" ? "Archivé" : "Renvoyé"} : {undo.item.title}</span>
           <button type="button" onClick={cancel} className="h-11 px-2 font-semibold shrink-0">Annuler</button>
         </div>
       )}

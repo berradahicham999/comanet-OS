@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { AlertTriangle, ArrowRight, Upload } from "lucide-react";
 import { requireAnyModule, getUserPermissions } from "@/lib/access";
 import { cockpitData } from "@/lib/cockpit";
@@ -17,12 +18,17 @@ import { listPlans } from "@/lib/ai/plans";
 import { isAdmin } from "@/lib/permissions-shared";
 import { getSettings } from "@/lib/settings";
 import { canDismiss } from "@/lib/rules/dismissals-shared";
+import { listValidations } from "@/lib/validations/queue";
+import { COCKPIT_DECISION_LIMIT, DecisionSection, DecisionSectionFallback, PendingCount } from "@/components/validations/decision-section";
 
 export const dynamic = "force-dynamic";
 
 export default async function CockpitPage() {
   const user = await requireAnyModule();
   const perms = await getUserPermissions();
+  const access = await requireAccessContext();
+  // File « À décider » : lancée tout de suite et jamais attendue ici, la page s'affiche pendant qu'elle se lit (même file que le téléphone).
+  const pending = listValidations(access);
   const [d, users] = await Promise.all([cockpitData(), listUsers()]);
   const { cmp, objective, annualObj, ytd, ytdN1, series, seriesN1 } = d.commercial;
   const mtd = cmp.current.amount;
@@ -31,7 +37,8 @@ export default async function CockpitPage() {
   const topRecs = d.recs.filter((r) => !r.existingTask).slice(0, 4);
   const critical = d.recs.filter((r) => r.priority === "CRITICAL" && !r.existingTask).length;
   const monthLabel = fmtMonth(d.refDate.ref);
-  const access = await requireAccessContext();
+  /** `null` quand le réglementaire est tenu hors du Cockpit (Paramètres → Cockpit) : la carte disparaît. */
+  const regulatory = d.regulatory;
   const explainOn = copilotAllowed(access);
   /** Bouton ✦ « Expliquer » : la carte transmet exactement ce qu'elle affiche (valeurs, période), le copilote relit par les outils. */
   const explain = (card: string, title: string, values: { label: string; value: string }[], period: string, tools: string[]) =>
@@ -48,9 +55,14 @@ export default async function CockpitPage() {
       <PageHeader
         eyebrow="COMANET TODAY"
         title={`Bonjour ${user.name.split(" ")[0]}`}
-        subtitle={<>{fmtDateLong(d.refDate.ref)} · {critical > 0 ? <span className="text-red font-medium">{critical} action{critical > 1 ? "s" : ""} critique{critical > 1 ? "s" : ""}</span> : "aucune action critique"} · {d.recs.filter((r) => !r.existingTask).length} recommandations ouvertes</>}
+        subtitle={<>{fmtDateLong(d.refDate.ref)} · <Suspense fallback="lecture des décisions…"><PendingCount pending={pending} /></Suspense> · {critical > 0 ? <span className="text-red font-medium">{critical} action{critical > 1 ? "s" : ""} critique{critical > 1 ? "s" : ""}</span> : "aucune action critique"} · {d.recs.filter((r) => !r.existingTask).length} recommandations ouvertes</>}
         actions={<Link href="/actions" className="btn-primary">Action Center <ArrowRight size={16} /></Link>}
       />
+
+      {/* ---------------- À décider : tout ce qui attend l'accord de la direction ---------------- */}
+      <Suspense fallback={<DecisionSectionFallback />}>
+        <DecisionSection pending={pending} readOnly={!!access.preview} limit={COCKPIT_DECISION_LIMIT} showEmpty={isAdmin(perms)} />
+      </Suspense>
 
       {d.refDate.staleDays > 3 && (
         <div className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl border border-yellow/30 bg-yellow-soft px-4 py-3 text-[13px]">
@@ -130,7 +142,7 @@ export default async function CockpitPage() {
       </Section>}
 
       {/* ---------------- Blocs opérationnels : chaque carte suit le module correspondant ---------------- */}
-      {(perms.budgets.view || perms.terrain.view || perms.marketing.view || perms.reglementaire.view || perms.stock.view) && <Section title="Pilotage" description="Marketing · Terrain · Digital · Réglementaire · Stock">
+      {(perms.budgets.view || perms.terrain.view || perms.marketing.view || (regulatory && perms.reglementaire.view) || perms.stock.view) && <Section title="Pilotage" description={regulatory ? "Marketing · Terrain · Digital · Réglementaire · Stock" : "Marketing · Terrain · Digital · Stock"}>
         <div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-3">
           {perms.budgets.view && <Card href="/marketing" title="Marketing" explain={explain("marketing", "Budget marketing", [{ label: "Disponible", value: fmtMAD(d.marketing.available) }, { label: "Enveloppe", value: fmtMAD(d.marketing.budget) }, { label: "Engagé", value: fmtMAD(d.marketing.engaged) }, { label: "Dépensé", value: fmtMAD(d.marketing.spent) }], `Année ${d.year}`, ["get_marketing_budget"])}>
             <div className="kpi">{fmtMAD(d.marketing.available, { compact: true })}</div>
@@ -172,14 +184,14 @@ export default async function CockpitPage() {
             </div>
           </Card>}
 
-          {perms.reglementaire.view && <Card href="/reglementaire" title="Réglementaire" explain={explain("reglementaire", "Réglementaire", [{ label: "Critiques", value: String(d.regulatory.critical) }, { label: "À redéposer ≤ 90 j", value: String(d.regulatory.soon) }, { label: "Certificats CE à obtenir", value: String(d.regulatory.certificates) }, { label: "Non déposés / bloqués", value: String(d.regulatory.blocked) }], "Aujourd'hui", ["get_regulatory_alerts"])}>
-            <div className="kpi text-red">{d.regulatory.critical} <span className="text-[14px] font-medium text-muted">critique{d.regulatory.critical > 1 ? "s" : ""}</span></div>
+          {regulatory && perms.reglementaire.view && <Card href="/reglementaire" title="Réglementaire" explain={explain("reglementaire", "Réglementaire", [{ label: "Critiques", value: String(regulatory.critical) }, { label: "À redéposer ≤ 90 j", value: String(regulatory.soon) }, { label: "Certificats CE à obtenir", value: String(regulatory.certificates) }, { label: "Non déposés / bloqués", value: String(regulatory.blocked) }], "Aujourd'hui", ["get_regulatory_alerts"])}>
+            <div className="kpi text-red">{regulatory.critical} <span className="text-[14px] font-medium text-muted">critique{regulatory.critical > 1 ? "s" : ""}</span></div>
             <div className="text-[12px] text-muted mt-1">expirés ou ≤ 30 jours</div>
             <div className="mt-3 space-y-1 text-[12px]">
-              <div className="flex justify-between"><span className="text-muted">À redéposer ≤ 90 j</span><span className="font-medium">{d.regulatory.soon}</span></div>
-              <div className="flex justify-between"><span className="text-muted">Certificats (CE) à obtenir</span><span className="font-medium">{d.regulatory.certificates}</span></div>
-              <div className="flex justify-between"><span className="text-muted">Non déposés / bloqués</span><span className="font-medium">{d.regulatory.blocked}</span></div>
-              <div className="flex justify-between"><span className="text-muted">Dossiers suivis</span><span className="font-medium">{d.regulatory.total}</span></div>
+              <div className="flex justify-between"><span className="text-muted">À redéposer ≤ 90 j</span><span className="font-medium">{regulatory.soon}</span></div>
+              <div className="flex justify-between"><span className="text-muted">Certificats (CE) à obtenir</span><span className="font-medium">{regulatory.certificates}</span></div>
+              <div className="flex justify-between"><span className="text-muted">Non déposés / bloqués</span><span className="font-medium">{regulatory.blocked}</span></div>
+              <div className="flex justify-between"><span className="text-muted">Dossiers suivis</span><span className="font-medium">{regulatory.total}</span></div>
             </div>
           </Card>}
 

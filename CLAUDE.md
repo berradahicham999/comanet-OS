@@ -155,7 +155,10 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Métier sur le téléphone (déduit des droits, jamais de `users.role`) et onglets | `src/lib/mobile/persona.ts` + `src/components/nav-config.ts` | `personaOf()`, `mobileTabsForPermissions()` |
 | File d'envoi de l'app mobile (état d'une saisie, rejeu, conflit) et saisies rejouées | `src/lib/mobile/outbox-shared.ts` + `outbox.ts` + `mutations.ts` | `settle()`, `sendable()`, `flushOutbox()`, `applyMutation()` (seule entrée des saisies du téléphone) |
 | Référentiels gardés sur le téléphone (portée, durée de vie), fiche courte d'un client, pack conseillé | `src/lib/mobile/snapshot.ts` + `snapshot-shared.ts` + `outbox-shared.ts` | `mobileSnapshot()`, `clientSheet()`, `sortPortfolio()`, `deliverablePack()`, `snapshotExpired()` |
-| File unique de validation du téléphone (contenus, activations, pièces bloquées) | `src/lib/mobile/validations.ts` + `validations-shared.ts` | `listValidations()`, `decideValidation()`, `swipeDecision()` |
+| File unique « À décider » de la direction, lue par le téléphone ET le Cockpit (contenus, dépenses par activation, pièces bloquées, décisions d'agents, rapports à lire, décisions marketing critiques ou hautes) | `src/lib/validations/shared.ts` + `queue.ts` | `listValidations()`, `decideValidation()` (ne font que déléguer aux écritures officielles de chaque file), `sortValidations()` (échéance puis montant), `readDecision()`, `swipeDecision()` |
+| Décision d'agent portée par un rapport (`ai_reports.sources.decisions[]`, contrat dans `docs/contrat-decisions-agents.md`) | `src/lib/ai/report-decisions-shared.ts` + `report-decisions.ts` | `parseAgentDecisions()`, `decisionStates()`, `withOutcome()` (bascule VALIDATED), `resolveOwner()`, `normalizeReportStatus()`, `decideReportDecision()` (seule écriture de `sources.outcomes`), `draftReports()` |
+| Création d'une tâche active | `src/lib/tasks.ts` | `createTask()`, `notifyTaskAssigned()` |
+| Ce que le pilotage de direction ne montre pas (réglementaire hors Cockpit, brief, rapports) | `src/lib/rules/visibility.ts` | `hiddenRuleIds()`, `hiddenTools()`, `directionRecommendations()` |
 | Web Push (abonnements, envoi) et relances | `src/lib/mobile/push.ts` + `push-shared.ts` + `reminders.ts` | `saveSubscription()`, `sendPush()` (seules écritures et seul envoi), `validEndpoint()`, `reminderDue()`, `runMobileCron()` |
 | Journée d'une déléguée (bureau et téléphone), lecture d'un compte rendu | `src/lib/medical/day.ts` + `report-input.ts` | `delegateDay()`, `visitHistory()`, `readReport()` |
 | Service worker (ce qui est mis en cache, et ce qui ne l'est jamais) | `src/lib/mobile/sw-source.ts` | `swSource()` |
@@ -219,6 +222,18 @@ cache), clé et modèles en variables d'environnement, limites dans `settings.ai
 ⌘K (`/api/ai/chat`, SSE), « Expliquer » sur les cartes (`explain.ts`, cache 1 h), brief du matin (`brief.ts`, désactivé par défaut : `settings.ai.morningBrief`, cache
 quotidien, administrateurs), « Détailler » sur l'Action Center (`plans.ts`), rapports (`reports.ts`, module `rapports`).
 Ouvert aux profils hors portée OWN (`copilotAllowed()`).
+
+**Cockpit « À décider »** (`docs/contrat-decisions-agents.md`). Le haut du Cockpit est un poste de décision : une seule zone, la même file
+que `/m/validations` (`src/lib/validations/`), triée par échéance puis montant, dix lignes puis `/a-decider`. Chaque ligne passe par
+l'écriture officielle de sa file, qui revérifie les droits : `transition()`, `transitionActivation()`, `validateAndRender()`,
+`decideReportDecision()` / `setReportStatus()` (Rapports → Valider), `approveDecision()` / `rejectDecision()` (Marketing Créer / Modifier,
+décisions PROPOSED critiques ou hautes, « ne pas pousser » exclu). Un refus exige un motif (sauf archiver un rapport lu). Les agents
+externes écrivent `ai_reports` avec un `type` libre et un statut en minuscules (`draft`) : toujours lire le statut par
+`normalizeReportStatus()`. Une décision d'agent validée crée une tâche (`createTask()`, source AI, `source_key` `rapport:<id>:<décision>`),
+son sort s'écrit dans `sources.outcomes` sous verrou de ligne, et le rapport passe VALIDATED quand tout est tranché ; aucune table
+nouvelle. Un montant absent s'affiche « — ». **Réglementaire hors du Cockpit** : `settings.cockpit.hideRegulatory` (activé par défaut,
+Paramètres → Cockpit) retire la carte, la règle `regulatory-expiry` du Cockpit, et la section, la règle et l'outil
+`get_regulatory_alerts` du brief du matin et des rapports ; le module Réglementaire et l'Action Center ne changent pas.
 
 **Agent marketing** (`docs/guide-agent-marketing.md`). Le copilote avec la persona marketing
 (`src/lib/ai/prompts/marketing-agent.md`) et dix outils de lecture (`src/lib/ai/tools/marketing-*.ts`) posés sur la

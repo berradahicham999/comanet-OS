@@ -154,6 +154,8 @@ export type ToolContext = {
   deps: ToolDeps;
   /** Message assistant en cours, pour rattacher le journal (optionnel). */
   messageId?: string | null;
+  /** Règles de l'Action Center que cette surface ne remonte pas (brief, rapports : `hiddenRuleIds()`). */
+  hiddenRules?: string[];
 };
 
 /** Résultat compact renvoyé au modèle. `source` nomme toujours la réalité mesurée (sell-in Sage, sell-out animatrices…). */

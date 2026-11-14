@@ -14,17 +14,19 @@ import { isAdmin } from "@/lib/permissions-shared";
 import { MODULE_KEYS } from "@/lib/access-shared";
 import { addDays, iso, today } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
+import { hiddenRuleIds, hiddenTools } from "@/lib/rules/visibility";
 import { isAiConfigured } from "./client";
 import { askCopilot, CopilotError } from "./service";
 import { parseBrief, type BriefResult, type MorningBrief } from "./brief-shared";
 
-const INSTRUCTIONS = `Brief du matin pour la direction générale de COMANET. Format imposé, en Markdown réduit :
-1. Cinq à sept lignes au total, chacune commençant par une puce « - », regroupées ainsi : ce qui a bougé (ventes sell-in du mois à date vs M-1, sell-out terrain 7 jours si disponible), ce qui est à risque (stock en rupture ou en tension, dossiers réglementaires critiques, clients à risque ou en retard de commande, budget au-delà du seuil d'alerte, tâches en retard), et une ligne « Actions du jour » qui annonce les trois actions.
-2. Chaque ligne cite ses chiffres avec la source entre parenthèses (sell-in Sage, sell-out animatrices, stock, réglementaire…). Pas de bloc Donnée / Analyse / Hypothèse / Recommandation ici : le brief est une lecture rapide.
+/** `regulatory` faux = réglementaire hors du pilotage de direction (Paramètres → Cockpit) : il sort aussi des consignes. */
+const instructions = (regulatory: boolean) => `Brief du matin pour la direction générale de COMANET. Format imposé, en Markdown réduit :
+1. Cinq à sept lignes au total, chacune commençant par une puce « - », regroupées ainsi : ce qui a bougé (ventes sell-in du mois à date vs M-1, sell-out terrain 7 jours si disponible), ce qui est à risque (stock en rupture ou en tension, ${regulatory ? "dossiers réglementaires critiques, " : ""}clients à risque ou en retard de commande, budget au-delà du seuil d'alerte, tâches en retard), et une ligne « Actions du jour » qui annonce les trois actions.
+2. Chaque ligne cite ses chiffres avec la source entre parenthèses (sell-in Sage, sell-out animatrices, stock${regulatory ? ", réglementaire" : ""}…). Pas de bloc Donnée / Analyse / Hypothèse / Recommandation ici : le brief est une lecture rapide.
 3. Termine OBLIGATOIREMENT par un bloc de code JSON (\`\`\`json … \`\`\`) et rien après, de la forme :
 {"actions":[{"title":"…","why":"…","assignee_role":"…","due_in_days":3,"priority":"HIGH","module":"stock","expected":"…"}]}
 avec exactement trois actions (ou moins si les données ne justifient pas trois actions), triées par urgence. \`module\` est l'un de : ${MODULE_KEYS.join(", ")}. \`priority\` est LOW, MEDIUM, HIGH ou CRITICAL. \`why\` cite la donnée exacte. \`expected\` dit le résultat attendu et comment le mesurer.
-4. Appelle d'abord get_action_center, puis les outils nécessaires (au plus six) ; n'invente rien, une donnée absente se dit « non disponible ». Aucune écriture (pas de propose_task : la direction crée les tâches d'un clic depuis le brief).`;
+4. Appelle d'abord get_action_center, puis les outils nécessaires (au plus six) ; n'invente rien, une donnée absente se dit « non disponible ». Aucune écriture (pas de propose_task : la direction crée les tâches d'un clic depuis le brief).${regulatory ? "" : "\n5. Le réglementaire est suivi dans son module : n'en parle pas et ne propose aucune action réglementaire."}`;
 
 const QUESTION = "Rédige le brief du matin : qu'est-ce qui a bougé, qu'est-ce qui est à risque, quelles sont les trois actions du jour ?";
 
@@ -57,7 +59,8 @@ export async function briefAllowed(): Promise<{ ok: boolean; userId: string | nu
 
 export async function getMorningBrief(opts: { generate?: boolean; force?: boolean } = {}): Promise<BriefResult> {
   if (!isAiConfigured()) return { ok: false, error: "Copilote non configuré (ANTHROPIC_API_KEY absente).", configured: false };
-  if (!(await getSettings()).ai.morningBrief) return { ok: false, error: "Le brief du matin est désactivé (Paramètres → Copilote IA).", configured: false };
+  const settings = await getSettings();
+  if (!settings.ai.morningBrief) return { ok: false, error: "Le brief du matin est désactivé (Paramètres → Copilote IA).", configured: false };
   const who = await briefAllowed();
   if (!who.ok || !who.userId) return { ok: false, error: "Le brief du matin est réservé à la direction.", configured: true };
   const key = briefCacheKey(who.userId, iso(today()));
@@ -69,7 +72,8 @@ export async function getMorningBrief(opts: { generate?: boolean; force?: boolea
   try {
     const out = await askCopilot({
       question: QUESTION, contextPath: "/", tier: "fast", surface: "brief", contextModule: "brief",
-      surfaceInstructions: INSTRUCTIONS, allowWrites: false, automatic: true, maxToolCalls: 6,
+      surfaceInstructions: instructions(!settings.cockpit.hideRegulatory), allowWrites: false, automatic: true, maxToolCalls: 6,
+      hiddenRules: hiddenRuleIds(settings), hiddenTools: hiddenTools(settings),
     });
     const { text, actions } = parseBrief(out.text);
     const brief: MorningBrief = { text, actions, generatedAt: new Date().toISOString(), model: out.model, createdTaskIds: {} };

@@ -90,6 +90,8 @@ export async function updateSettings(formData: FormData) {
     clientHighPotentialPercentile: num(formData, "clientHighPotentialPercentile", cur.clientHighPotentialPercentile),
     regulatoryAlertDays: String(formData.get("regulatoryAlertDays") ?? "").split(/[,\s/]+/).map(Number).filter((n) => Number.isFinite(n) && n > 0).sort((a, b) => b - a),
     regulatoryRenewalDays: num(formData, "regulatoryRenewalDays", cur.regulatoryRenewalDays),
+    // Case à cocher : absente du formulaire = décochée, mais seulement si la carte Cockpit a bien été envoyée.
+    cockpit: formData.has("cockpit_present") ? { ...cur.cockpit, hideRegulatory: formData.get("cockpit_hideRegulatory") === "on" } : cur.cockpit,
     sellOutDropPct: num(formData, "sellOutDropPct", cur.sellOutDropPct),
     budgetAlertPct: num(formData, "budgetAlertPct", cur.budgetAlertPct),
     brandDropPct: num(formData, "brandDropPct", cur.brandDropPct),
