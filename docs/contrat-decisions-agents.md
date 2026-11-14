@@ -37,13 +37,20 @@ Sans ce tableau, le rapport apparaît comme **une seule ligne « Rapport à lire
 | `why` | texte | oui | Le pourquoi, avec la donnée qui le justifie. Sa première ligne est affichée dans la file. |
 | `amount_mad` | nombre ≥ 0 ou `null` | non | Montant en dirhams. Absent ou `null` = pas de montant : affiché « — », **jamais estimé**. Un texte (`"12 000"`) rend la ligne illisible. |
 | `due_date` | `AAAA-MM-JJ` | oui | Échéance : sert au tri de la file et devient l'échéance de la tâche. |
-| `owner_role` | texte | oui | Qui doit exécuter : un rôle (`ADMIN`, `MARKETING`, `TRADE`, `REGLEMENTAIRE`, `ANIMATRICE`, `DELEGUE_MEDICAL`, `MANAGER_MEDICAL`, ou en clair : « direction », « commercial »…) ou l'adresse e-mail d'un compte. |
+| `owner_role` | texte | oui | Qui doit exécuter, du plus précis au plus large : l'adresse e-mail d'un compte, le nom d'un compte (nom complet, ou prénom porté par un seul compte actif : « Nasr »), ou un rôle (`ADMIN`, `MARKETING`, `TRADE`, `REGLEMENTAIRE`, `ANIMATRICE`, `DELEGUE_MEDICAL`, `MANAGER_MEDICAL`, ou en clair : « direction », « commercial »…). |
 | `brand_id` | UUID de `brands.id` ou `null` | non | Marque de la décision ; à défaut, celle du rapport. Sert à la portée : une décision hors du périmètre de la personne ne lui est pas proposée. |
 | `expected_kpi` | texte | oui | Résultat attendu et comment le mesurer. |
 | `review_date` | `AAAA-MM-JJ` | oui | Date à laquelle le résultat sera revu. |
 
 Le rapport est créé avec `status = 'draft'` (les minuscules sont comprises). Le `type` est libre
 (`gamarde_cmo_monthly`, `mbr_monthly`…).
+
+Écrire le JSON dans le SQL avec un délimiteur dollar (`$js$ … $js$::jsonb`) : les apostrophes du français (« l'offre ») cassent
+une chaîne entre guillemets simples. Les montants sont des nombres (`38000`), jamais du texte.
+
+**Une décision n'est déclarée qu'une fois**, par l'agent qui la porte. Un agent qui consolide (CMO groupe, responsable MBR)
+ne redéclare pas une décision déjà déclarée par un autre rapport encore en brouillon : il la cite. Le relevé de décisions
+d'une réunion (décisions déjà prises) ne porte jamais `decisions`.
 
 ## Ce que fait l'application
 

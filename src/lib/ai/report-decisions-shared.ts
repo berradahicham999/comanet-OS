@@ -154,12 +154,18 @@ const ROLE_WORDS: [UserRole, string[]][] = [
 ];
 
 /**
- * Responsable d'une tâche à partir de `owner_role` : une adresse e-mail d'un compte, sinon un rôle. Sans correspondance,
- * `null` : la tâche naît sans assigné et le rôle demandé figure dans sa description.
+ * Responsable d'une tâche à partir de `owner_role`, du plus précis au plus large : l'adresse e-mail d'un compte, le nom
+ * d'un compte (nom complet, ou prénom porté par un seul compte : « Nasr », « Oumaima (DMP) »), sinon un rôle. Sans
+ * correspondance, `null` : la tâche naît sans assigné et le responsable demandé figure dans sa description.
  */
-export function resolveOwner<U extends { id: string; email: string; role: UserRole }>(ownerRole: string, users: U[]): U | null {
+export function resolveOwner<U extends { id: string; name: string; email: string; role: UserRole }>(ownerRole: string, users: U[]): U | null {
   const key = fold(ownerRole);
   if (key.includes("@")) return users.find((u) => u.email.toLowerCase() === key) ?? null;
+  const full = users.filter((u) => fold(u.name) === key);
+  if (full.length === 1) return full[0];
+  const tokens = new Set(key.split(" "));
+  const byFirst = users.filter((u) => { const first = fold(u.name).split(" ")[0]; return !!first && tokens.has(first); });
+  if (byFirst.length === 1) return byFirst[0];
   const squashed = key.replace(/ /g, "_").toUpperCase();
   const role = ROLE_WORDS.find(([r]) => r === squashed)?.[0] ?? ROLE_WORDS.find(([, words]) => words.some((w) => ` ${key} `.includes(` ${w} `)))?.[0] ?? null;
   return role ? users.find((u) => u.role === role) ?? null : null;

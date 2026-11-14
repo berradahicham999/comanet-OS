@@ -198,9 +198,10 @@ describe("bascule du rapport en VALIDATED", () => {
 
 describe("responsable et libellés", () => {
   const users = [
-    { id: "u1", email: "direction@exemple.ma", role: "ADMIN" as const },
-    { id: "u2", email: "marketing@exemple.ma", role: "MARKETING" as const },
-    { id: "u3", email: "terrain@exemple.ma", role: "TRADE" as const },
+    { id: "u1", name: "Alice Direction", email: "direction@exemple.ma", role: "ADMIN" as const },
+    { id: "u2", name: "Bruno Marketing", email: "marketing@exemple.ma", role: "MARKETING" as const },
+    { id: "u3", name: "Chloé Terrain", email: "terrain@exemple.ma", role: "TRADE" as const },
+    { id: "u4", name: "Chloé Bis", email: "bis@exemple.ma", role: "ANIMATRICE" as const },
   ];
   test("owner_role : un rôle, en clé ou en clair", () => {
     assert.equal(resolveOwner("MARKETING", users)?.id, "u2");
@@ -211,6 +212,15 @@ describe("responsable et libellés", () => {
   test("owner_role : l'adresse d'un compte", () => {
     assert.equal(resolveOwner("Terrain@exemple.ma", users)?.id, "u3");
     assert.equal(resolveOwner("inconnu@exemple.ma", users), null);
+  });
+  test("owner_role : le nom d'un compte, complet ou par un prénom porté par un seul compte", () => {
+    assert.equal(resolveOwner("alice direction", users)?.id, "u1");
+    assert.equal(resolveOwner("Bruno", users)?.id, "u2");
+    assert.equal(resolveOwner("Bruno (créas Higgsfield)", users)?.id, "u2");
+    assert.equal(resolveOwner("Chloe Terrain", users)?.id, "u3");
+    // Prénom porté par deux comptes : ambigu, on retombe sur le rôle s'il y en a un, sinon personne.
+    assert.equal(resolveOwner("Chloé", users), null);
+    assert.equal(resolveOwner("Chloé, commerciale", users)?.id, "u3");
   });
   test("sans correspondance, personne n'est désigné d'office", () => {
     assert.equal(resolveOwner("Agence externe", users), null);
