@@ -202,8 +202,8 @@ async function medicalSnapshot(access: Access): Promise<MedicalSnapshot> {
 }
 
 async function directionSnapshot(access: Access): Promise<DirectionSnapshot> {
-  // À la demande : ce module tire les trois files de validation, inutiles aux autres métiers.
-  const { listValidations } = await import("./validations");
+  // À la demande : ce module tire toutes les files de la direction (même file que le Cockpit), inutiles aux autres métiers.
+  const { listValidations } = await import("@/lib/validations/queue");
   return { aiConfigured: isAiConfigured(), pendingValidations: (await listValidations(access)).length };
 }
 

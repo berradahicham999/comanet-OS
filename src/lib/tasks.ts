@@ -1,7 +1,9 @@
 import { sql } from "drizzle-orm";
 import { pgArray } from "@/lib/sql-array";
 import { db } from "@/db";
-import type { TaskPriority, TaskStatus } from "@/db/schema";
+import { tasks, type TaskPriority, type TaskStatus } from "@/db/schema";
+import type { DbLike } from "@/lib/events/emit";
+import { notify } from "@/lib/content/notify";
 
 export type TaskRow = {
   id: string; title: string; status: TaskStatus; priority: TaskPriority; dueDate: string | null; source: string;
@@ -12,7 +14,7 @@ export const SOURCE_LABEL: Record<string, string> = { MANUAL: "Manuelle", ACTION
 
 export function entityHref(type: string | null, id: string | null) {
   if (!type || !id) return null;
-  const map: Record<string, string> = { product: "/produits/", client: "/clients/", brand: "/marques/", regulatory: "/reglementaire/", campaign: "/marketing/campagnes/", animation: "/terrain/", content: "/marketing/planning/", activation: "/marketing/activations/", marketing_action: "/marketing/priorites/" };
+  const map: Record<string, string> = { product: "/produits/", client: "/clients/", brand: "/marques/", regulatory: "/reglementaire/", campaign: "/marketing/campagnes/", animation: "/terrain/", content: "/marketing/planning/", activation: "/marketing/activations/", marketing_action: "/marketing/priorites/", report: "/rapports/" };
   return map[type] ? map[type] + id : null;
 }
 
@@ -35,4 +37,31 @@ export async function listTasks(opts: { assigneeId?: string; brandId?: string; b
     assigneeId: x.assignee_id ? String(x.assignee_id) : null, assignee: x.assignee ? String(x.assignee) : null, brand: x.brand ? String(x.brand) : null, brandColor: x.brand_color ? String(x.brand_color) : null,
     entityType: x.entity_type ? String(x.entity_type) : null, entityId: x.entity_id ? String(x.entity_id) : null, comments: Number(x.comments), createdAt: String(x.created_at),
   }));
+}
+
+export type NewTask = {
+  title: string; description?: string | null; priority?: TaskPriority; dueDate?: string | null; assigneeId?: string | null; brandId?: string | null;
+  source?: (typeof tasks.$inferInsert)["source"]; sourceKey?: string | null; entityType?: string | null; entityId?: string | null; expectedImpact?: string | null;
+  createdById: string | null;
+};
+
+/**
+ * Création d'une tâche active (À faire), dans la transaction de l'appelant si elle est fournie. Les droits sont
+ * vérifiés par l'appelant : cette fonction n'écrit que la ligne. Prévenir l'assigné se fait après la transaction
+ * (`notifyTaskAssigned()`), pour qu'une notification ne parte jamais pour une tâche annulée par un rollback.
+ */
+export async function createTask(input: NewTask, tx: DbLike = db): Promise<{ id: string }> {
+  const title = input.title.trim();
+  if (!title) throw new Error("Le titre de la tâche est obligatoire.");
+  const [row] = await tx.insert(tasks).values({
+    title, description: input.description ?? null, priority: input.priority ?? "MEDIUM", dueDate: input.dueDate ?? null, assigneeId: input.assigneeId ?? null,
+    brandId: input.brandId ?? null, source: input.source ?? "MANUAL", sourceKey: input.sourceKey ?? null, entityType: input.entityType ?? null,
+    entityId: input.entityId ?? null, expectedImpact: input.expectedImpact ?? null, createdById: input.createdById,
+  }).returning({ id: tasks.id });
+  return { id: row.id };
+}
+
+/** Prévient la personne à qui une tâche vient d'être confiée (jamais l'auteur de l'action lui-même). */
+export async function notifyTaskAssigned(assigneeId: string, title: string, taskId: string, actorId: string | null) {
+  await notify([assigneeId], { type: "TASK_ASSIGNED", title: `Tâche assignée : ${title}`, href: `/taches/${taskId}`, entityType: "task", entityId: taskId }, { except: actorId });
 }

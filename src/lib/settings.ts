@@ -103,7 +103,20 @@ export type ComanetSettings = {
   marketingPlan: MarketingPlanSettings;
   /** Studio créatif (Intelligence contenu) : fatigue des territoires, doublons, nombre d'opportunités et de concepts, budget de test, modèles. */
   creative: CreativeSettings;
+  /** Cockpit de direction : ce qui en est tenu à l'écart (voir `src/lib/rules/visibility.ts`). */
+  cockpit: CockpitSettings;
 };
+
+export type CockpitSettings = {
+  /**
+   * Réglementaire hors du pilotage de direction : pas de carte au Cockpit, et les dossiers à traiter ne remontent ni
+   * dans les actions du Cockpit, ni dans le brief du matin, ni dans les rapports du copilote. Le module Réglementaire,
+   * l'Action Center et les tâches de la responsable ne changent pas. Activé par défaut.
+   */
+  hideRegulatory: boolean;
+};
+
+export const DEFAULT_COCKPIT: CockpitSettings = { hideRegulatory: true };
 
 /**
  * Seuils du studio créatif (`src/lib/creative/`). Les scores sont des aides à la décision ; les apprentissages exigent
@@ -846,6 +859,7 @@ export const DEFAULT_SETTINGS: ComanetSettings = {
   forecast: DEFAULT_FORECAST,
   marketingPlan: DEFAULT_MARKETING_PLAN,
   creative: DEFAULT_CREATIVE,
+  cockpit: DEFAULT_COCKPIT,
 };
 
 export const SETTINGS_KEY = "comanet.rules";
@@ -878,6 +892,7 @@ export function mergeSettings(stored: Partial<ComanetSettings> | null | undefine
     forecast: mergeForecast(stored.forecast),
     marketingPlan: { ...DEFAULT_MARKETING_PLAN, ...(stored.marketingPlan ?? {}) },
     creative: { ...DEFAULT_CREATIVE, ...(stored.creative ?? {}) },
+    cockpit: { ...DEFAULT_COCKPIT, ...(stored.cockpit ?? {}) },
   };
 }
 

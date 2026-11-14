@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireAccess, getUserPermissions, brandFilter } from "@/lib/access";
 import { can } from "@/lib/permissions-shared";
 import { listBrands } from "@/lib/users";
-import { listReports, reportPeriods, REPORT_STATUS_LABEL, REPORT_TYPE_LABEL } from "@/lib/ai/reports";
+import { listReports, reportPeriods, REPORT_STATUS_LABEL, reportTypeLabel } from "@/lib/ai/reports";
 import { isAiConfigured } from "@/lib/ai/client";
 import { PageHeader, Card, Badge, Empty } from "@/components/ui";
 import { fmtDateShort, today } from "@/lib/format";
@@ -30,7 +30,7 @@ export default async function RapportsPage() {
             <Link key={r.id} href={`/rapports/${r.id}`} className="card px-4 py-3 flex items-center gap-3 hover:border-line-2">
               <div className="min-w-0 flex-1">
                 <div className="font-medium truncate">{r.title}</div>
-                <div className="text-[12px] text-muted">{REPORT_TYPE_LABEL[r.type]}{r.brandName ? ` · ${r.brandName}` : ""} · généré le {fmtDateShort(r.createdAt)}{r.validatedAt ? ` · validé le ${fmtDateShort(r.validatedAt)}` : ""}</div>
+                <div className="text-[12px] text-muted">{reportTypeLabel(r.type)}{r.brandName ? ` · ${r.brandName}` : ""} · généré le {fmtDateShort(r.createdAt)}{r.validatedAt ? ` · validé le ${fmtDateShort(r.validatedAt)}` : ""}</div>
               </div>
               <Badge tone={tone[r.status]}>{REPORT_STATUS_LABEL[r.status]}</Badge>
             </Link>
