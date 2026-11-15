@@ -5,6 +5,7 @@ import { stockAlertLog } from "@/db/schema";
 import { notify } from "@/lib/content/notify";
 import { addDays, iso, today } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
+import { notifyNewReports } from "@/lib/ai/reports";
 import { productStocks } from "@/lib/stock";
 import { isUnderTension } from "@/lib/stock-math";
 import { ANIMATRICE_SQL } from "@/lib/users";
@@ -54,5 +55,7 @@ export async function runMobileCron(now = new Date()) {
     hour,
     reminded: hour === s.reminderHour ? await remindMissingEntries(now) : null,
     stockAlerts: hour === s.stockAlertHour ? await alertStockTension(now) : null,
+    // Chaque heure : rapports d'agents écrits en base depuis le dernier passage.
+    reports: await notifyNewReports().catch(() => null),
   };
 }

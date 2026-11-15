@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePermission } from "@/lib/access";
-import { generateReport, setReportStatus, type ReportType } from "@/lib/ai/reports";
+import { generateReport, moveReport, type ReportMove, type ReportType } from "@/lib/ai/reports";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 
@@ -19,16 +19,15 @@ export async function generateReportAction(_prev: { error?: string } | null, for
   redirect(`/rapports/${r.id}`);
 }
 
-export async function validateReportAction(formData: FormData) {
-  await requirePermission("rapports", "validate");
+/**
+ * Valider, archiver, annuler la validation ou désarchiver. Les droits sont vérifiés par `moveReport()` (administrateur
+ * compris, comme l'écran) : l'ancienne garde `requirePermission()` ignorait l'administrateur et faisait planter la page.
+ */
+export async function moveReportAction(_prev: { error?: string; ok?: boolean } | null, formData: FormData): Promise<{ error?: string; ok?: boolean }> {
   const id = str(formData, "id");
-  if (id) await setReportStatus(id, "VALIDATED");
-  revalidatePath("/rapports"); revalidatePath(`/rapports/${id}`);
-}
-
-export async function archiveReportAction(formData: FormData) {
-  await requirePermission("rapports", "edit");
-  const id = str(formData, "id");
-  if (id) await setReportStatus(id, "ARCHIVED");
-  revalidatePath("/rapports"); revalidatePath(`/rapports/${id}`);
+  const move = str(formData, "move") as ReportMove;
+  if (!id || !["VALIDATE", "ARCHIVE", "REOPEN"].includes(move)) return { error: "Action inconnue." };
+  const r = await moveReport(id, move);
+  revalidatePath("/rapports"); revalidatePath(`/rapports/${id}`); revalidatePath("/"); revalidatePath("/a-decider");
+  return r.ok ? { ok: true } : { error: r.error ?? "Rapport non modifié." };
 }
