@@ -3694,6 +3694,8 @@ export const aiReports = pgTable(
     createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
     validatedById: uuid("validated_by_id").references(() => users.id, { onDelete: "set null" }),
     validatedAt: timestamp("validated_at", { withTimezone: true }),
+    /** Rapport annoncé à la direction (`notifyNewReports()`). NULL = pas encore notifié, y compris un rapport d'agent écrit en base. */
+    notifiedAt: timestamp("notified_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("ai_reports_type_idx").on(t.type, t.periodStart), index("ai_reports_brand_idx").on(t.brandId)],

@@ -7,7 +7,7 @@ import { PageHeader, Card, Badge } from "@/components/ui";
 import { PrintButton } from "@/components/print-button";
 import { MarkdownLite } from "@/components/ai/answer-blocks";
 import { fmtDateLong, fmtDateShort } from "@/lib/format";
-import { archiveReportAction, validateReportAction } from "../actions";
+import { ReportStatusButtons } from "../report-status-buttons";
 import { decisionStates } from "@/lib/ai/report-decisions-shared";
 import { fmtDate, fmtMAD } from "@/lib/format";
 
@@ -35,8 +35,7 @@ export default async function RapportPage(props: { params: Promise<{ id: string 
           <a href={`/rapports/${r.id}/export`} className="btn-secondary btn-sm">Exporter (.md)</a>
           <PrintButton />
           {r.status === "DRAFT" && canValidate && open > 0 && <Link href="/a-decider" className="btn-primary btn-sm">Trancher {open} décision{open > 1 ? "s" : ""}</Link>}
-          {r.status === "DRAFT" && canValidate && open === 0 && <form action={validateReportAction}><input type="hidden" name="id" value={r.id} /><button type="submit" className="btn-primary btn-sm">Valider</button></form>}
-          {r.status !== "ARCHIVED" && canEdit && <form action={archiveReportAction}><input type="hidden" name="id" value={r.id} /><button type="submit" className="btn-ghost btn-sm">Archiver</button></form>}
+          <ReportStatusButtons id={r.id} status={r.status} canValidate={canValidate} canEdit={canEdit} openDecisions={open} />
         </div>} />
       {r.status === "DRAFT" && <div className="text-[12.5px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-3 print:hidden">Brouillon rédigé par {sources.length > 0 ? "le copilote IA" : "un agent"} : à relire avant validation.{sources.length > 0 ? " Les chiffres proviennent des outils de lecture listés en bas de page." : ""}</div>}
       {(proposed.decisions.length > 0 || proposed.ignored > 0) && (

@@ -1,19 +1,47 @@
 import { fmtNum, fmtPct, daysBetween, startOfMonth, addMonths } from "@/lib/format";
-import { listDoctors, buildDoctorRecommendation } from "@/lib/medical/doctors";
+import { listDoctors, buildDoctorRecommendation, computeDoctorSignal } from "@/lib/medical/doctors";
+import { groupFollowUpsByDelegate, type FollowUpDoctor } from "@/lib/medical/follow-up-shared";
 import { delegatePerformance } from "@/lib/medical/delegates";
 import { sampleForecast } from "@/lib/medical/samples";
 import type { Rule, Recommendation } from "./types";
 
-/** Médecin jamais visité ou en retard de visite au regard de sa fréquence recommandée. */
+/**
+ * Médecins jamais visités ou en retard au regard de leur fréquence recommandée : UNE carte par déléguée (et non une par
+ * médecin, ~300 cartes qui noyaient l'Action Center). La fiche du médecin garde sa propre recommandation.
+ */
 export const doctorFollowUpRule: Rule = {
   id: "medical-doctor-follow-up",
-  label: "Médecin à relancer",
-  description: "Médecin jamais visité, ou en retard par rapport à sa fréquence de visite recommandée.",
+  label: "Médecins à relancer",
+  description: "Par déléguée : médecins jamais visités, ou en retard par rapport à leur fréquence de visite recommandée.",
   async run({ settings, now }) {
     const doctors = await listDoctors();
-    return doctors
-      .map((d) => buildDoctorRecommendation(d, settings, now))
-      .filter((r): r is Recommendation => r !== null);
+    const late: FollowUpDoctor[] = [];
+    for (const d of doctors) {
+      if (!d.delegateId || !buildDoctorRecommendation(d, settings, now)) continue;
+      const signal = computeDoctorSignal(d, settings, now);
+      late.push({
+        id: d.id, name: `Dr ${d.firstName} ${d.lastName}`, delegateId: d.delegateId, delegateName: d.delegateName,
+        highPotential: d.potential === "A" || d.potential === "B", neverVisited: signal.neverVisited, daysSinceLastVisit: signal.daysSinceLastVisit,
+      });
+    }
+    return groupFollowUpsByDelegate(late).map((g): Recommendation => ({
+      key: `medical-doctor-follow-up:delegate:${g.delegateId}`,
+      rule: "medical-doctor-follow-up",
+      category: "MEDICAL",
+      priority: g.highPotential > 0 ? "HIGH" : "MEDIUM",
+      title: `${g.delegateName} — ${fmtNum(g.total)} médecin${g.total > 1 ? "s" : ""} à relancer`,
+      subtitle: g.highPotential > 0 ? `dont ${fmtNum(g.highPotential)} à fort potentiel (A/B)` : "aucun à fort potentiel",
+      facts: [
+        { label: "À relancer", value: fmtNum(g.total) },
+        { label: "Jamais visités", value: fmtNum(g.neverVisited) },
+        { label: "Potentiel A/B", value: fmtNum(g.highPotential) },
+      ],
+      why: `${fmtNum(g.total)} médecin${g.total > 1 ? "s" : ""} de son portefeuille ${g.total > 1 ? "sont" : "est"} en retard de visite ou jamais visité${g.total > 1 ? "s" : ""}. À commencer par : ${g.first.map((d) => `${d.name}${d.daysSinceLastVisit !== null ? ` (${d.daysSinceLastVisit} j)` : ""}`).join(", ")}.`,
+      action: "Construire la tournée des deux prochaines semaines en commençant par les médecins à fort potentiel.",
+      task: { title: `Tournée de relance — ${g.delegateName} (${fmtNum(g.total)} médecins)`, dueInDays: 7, role: "DELEGUE_MEDICAL", priority: g.highPotential > 0 ? "HIGH" : "MEDIUM" },
+      suggestedAssigneeId: g.delegateId,
+      entity: { type: "user", id: g.delegateId, href: `/medical/medecins?delegate=${g.delegateId}` },
+    }));
   },
 };
 

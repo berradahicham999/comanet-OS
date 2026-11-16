@@ -1,6 +1,7 @@
 import "server-only";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import webpush from "web-push";
+// web-push 4 est un module ESM sans export par défaut : `import webpush from` donnait `undefined` en production.
+import * as webpush from "web-push";
 import { db } from "@/db";
 import { pushSubscriptions } from "@/db/schema";
 import { deviceLabel } from "@/lib/sessions-shared";
