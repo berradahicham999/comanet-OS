@@ -5,13 +5,16 @@ import { db } from "@/db";
 import { clientVisits, clients, visitEvents, medicalGpsConsents } from "@/db/schema";
 import type { DbLike } from "@/lib/events/emit";
 import { audit, type AuditActor } from "@/lib/audit";
-import { getSettings, type CrmSettings } from "@/lib/settings";
+import { getSettings, type CrmSettings, type WebPlacesSettings } from "@/lib/settings";
 import { businessDay } from "@/lib/medical/chrono";
 import {
   verifyVisit, eventTime, sendDelayMs, haversineM, pointOf, canProposeCabinet, visitDurationMinutes,
   type EventForCheck, type GpsError, type VerificationStatus, type Cabinet, type PreviousStop,
 } from "@/lib/medical/gps-shared";
 import { crmCheckSettings, type ClientVisitKind } from "./visits-shared";
+import { webCheckOf } from "@/lib/places/store";
+import { webPositionAction, isOutOfZone, type GpsSource } from "@/lib/places/web-check-shared";
+import { alertOutOfZoneQuietly, type OutOfZoneInput } from "@/lib/places/out-of-zone";
 
 /**
  * CRM commercial — visites chez les clients. Seul écrivain des heures, du statut et du contrôle de
@@ -77,7 +80,8 @@ export async function clientVisitAllowed(tx: DbLike, clientId: string, actorId: 
 /** Enregistre Démarrer / Terminer / non effectuée. Idempotent : un `clientEventId` déjà reçu renvoie la visite créée. */
 export async function recordClientVisitAction(actor: CrmActor, input: CrmActionInput, opts: { scopeClientIds: string[] | null; settings?: CrmSettings }): Promise<CrmActionResult> {
   if (!input.clientEventId || input.clientEventId.length > 80) return { ok: false, code: "INVALID", message: "Identifiant d'action manquant." };
-  const s = opts.settings ?? (await getSettings()).crm;
+  const all = await getSettings();
+  const s = opts.settings ?? all.crm;
 
   const existing = await db.execute<{ client_visit_id: string | null }>(sql`select client_visit_id from visit_events where client_event_id = ${input.clientEventId}`);
   if (existing.rows[0]) {
@@ -99,9 +103,10 @@ export async function recordClientVisitAction(actor: CrmActor, input: CrmActionI
   };
   const at = eventTime(ev);
   const late = !!input.queued || sendDelayMs(ev) > 120_000;
+  let alert: OutOfZoneInput | null = null;
 
   try {
-    return await db.transaction(async (tx) => {
+    const result: CrmActionResult = await db.transaction(async (tx): Promise<CrmActionResult> => {
       let visitId: string;
       let clientId: string;
 
@@ -175,6 +180,13 @@ export async function recordClientVisitAction(actor: CrmActor, input: CrmActionI
       const place = await placeOf(tx, clientId);
       const distance = place && ev.lat !== null ? Math.round(haversineM({ lat: ev.lat, lng: ev.lng! }, place)) : null;
       await insertEvent(tx, actor, visitId, input, ev, late, distance);
+      if (place && isOutOfZone({ validated: place.validated, distanceM: distance, accuracyM: ev.accuracyM, radiusM: s.radiusM })) {
+        const n = await tx.execute<{ name: string }>(sql`select name from clients where id = ${clientId}::uuid`);
+        alert = {
+          kind: "crm", visitId, actorId: actor.id, actorName: actor.name, placeName: n.rows[0]?.name ?? "", eventType: input.type,
+          distanceM: distance!, radiusM: s.radiusM, accuracyM: ev.accuracyM, at,
+        };
+      }
 
       // Point de vente sans position : le premier Démarrer précis est proposé, à valider par le manager.
       if (input.type === "START" && !place && canProposeCabinet(ev, s)) {
@@ -182,10 +194,16 @@ export async function recordClientVisitAction(actor: CrmActor, input: CrmActionI
           gpsLat: ev.lat!.toFixed(6), gpsLng: ev.lng!.toFixed(6), gpsSource: "PREMIERE_VISITE", gpsStatus: "A_CONFIRMER", updatedAt: new Date(),
         }).where(and(eq(clients.id, clientId), sql`${clients.gpsLat} is null`));
       }
+      // Position à valider : validée d'office si Google Maps et le terrain concordent (`webPositionAction()`).
+      if (input.type === "START") {
+        await applyWebPositionToPointOfSale(tx, clientId, { crm: s, web: all.webPlaces, startPoint: canProposeCabinet(ev, s) ? pointOf(ev) : null });
+      }
 
       await refreshClientVisitVerification(tx, visitId, s);
       return { ok: true, visitId };
     });
+    if (result.ok) await alertOutOfZoneQuietly(alert);
+    return result;
   } catch (e) {
     if (String((e as { code?: string })?.code ?? "") === "23505") {
       const again = await db.execute<{ client_visit_id: string | null }>(sql`select client_visit_id from visit_events where client_event_id = ${input.clientEventId}`);
@@ -440,7 +458,7 @@ export async function validatePointOfSale(actor: CrmActor, clientId: string, pos
     const next = {
       gpsLat: moved ? position!.lat.toFixed(6) : c.gps_lat,
       gpsLng: moved ? position!.lng.toFixed(6) : c.gps_lng,
-      gpsSource: (moved ? "MANUELLE" : (c.gps_source ?? "MANUELLE")) as "MANUELLE" | "PREMIERE_VISITE",
+      gpsSource: (moved ? "MANUELLE" : (c.gps_source ?? "MANUELLE")) as "MANUELLE" | "PREMIERE_VISITE" | "INTERNET",
       gpsStatus: "VALIDEE" as const,
       gpsValidatedAt: new Date(),
       gpsValidatedBy: actor.id,
@@ -456,6 +474,39 @@ export async function validatePointOfSale(actor: CrmActor, clientId: string, pos
     for (const v of visits.rows) await refreshClientVisitVerification(tx, v.id, s);
     return { ok: true };
   });
+}
+
+/**
+ * Applique le contrôle Internet à la position du point de vente (seule écriture d'une position venue de Google) :
+ * mêmes règles que `applyWebPositionToCabinet()` (`webPositionAction()`), trace `audit_logs`, contrôles recalculés.
+ */
+export async function applyWebPositionToPointOfSale(
+  tx: DbLike,
+  clientId: string,
+  opts: { crm: CrmSettings; web: WebPlacesSettings; startPoint?: { lat: number; lng: number } | null },
+): Promise<"PROPOSE" | "VALIDATE" | null> {
+  const c = (await tx.execute<{ gps_lat: string | null; gps_lng: string | null; gps_source: GpsSource | null; gps_status: string | null; name: string }>(
+    sql`select gps_lat, gps_lng, gps_source, gps_status, name from clients where id = ${clientId}::uuid for update`,
+  )).rows[0];
+  if (!c) return null;
+  const pos = c.gps_lat === null || c.gps_lng === null ? null : { lat: Number(c.gps_lat), lng: Number(c.gps_lng), validated: c.gps_status === "VALIDEE", source: c.gps_source };
+  const action = webPositionAction(pos, await webCheckOf(tx, "client", clientId), opts.web, opts.startPoint ?? null);
+  if (!action) return null;
+  const actor = { id: null, name: "Contrôle Internet" };
+  const before = { lat: c.gps_lat, lng: c.gps_lng, source: c.gps_source, status: c.gps_status };
+  if (action.kind === "PROPOSE") {
+    const lat = action.position.lat.toFixed(6);
+    const lng = action.position.lng.toFixed(6);
+    await tx.update(clients).set({ gpsLat: lat, gpsLng: lng, gpsSource: "INTERNET", gpsStatus: "A_CONFIRMER", updatedAt: new Date() })
+      .where(and(eq(clients.id, clientId), sql`${clients.gpsLat} is null`));
+    await audit({ actor, action: "UPDATE", module: "clients", entity: "client_position", entityId: clientId, label: `Point de vente ${c.name} : ${action.label}`, before, after: { lat, lng, source: "INTERNET", status: "A_CONFIRMER" } }, tx);
+  } else {
+    await tx.update(clients).set({ gpsStatus: "VALIDEE", gpsValidatedAt: new Date(), gpsValidatedBy: null, updatedAt: new Date() }).where(eq(clients.id, clientId));
+    await audit({ actor, action: "VALIDATE", module: "clients", entity: "client_position", entityId: clientId, label: `Point de vente ${c.name} : ${action.label}`, before, after: { ...before, status: "VALIDEE" } }, tx);
+  }
+  const visits = await tx.execute<{ id: string }>(sql`select id from client_visits where client_id = ${clientId}::uuid and timing_source = 'CHRONO'`);
+  for (const v of visits.rows) await refreshClientVisitVerification(tx, v.id, opts.crm);
+  return action.kind;
 }
 
 /* ------------------------------------------------------------------ */

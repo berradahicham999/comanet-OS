@@ -15,7 +15,9 @@ export type NotificationType =
   // Gestion commerciale
   | "APPROVAL_REQUESTED"
   // App mobile
-  | "TASK_ASSIGNED" | "STOCK_ALERT" | "SAISIE_REMINDER" | "ORDER_DRAFT";
+  | "TASK_ASSIGNED" | "STOCK_ALERT" | "SAISIE_REMINDER" | "ORDER_DRAFT"
+  // Contrôle des positions (`src/lib/places/`)
+  | "VISIT_OUT_OF_ZONE" | "PLACE_WEB_GAP";
 
 export type NotifyInput = { type: NotificationType; title: string; body?: string | null; href?: string | null; entityType?: string; entityId?: string | null };
 

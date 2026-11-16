@@ -1,8 +1,8 @@
-import { requireAccess } from "@/lib/access";
+import { requireAccess, canDo } from "@/lib/access";
 import { getSettings } from "@/lib/settings";
 import { PageHeader, Card } from "@/components/ui";
-import { updateMedicalSettings, updateMedicalFieldSettings } from "./actions";
-import { DEFAULT_MEDICAL_FIELD } from "@/lib/settings";
+import { updateMedicalSettings, updateMedicalFieldSettings, updateWebPlacesSettings } from "./actions";
+import { DEFAULT_MEDICAL_FIELD, DEFAULT_WEB_PLACES } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Paramétrage médical" };
@@ -22,6 +22,9 @@ export default async function MedicalParametragePage() {
   const s = await getSettings();
   const f = s.medicalField;
   const D = DEFAULT_MEDICAL_FIELD;
+  const w = s.webPlaces;
+  const W = DEFAULT_WEB_PLACES;
+  const admin = await canDo("administration", "validate");
 
   return (
     <>
@@ -75,6 +78,26 @@ export default async function MedicalParametragePage() {
           <div className="sm:col-span-3"><button className="btn-primary" type="submit">Enregistrer</button></div>
         </form>
       </Card>
+
+      {admin && (
+        <Card className="max-w-3xl mt-6" title="Positions vérifiées sur Internet et alerte hors zone (médecins et points de vente)">
+          <form action={updateWebPlacesSettings} className="grid sm:grid-cols-3 gap-3">
+            <Field name="concordanceM" label="Concordance avec Google (m)" value={w.concordanceM} hint={`Position de la fiche et lieu Google à moins de cette distance = concordent. Défaut ${W.concordanceM}.`} />
+            <Field name="minNameScore" label="Ressemblance du nom (0-1)" value={w.minNameScore} step="0.05" hint={`Lieu Google retenu à partir de ce score. Défaut ${W.minNameScore}.`} />
+            <Field name="batchPerRun" label="Fiches vérifiées par heure" value={w.batchPerRun} hint={`0 = pause. Chaque recherche est facturée par Google. Défaut ${W.batchPerRun}.`} />
+            <Field name="recheckDays" label="Revérifier après (j)" value={w.recheckDays} hint={`Défaut ${W.recheckDays}.`} />
+            <label className="flex items-start gap-2 text-[13px] sm:col-span-3">
+              <input type="checkbox" name="autoValidate" defaultChecked={w.autoValidate} className="mt-1" />
+              <span>Valider automatiquement une position « à valider » quand Google Maps et le terrain concordent (trace dans le journal d&apos;audit).</span>
+            </label>
+            <label className="flex items-start gap-2 text-[13px] sm:col-span-3">
+              <input type="checkbox" name="notifyOutOfZone" defaultChecked={w.notifyOutOfZone} className="mt-1" />
+              <span>Notifier tout de suite la direction et le manager quand une visite démarre ou se termine hors du rayon d&apos;une position validée (application et téléphone).</span>
+            </label>
+            <div className="sm:col-span-3"><button className="btn-primary" type="submit">Enregistrer</button></div>
+          </form>
+        </Card>
+      )}
     </>
   );
 }

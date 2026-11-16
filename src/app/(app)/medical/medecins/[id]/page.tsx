@@ -130,7 +130,7 @@ export default async function MedecinFichePage({ params }: { params: Promise<{ i
           {cab?.gps_lat ? (
             <div className="text-[13px] space-y-1">
               <Badge tone={cab.gps_status === "VALIDEE" ? "green" : "orange"}>{cab.gps_status === "VALIDEE" ? "Validée" : "À valider"}</Badge>
-              <div className="text-muted">{cab.gps_source === "PREMIERE_VISITE" ? "Proposée au premier démarrage d'une visite" : cab.gps_source === "ADRESSE" ? "Déduite de l'adresse" : "Saisie à la main"}{cab.gps_validated_at ? ` · validée le ${fmtDate(cab.gps_validated_at)}` : ""}</div>
+              <div className="text-muted">{cab.gps_source === "PREMIERE_VISITE" ? "Proposée au premier démarrage d'une visite" : cab.gps_source === "ADRESSE" ? "Déduite de l'adresse" : cab.gps_source === "INTERNET" ? "Trouvée sur Google Maps" : cab.gps_source === "HISTORIQUE" ? "Déduite de l'historique des visites" : "Saisie à la main"}{cab.gps_validated_at ? ` · validée le ${fmtDate(cab.gps_validated_at)}` : ""}</div>
               {control && <a className="text-accent-2 hover:underline" target="_blank" rel="noopener" href={mapsUrl({ lat: Number(cab.gps_lat), lng: Number(cab.gps_lng) })}>Voir sur Google Maps</a>}
               {control && cab.gps_status !== "VALIDEE" && <div><a className="text-accent-2 hover:underline" href="/medical/suivi">Valider sur la carte du suivi terrain</a></div>}
             </div>

@@ -17,7 +17,11 @@ export type MapVisit = {
   cabinet: { lat: number; lng: number; validated: boolean } | null;
 };
 
-export type MapCabinet = { doctorId: string; name: string; lat: number; lng: number; validated: boolean };
+export type MapCabinet = {
+  doctorId: string; name: string; lat: number; lng: number; validated: boolean;
+  /** Lieu trouvé sur Google Maps pour cette fiche (contrôle Internet), avec l'écart à la position de la fiche. */
+  web?: { lat: number; lng: number; name: string | null; address: string | null; distanceM: number | null; concordant: boolean } | null;
+};
 
 const COLORS: Record<string, string> = { VERIFIEE: "#16a34a", A_VERIFIER: "#ea580c", NON_VERIFIEE: "#dc2626", HORS_CONTROLE: "#6b7280" };
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -100,7 +104,22 @@ export function FieldMap({ visits, cabinets, editable, kind = "medical", validat
         const ll: [number, number] = [c.lat, c.lng];
         bounds.push(ll);
         const marker = L.marker(ll, { icon: square(c.validated ? "#111827" : "#ea580c", !c.validated), draggable: editable && !c.validated });
-        const html = `<b>${placeTitle}${esc(c.name)}</b><br>${c.validated ? "Position validée" : "Position proposée au premier démarrage, <b>à valider</b>"}${editable && !c.validated ? `<br><button data-validate="${c.doctorId}" style="margin-top:6px;padding:4px 10px;border-radius:8px;background:#111827;color:#fff">Valider cette position</button><br><span style="font-size:11px;color:#6b7280">Déplacez le carré si le cabinet est ailleurs.</span>` : ""}`;
+        if (c.web) {
+          const wl: [number, number] = [c.web.lat, c.web.lng];
+          bounds.push(wl);
+          const gIcon = L.divIcon({
+            className: "",
+            iconSize: [20, 20],
+            iconAnchor: [10, 10],
+            html: `<div style="width:20px;height:20px;border-radius:50%;background:#2563eb;color:#fff;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font:700 10px system-ui;box-shadow:0 1px 3px rgba(0,0,0,.4)">G</div>`,
+          });
+          L.marker(wl, { icon: gIcon })
+            .bindPopup(`<b>Google Maps — ${esc(c.web.name ?? c.name)}</b><br>${esc(c.web.address ?? "")}${c.web.distanceM !== null ? `<br>${c.web.concordant ? "Concorde" : "<b style='color:#dc2626'>Écart</b>"} : ${c.web.distanceM} m de la position de la fiche` : ""}`)
+            .addTo(map);
+          if (!c.web.concordant) L.polyline([ll, wl], { color: "#dc2626", weight: 2, dashArray: "4 4", opacity: 0.8 }).addTo(map);
+        }
+        const webLine = c.web && c.web.distanceM !== null ? `<br>Google Maps : ${c.web.concordant ? "concorde" : "<b style='color:#dc2626'>écart</b>"} (${c.web.distanceM} m)` : "";
+        const html = `<b>${placeTitle}${esc(c.name)}</b><br>${c.validated ? "Position validée" : "Position proposée, <b>à valider</b>"}${webLine}${editable && !c.validated ? `<br><button data-validate="${c.doctorId}" style="margin-top:6px;padding:4px 10px;border-radius:8px;background:#111827;color:#fff">Valider cette position</button><br><span style="font-size:11px;color:#6b7280">Déplacez le carré si le cabinet est ailleurs.</span>` : ""}`;
         marker.bindPopup(html);
         marker.on("popupopen", (ev) => {
           const btn = (ev.popup.getElement() as HTMLElement | undefined)?.querySelector<HTMLButtonElement>(`[data-validate="${c.doctorId}"]`);
@@ -140,7 +159,7 @@ export function FieldMap({ visits, cabinets, editable, kind = "medical", validat
         <span><span className="inline-block w-2.5 h-2.5 rounded-full mr-1" style={{ background: COLORS.VERIFIEE }} />Vérifiée</span>
         <span><span className="inline-block w-2.5 h-2.5 rounded-full mr-1" style={{ background: COLORS.A_VERIFIER }} />À vérifier</span>
         <span><span className="inline-block w-2.5 h-2.5 rounded-full mr-1" style={{ background: COLORS.NON_VERIFIEE }} />Non vérifiée</span>
-        <span>● démarrage · ○ fin (n′) · × non effectuée · ■ {crm ? "point de vente validé" : "cabinet validé"} · ▢ {crm ? "point de vente à valider" : "cabinet à valider"} · - - trajet</span>
+        <span>● démarrage · ○ fin (n′) · × non effectuée · ■ {crm ? "point de vente validé" : "cabinet validé"} · ▢ {crm ? "point de vente à valider" : "cabinet à valider"} · G lieu Google Maps (trait rouge = écart) · - - trajet</span>
       </div>
     </div>
   );

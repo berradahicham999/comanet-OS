@@ -137,6 +137,7 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Ventilation du marketing réel (publicité, échantillons par nature, goodies, PLV, influence, activations, autres) | `src/lib/budget-categories.ts` | `marketingBucketOf()`, `MARKETING_BUCKET_LABELS` ; somme = consommé (`budgetConsumptionByMonth().breakdown`) |
 | Contrôle de présence d'une visite (distance, heure retenue, durée, vitesse implicite, statut et motifs) | `src/lib/medical/gps-shared.ts` | `haversineM()`, `eventTime()`, `visitDurationMinutes()`, `impliedSpeedKmh()`, `verifyVisit()` |
 | Chrono de visite (Démarrer / Terminer / non effectuée, clôture auto, correction, cabinet) | `src/lib/medical/chrono.ts` | `recordAction()` (seule écriture de `visit_events` et des heures de visite), `autoCloseStale()`, `correctVisit()`, `validateCabinet()`, `refreshVerification()` |
+| Contrôle Internet d'une position (requête Google, ressemblance des noms, lieu retenu, verdict concorde / écart, proposition ou validation automatique) et alerte « visite hors zone » | `src/lib/places/web-check-shared.ts` (pur) + `web-check.ts` + `google.ts` + `out-of-zone.ts` | `buildQuery()`, `placeNameScore()`, `pickPlace()`, `compareWithWeb()` (verdict calculé à la lecture, jamais stocké), `webPositionAction()`, `isOutOfZone()`, `runWebChecks()` (seule écriture de `place_web_checks`), `applyWebPositionToCabinet()` / `applyWebPositionToPointOfSale()` (seules écritures d'une position venue de Google), `alertOutOfZone()` |
 | Qui voit les heures et positions des visites | `src/lib/medical/field-access.ts` | `fieldScope()`, `inFieldScope()`, `requireFieldControl()` |
 | Journée terrain (ordre, temps en visite / entre visites) et indicateurs du suivi | `src/lib/medical/field-report-shared.ts` + `field-report.ts` | `buildTimeline()`, `fieldVisits()`, `fieldKpis()` |
 | Rapprochement d'un nom de médecin | `src/lib/medical/matching.ts` | `doctorNameTokens()`, `doctorAliasKey()`, `doctorNameScore()`, `matchDoctor()` |
@@ -337,6 +338,15 @@ différer). Ordonnances : import `PRESCRIPTIONS` (liste blanche, colonne patient
 `/medical/ordonnances`. Potentiel AUTO jamais par-dessus une valeur MANUELLE. Analyses (segments, impact = corrélation
 observée, tournée) : `/medical/analyses`. Copilote : `get_doctor_profile`, `get_field_control` (aucune coordonnée).
 Test d'intégration : `MEDICAL_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/medical-integration.ts`.
+
+**Positions vérifiées sur Internet** (`docs/guide-positions-internet.md`, migration 0058). Chaque médecin et point de vente est
+recherché sur Google Maps (Places API « Text Search », nom + ville, Maroc seulement ; clé `GOOGLE_MAPS_API_KEY`) par lots du cron
+horaire médical (`settings.webPlaces`). Google n'est jamais une preuve : fiche sans position → position Google proposée « à valider »
+(origine INTERNET), validée seulement par un Démarrer sur place ; position « à valider » (premier Démarrer, historique) qui concorde
+avec Google à moins de `concordanceM` → validée d'office (`audit()` « Contrôle Internet ») ; position validée jamais modifiée, un
+écart est signalé (panneau « Positions vérifiées sur Internet » de `/medical/suivi` et `/clients/visites`, notification PLACE_WEB_GAP).
+Alerte immédiate VISIT_OUT_OF_ZONE (application + push) aux administrateurs et au manager quand un Démarrer / Terminer / non effectuée
+tombe hors du rayon d'une position VALIDÉE, incertitude GPS déduite, une fois par visite.
 
 **CRM commercial** (`docs/guide-crm-commercial.md`, plan `docs/plan-crm-commercial.md`, migration 0045). Portefeuille =
 `clients.account_manager_id` (un commercial attitré par client, il entre dans sa portée « assignés ») ; fréquence de visite

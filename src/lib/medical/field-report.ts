@@ -218,6 +218,8 @@ export async function cabinetsToValidate(scope: FieldScope): Promise<{ doctorId:
     left join doctor_visits v on v.doctor_id = d.id and v.timing_source = 'CHRONO'
     left join users u on u.id = v.delegate_id
     where d.gps_status = 'A_CONFIRMER' and d.gps_lat is not null
+      -- Position Google jamais confirmée par une visite : rien à trancher tant qu'aucune visite n'a démarré.
+      and (d.gps_source is distinct from 'INTERNET' or v.id is not null)
       ${scope.all ? sql`` : scope.delegateIds.length ? sql`and v.delegate_id = any(${pgArray(scope.delegateIds)})` : sql`and false`}
     order by d.id, v.started_at desc nulls last
     limit 200`);

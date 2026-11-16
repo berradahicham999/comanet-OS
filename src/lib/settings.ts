@@ -105,6 +105,8 @@ export type ComanetSettings = {
   creative: CreativeSettings;
   /** Cockpit de direction : ce qui en est tenu à l'écart (voir `src/lib/rules/visibility.ts`). */
   cockpit: CockpitSettings;
+  /** Contrôle Internet des positions (Google Maps) et alerte de visite hors zone (`src/lib/places/`). */
+  webPlaces: WebPlacesSettings;
 };
 
 export type CockpitSettings = {
@@ -117,6 +119,30 @@ export type CockpitSettings = {
 };
 
 export const DEFAULT_COCKPIT: CockpitSettings = { hideRegulatory: true };
+
+export type WebPlacesSettings = {
+  /** Distance sous laquelle la position Internet et la position relevée sur le terrain « concordent » (m). */
+  concordanceM: number;
+  /** Concordance = validation automatique d'une position « à valider » (sinon : affichage seulement). */
+  autoValidate: boolean;
+  /** Ressemblance minimale (0-1) entre le nom trouvé sur Google et celui de la fiche pour retenir un lieu. */
+  minNameScore: number;
+  /** Fiches vérifiées à chaque passage du cron horaire (coût Google maîtrisé). */
+  batchPerRun: number;
+  /** Une fiche déjà vérifiée est revérifiée au bout de N jours. */
+  recheckDays: number;
+  /** Notification immédiate (direction + manager) quand une visite démarre ou se termine hors du rayon d'une position validée. */
+  notifyOutOfZone: boolean;
+};
+
+export const DEFAULT_WEB_PLACES: WebPlacesSettings = {
+  concordanceM: 150,
+  autoValidate: true,
+  minNameScore: 0.8,
+  batchPerRun: 40,
+  recheckDays: 365,
+  notifyOutOfZone: true,
+};
 
 /**
  * Seuils du studio créatif (`src/lib/creative/`). Les scores sont des aides à la décision ; les apprentissages exigent
@@ -860,6 +886,7 @@ export const DEFAULT_SETTINGS: ComanetSettings = {
   marketingPlan: DEFAULT_MARKETING_PLAN,
   creative: DEFAULT_CREATIVE,
   cockpit: DEFAULT_COCKPIT,
+  webPlaces: DEFAULT_WEB_PLACES,
 };
 
 export const SETTINGS_KEY = "comanet.rules";
@@ -893,6 +920,7 @@ export function mergeSettings(stored: Partial<ComanetSettings> | null | undefine
     marketingPlan: { ...DEFAULT_MARKETING_PLAN, ...(stored.marketingPlan ?? {}) },
     creative: { ...DEFAULT_CREATIVE, ...(stored.creative ?? {}) },
     cockpit: { ...DEFAULT_COCKPIT, ...(stored.cockpit ?? {}) },
+    webPlaces: { ...DEFAULT_WEB_PLACES, ...(stored.webPlaces ?? {}) },
   };
 }
 
