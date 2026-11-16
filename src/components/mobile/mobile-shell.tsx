@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
 import { Bell, CalendarCheck, ClipboardList, CloudOff, MapPinned, RefreshCw, Search, ShoppingCart, SquareCheck, Store, Sun, Timer, Trophy, TriangleAlert, UserRound, Users, Zap } from "lucide-react";
-import type { Persona } from "@/lib/mobile/persona";
+import { SIDE_LABELS, type Persona } from "@/lib/mobile/persona";
 import { MobileApp, useMobile } from "./mobile-app";
 import { PushPrompt } from "./push-toggle";
 
@@ -64,9 +64,30 @@ function SyncBadge() {
   return null;
 }
 
+/** Profil à deux métiers : on passe de la visite médicale à l'animation sans se reconnecter. */
+function SideSwitch() {
+  const { personas, side, switchSide } = useMobile();
+  if (personas.length < 2) return null;
+  return (
+    <div className="px-4 pb-2.5">
+      <div role="tablist" aria-label="Métier" className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-sunk">
+        {personas.map((p) => {
+          const active = p === side;
+          return (
+            <button key={p} type="button" role="tab" aria-selected={active} onClick={() => { if (!active) switchSide(p); }}
+              className={clsx("h-10 rounded-lg text-[13.5px] font-medium", active ? "bg-surface text-ink shadow-sm" : "text-muted")}>
+              {SIDE_LABELS[p] ?? p}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function Frame({ children }: { children: React.ReactNode }) {
   const path = usePathname();
-  const { snapshot } = useMobile();
+  const { side } = useMobile();
   return (
     <div className="min-h-dvh flex flex-col bg-bg">
       <header className="sticky top-0 z-30 bg-bg/90 backdrop-blur border-b border-line pt-[env(safe-area-inset-top)]">
@@ -76,11 +97,12 @@ function Frame({ children }: { children: React.ReactNode }) {
           <SyncBadge />
           <Link href="/notifications" prefetch={false} className="h-11 w-11 flex items-center justify-center text-muted" aria-label="Notifications"><Bell size={19} /></Link>
         </div>
+        <SideSwitch />
       </header>
       <main className="flex-1 px-4 pt-4 pb-[calc(84px+env(safe-area-inset-bottom))]"><PushPrompt />{children}</main>
       <nav className="fixed bottom-0 inset-x-0 z-30 bg-surface/95 backdrop-blur border-t border-line pb-[env(safe-area-inset-bottom)]">
         <div className="grid grid-cols-4">
-          {tabsOf(snapshot?.persona).map(({ href, label, Icon }) => {
+          {tabsOf(side ?? undefined).map(({ href, label, Icon }) => {
             const active = tabActive(href, path);
             return (
               <Link key={href} href={href} prefetch={false} className={clsx("flex flex-col items-center justify-center gap-1 min-h-[56px] text-[11px] font-medium", active ? "text-accent" : "text-muted")}>

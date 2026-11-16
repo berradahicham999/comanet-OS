@@ -96,7 +96,10 @@ export type DirectionSnapshot = { aiConfigured: boolean; pendingValidations: num
 export type MobileSnapshot = {
   generatedAt: string;
   user: { id: string; name: string };
+  /** Métier principal (premier de `personas`). */
   persona: Persona;
+  /** Tous ses métiers de terrain : deux pour une déléguée qui anime aussi, et le sélecteur s'affiche. */
+  personas: Persona[];
   /** Accueil de la version complète : où renvoyer un métier qui n'a pas encore ses écrans sous `/m`. */
   home: string;
   gpsNoticeAccepted: boolean;
@@ -106,6 +109,11 @@ export type MobileSnapshot = {
   medical: MedicalSnapshot | null;
   direction: DirectionSnapshot | null;
 };
+
+/** Métiers d'une copie locale : une copie d'avant le double métier n'a que `persona`. */
+export function snapshotPersonas(s: Pick<MobileSnapshot, "persona"> & { personas?: Persona[] }): Persona[] {
+  return s.personas?.length ? s.personas : [s.persona];
+}
 
 /** Ordre du portefeuille : les visites du jour, puis les commandes en retard, puis le plus gros chiffre d'affaires. */
 export function sortPortfolio<T extends { id: string; orderLate: boolean; revenue12: number }>(clients: T[], todayIds: string[]): T[] {
