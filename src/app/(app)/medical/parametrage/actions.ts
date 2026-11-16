@@ -1,8 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireAccess, canDo } from "@/lib/access";
-import { getSettings, saveSettings, type ComanetSettings, type MedicalFieldSettings } from "@/lib/settings";
+import { requireAccess, requireAdmin, canDo } from "@/lib/access";
+import { getSettings, saveSettings, type ComanetSettings, type MedicalFieldSettings, type WebPlacesSettings } from "@/lib/settings";
 import { audit, changedFields } from "@/lib/audit";
 
 const num = (fd: FormData, k: string, fallback: number) => {
@@ -73,4 +73,27 @@ export async function updateMedicalFieldSettings(formData: FormData) {
   await saveSettings({ ...cur, medicalField: next });
   if (diff) await audit({ actor: { id: user.id, name: user.name }, action: "SETTINGS", module: "medical", entity: "settings", label: "Réglages médicaux : chrono, GPS, ordonnances", before: diff.before, after: diff.after });
   revalidatePath("/medical", "layout");
+}
+
+/**
+ * Contrôle Internet des positions et alerte « visite hors zone » (cabinets ET points de vente) : réservé à la
+ * direction, comme les positions elles-mêmes. Tracé dans l'audit.
+ */
+export async function updateWebPlacesSettings(formData: FormData) {
+  const user = await requireAdmin();
+  const cur = await getSettings();
+  const c = cur.webPlaces;
+  const next: WebPlacesSettings = {
+    concordanceM: Math.round(Math.min(2000, Math.max(20, num(formData, "concordanceM", c.concordanceM)))),
+    autoValidate: formData.get("autoValidate") === "on",
+    minNameScore: Math.min(1, Math.max(0.5, num(formData, "minNameScore", c.minNameScore))),
+    batchPerRun: Math.round(Math.min(200, Math.max(0, num(formData, "batchPerRun", c.batchPerRun)))),
+    recheckDays: Math.round(Math.min(3650, Math.max(7, num(formData, "recheckDays", c.recheckDays)))),
+    notifyOutOfZone: formData.get("notifyOutOfZone") === "on",
+  };
+  const diff = changedFields(c as unknown as Record<string, unknown>, next as unknown as Record<string, unknown>);
+  await saveSettings({ ...cur, webPlaces: next });
+  if (diff) await audit({ actor: { id: user.id, name: user.name }, action: "SETTINGS", module: "medical", entity: "settings", label: "Réglages : contrôle Internet des positions, alerte hors zone", before: diff.before, after: diff.after });
+  revalidatePath("/medical", "layout");
+  revalidatePath("/clients/visites");
 }

@@ -458,6 +458,38 @@ export const pushSubscriptions = pgTable(
   (t) => [uniqueIndex("push_subscriptions_endpoint_uq").on(t.endpoint), index("push_subscriptions_user_idx").on(t.userId)],
 );
 
+/**
+ * Contrôle Internet d'une position (migration 0058) : résultat de la recherche Google Maps (nom + ville) d'un
+ * cabinet médical ou d'un point de vente. Une ligne par fiche, remplacée à chaque nouvelle recherche ; seul
+ * `src/lib/places/web-check.ts` écrit ici. Le verdict (concorde / écart) n'est pas stocké : il se calcule à la
+ * lecture contre la position actuelle de la fiche (`compareWithWeb()`), qui peut changer.
+ */
+export const placeWebChecks = pgTable(
+  "place_web_checks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    entityType: text("entity_type").notNull().$type<"doctor" | "client">(),
+    entityId: uuid("entity_id").notNull(),
+    provider: text("provider").notNull().default("GOOGLE"),
+    query: text("query").notNull(),
+    /** TROUVE : un lieu nettement reconnu ; AMBIGU : des lieux, aucun sûr ; INTROUVABLE : rien ; ERREUR : appel refusé. */
+    status: text("status").notNull().$type<"TROUVE" | "AMBIGU" | "INTROUVABLE" | "ERREUR">(),
+    placeId: text("place_id"),
+    placeName: text("place_name"),
+    placeAddress: text("place_address"),
+    lat: numeric("lat", { precision: 9, scale: 6 }),
+    lng: numeric("lng", { precision: 9, scale: 6 }),
+    /** Ressemblance du nom trouvé avec celui de la fiche (0-1). */
+    nameScore: numeric("name_score", { precision: 4, scale: 3 }),
+    /** Les meilleurs lieux renvoyés (nom, adresse, position, score), pour trancher à la main un cas ambigu. */
+    candidates: jsonb("candidates"),
+    error: text("error"),
+    checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+    checkedBy: uuid("checked_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => [uniqueIndex("place_web_checks_entity_uq").on(t.entityType, t.entityId), index("place_web_checks_status_idx").on(t.status)],
+);
+
 export const roleTemplates = pgTable("role_templates", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
@@ -715,7 +747,7 @@ export const clients = pgTable(
     visitFrequencyMonthly: integer("visit_frequency_monthly"),
     gpsLat: numeric("gps_lat", { precision: 9, scale: 6 }),
     gpsLng: numeric("gps_lng", { precision: 9, scale: 6 }),
-    gpsSource: text("gps_source").$type<"PREMIERE_VISITE" | "MANUELLE">(),
+    gpsSource: text("gps_source").$type<"PREMIERE_VISITE" | "MANUELLE" | "INTERNET">(),
     gpsStatus: text("gps_status").$type<"A_CONFIRMER" | "VALIDEE">(),
     gpsValidatedAt: timestamp("gps_validated_at", { withTimezone: true }),
     gpsValidatedBy: uuid("gps_validated_by").references((): AnyPgColumn => users.id, { onDelete: "set null" }),
@@ -1832,8 +1864,8 @@ export const doctors = pgTable(
     /** Fréquence de visite recommandée en jours. Null = utilise `settings.medicalDefaultVisitFrequencyDays`. */
     visitFrequencyDays: integer("visit_frequency_days"),
     lastVisitAt: timestamp("last_visit_at", { withTimezone: true }),
-    /** Origine de la position du cabinet : PREMIERE_VISITE (proposée au premier « Démarrer »), MANUELLE, ADRESSE. */
-    gpsSource: text("gps_source").$type<"PREMIERE_VISITE" | "MANUELLE" | "ADRESSE" | "HISTORIQUE">(),
+    /** Origine de la position du cabinet : PREMIERE_VISITE (proposée au premier « Démarrer »), MANUELLE, ADRESSE, HISTORIQUE, INTERNET (Google Maps, `src/lib/places/`). */
+    gpsSource: text("gps_source").$type<"PREMIERE_VISITE" | "MANUELLE" | "ADRESSE" | "HISTORIQUE" | "INTERNET">(),
     /** A_CONFIRMER (à valider) tant que le manager ou la direction n'a pas validé la position ; seule une position VALIDEE prouve une présence. */
     gpsStatus: text("gps_status").$type<"A_CONFIRMER" | "VALIDEE">(),
     gpsValidatedAt: timestamp("gps_validated_at", { withTimezone: true }),

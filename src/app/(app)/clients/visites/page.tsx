@@ -12,6 +12,8 @@ import { VISIT_KIND_LABELS, VISIT_STATUS_LABELS, type ClientVisitKind, type Clie
 import { VERIFICATION_LABELS, type VerificationStatus } from "@/lib/medical/gps-shared";
 import { autoCloseStaleClientVisitsQuietly } from "@/lib/crm/visits";
 import { validatePositionAction } from "./actions";
+import { WebCheckPanel } from "@/components/places/web-check-panel";
+import { withWebPositions } from "@/lib/places/web-check";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Suivi des visites" };
@@ -93,10 +95,12 @@ export default async function VisitsFollowUpPage(props: { searchParams: Promise<
       events: v.events.map((e) => ({ ...e, atLabel: fmtTime(e.at) })),
     }));
     const places = positions ? await placesToValidate([userId]) : [];
-    const mapPlaces: MapCabinet[] = [
+    const basePlaces: MapCabinet[] = [
       ...dayVisits.filter((v) => v.place).map((v) => ({ doctorId: v.clientId, name: v.clientName, lat: v.place!.lat, lng: v.place!.lng, validated: v.place!.validated })),
       ...places.map((p) => ({ doctorId: p.id, name: p.name, lat: p.lat, lng: p.lng, validated: false })),
     ];
+    // Le lieu Google n'est montré qu'à ceux qui voient les positions (direction, manager).
+    const mapPlaces = positions ? await withWebPositions("client", basePlaces) : basePlaces;
     const done = visits.filter((v) => v.status === "EFFECTUEE" && (settings.crm.countedKinds as string[]).includes(v.kind));
     const p = detail.progress;
     return (
@@ -235,6 +239,7 @@ export default async function VisitsFollowUpPage(props: { searchParams: Promise<
           </Section>
 
           <Section title="Par ville" description="Tous les portefeuilles visibles, par ville du client."><CityTable rows={team.byCity} elapsed={team.elapsedPct} /></Section>
+          {viewer.admin && <WebCheckPanel kind="client" />}
           <p className="text-[12px] text-faint">« Commandes en visite » : commandes saisies par la commerciale chez le client pendant la visite (déduit, seul lien mesuré entre une visite et une commande). Une hausse des ventes après des visites reste une corrélation observée.</p>
         </>
       )}

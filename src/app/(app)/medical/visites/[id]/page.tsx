@@ -63,7 +63,7 @@ export default async function VisiteDetailPage({ params, searchParams }: { param
                 <ul className="mt-2 text-[13px] text-ink-2 list-disc pl-5 space-y-0.5">{detail.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul>
               ) : <div className="mt-2 text-[13px] text-muted">Aucune anomalie.</div>}
               <div className="mt-2 text-[12px] text-muted">
-                Cabinet : {detail.cabinet ? `${detail.cabinet.validated ? "position validée" : "position à valider"} (${detail.cabinet.source === "PREMIERE_VISITE" ? "proposée au premier démarrage" : detail.cabinet.source === "ADRESSE" ? "depuis l'adresse" : "saisie à la main"})` : "position inconnue"}
+                Cabinet : {detail.cabinet ? `${detail.cabinet.validated ? "position validée" : "position à valider"} (${detail.cabinet.source === "PREMIERE_VISITE" ? "proposée au premier démarrage" : detail.cabinet.source === "ADRESSE" ? "depuis l'adresse" : detail.cabinet.source === "INTERNET" ? "trouvée sur Google Maps" : detail.cabinet.source === "HISTORIQUE" ? "depuis l'historique" : "saisie à la main"})` : "position inconnue"}
                 {" · "}<Link href={`/medical/suivi?${new URLSearchParams({ day: detail.date, ...(detail.delegateId ? { delegate: detail.delegateId } : {}) })}`} className="text-accent-2 hover:underline">Voir sur la carte</Link>
               </div>
             </Card>

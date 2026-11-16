@@ -407,6 +407,13 @@
       "when": 1790001200000,
       "tag": "0057_rapports_notification",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1790001300000,
+      "tag": "0058_positions_internet",
+      "breakpoints": true
     }
   ]
 }
