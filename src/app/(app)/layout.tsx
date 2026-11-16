@@ -10,9 +10,12 @@ import { can } from "@/lib/permissions-shared";
 import { runningVisitOf } from "@/lib/medical/chrono";
 import { RunningVisitBanner } from "@/components/medical/running-visit-banner";
 import { runningClientVisitOf } from "@/lib/crm/visits";
+import { notifyNewReports } from "@/lib/ai/reports";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const access = await requireAccessContext();
+  // Rapports écrits en base par les agents : annoncés dès qu'une page s'ouvre (le cron horaire couvre le reste).
+  await notifyNewReports({ throttle: true }).catch(() => 0);
   const unread = await unreadCount(access.user.id).catch(() => 0);
   const medical = can(access.perms, "medical", "create");
   const running = medical ? await runningVisitOf(access.user.id).catch(() => null) : null;

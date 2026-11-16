@@ -59,6 +59,40 @@ export function normalizeReportStatus(v: unknown): ReportStatus {
   return s === "VALIDATED" || s === "ARCHIVED" ? s : "DRAFT";
 }
 
+/** Changements de statut d'un rapport proposés à l'écran. REOPEN = annuler la validation, ou désarchiver. */
+export type ReportMove = "VALIDATE" | "ARCHIVE" | "REOPEN";
+
+/**
+ * Cycle d'un rapport, seule règle (page Rapports, Cockpit « À décider ») :
+ * brouillon → validé (Valider, décisions toutes tranchées) ; brouillon ou validé → archivé (Modifier ou Valider) ;
+ * validé → brouillon (annuler la validation, Valider) ; archivé → son statut d'avant (validé s'il l'avait été).
+ * Un administrateur a tous ces droits. Renvoie le statut d'arrivée ou la raison du refus.
+ */
+export function reportMove(
+  current: ReportStatus, move: ReportMove,
+  ctx: { canValidate: boolean; canEdit: boolean; wasValidated: boolean; openDecisions: boolean },
+): { ok: true; to: ReportStatus } | { ok: false; error: string; stale?: boolean } {
+  if (move === "VALIDATE") {
+    if (!ctx.canValidate) return { ok: false, error: "Droit « Valider » sur Rapports requis." };
+    if (current === "VALIDATED") return { ok: false, error: "Ce rapport est déjà validé.", stale: true };
+    if (current === "ARCHIVED") return { ok: false, error: "Ce rapport est archivé : désarchivez-le d'abord.", stale: true };
+    if (ctx.openDecisions) return { ok: false, error: "Ce rapport porte des décisions à trancher une par une (Cockpit → À décider)." };
+    return { ok: true, to: "VALIDATED" };
+  }
+  if (move === "ARCHIVE") {
+    if (!ctx.canEdit && !ctx.canValidate) return { ok: false, error: "Droit « Modifier » sur Rapports requis." };
+    if (current === "ARCHIVED") return { ok: false, error: "Ce rapport est déjà archivé.", stale: true };
+    return { ok: true, to: "ARCHIVED" };
+  }
+  if (current === "DRAFT") return { ok: false, error: "Ce rapport est déjà un brouillon.", stale: true };
+  if (current === "VALIDATED") {
+    if (!ctx.canValidate) return { ok: false, error: "Droit « Valider » sur Rapports requis pour annuler une validation." };
+    return { ok: true, to: "DRAFT" };
+  }
+  if (!ctx.canEdit && !ctx.canValidate) return { ok: false, error: "Droit « Modifier » sur Rapports requis." };
+  return { ok: true, to: ctx.wasValidated ? "VALIDATED" : "DRAFT" };
+}
+
 function readLine(raw: unknown): AgentDecision | null {
   if (!isObject(raw)) return null;
   const id = typeof raw.id === "number" && Number.isFinite(raw.id) ? String(raw.id) : text(raw.id, 80);
