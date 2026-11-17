@@ -322,7 +322,11 @@ async function main() {
   const K = await import("@/lib/gestion/counts");
   const brand = await one<{ id: string }>(sql`insert into brands (name, slug) values (${"IT MARQUE " + tag}, ${"it-marque-" + tag.toLowerCase()}) returning id`);
   await db.execute(sql`update products set brand_id = ${brand.id}::uuid where id in (${p3.id}::uuid, ${p2.id}::uuid)`);
-  const cnt = await K.createCount({ title: "IT inventaire " + tag, warehouseKey: "PRINCIPAL", brandIds: [brand.id], blind: true, countDate: day, notes: null }, who);
+  const cnt = await K.createCount({ title: "IT inventaire " + tag, warehouseKey: "PRINCIPAL", brandIds: [brand.id], blind: true, countDate: day, notes: null, counterIds: [], includeMaterials: true }, who);
+  // Matériel marketing de la marque : compté dans la même session (stock 10, coût 5).
+  const { recordMovement } = await import("@/lib/activations/inventory");
+  const goodie = await one<{ id: string }>(sql`insert into inventory_items (name, category_key, brand_id, unit_cost) values (${"IT goodie " + tag}, (select key from inventory_categories order by key limit 1), ${brand.id}::uuid, 5) returning id`);
+  await recordMovement({ itemId: goodie.id, type: "ENTREE", quantity: 10, unitCost: 5, date: day });
   await K.startCount(cnt, who);
   const lines0 = (await K.getCount(cnt))!.lines;
   assert.equal(lines0.find((l) => l.productId === p3.id && l.lotNumber === "L1")!.theoreticalQty, "50.000");
@@ -333,6 +337,14 @@ async function main() {
   await K.addEntry(cnt, { productId: p3.id, lotNumber: "L1", quantity: "17" }, { id: u.id, name: "Compteur B" });
   await K.addEntry(cnt, { productId: p3.id, lotNumber: "L9", expiryDate: "2029-01-31", quantity: "4" }, who);
   await refused("lot manquant au comptage", () => K.addEntry(cnt, { productId: p3.id, quantity: "1" }, who), /suivi par lot/);
+  // Feuille de comptage : « ma quantité » remplace ma saisie précédente sur la ligne ; le matériel se compte en entiers.
+  const gLine0 = (await K.getCount(cnt))!.lines.find((l) => l.itemId === goodie.id)!;
+  assert.equal(gLine0.kind, "MATERIEL");
+  assert.equal(gLine0.theoreticalQty, "10.000");
+  await K.setMyCount(cnt, { itemId: goodie.id, quantity: "8" }, who);
+  await K.setMyCount(cnt, { itemId: goodie.id, quantity: "7" }, who);
+  await refused("matériel en quantité décimale", () => K.setMyCount(cnt, { itemId: goodie.id, quantity: "7.5" }, who), /unités entières/);
+  assert.equal((await K.getCount(cnt))!.lines.find((l) => l.itemId === goodie.id)!.counted, "7.000");
   const view = (await K.getCount(cnt))!;
   const l1 = view.lines.find((l) => l.productId === p3.id && l.lotNumber === "L1")!;
   const l9 = view.lines.find((l) => l.productId === p3.id && l.lotNumber === "L9")!;
@@ -345,9 +357,11 @@ async function main() {
   await refused("écart sans motif", () => K.validateCount(cnt, who), /Motif manquant/);
   await K.setLineReason(l1.id, "SAISIE", "BL validé pendant le comptage");
   await K.setLineReason(l9.id, "ERREUR_COMPTAGE", null);
+  await K.setLineReason(gLine0.id, "ERREUR_COMPTAGE", null);
   const vinv = await K.validateCount(cnt, who);
   assert.ok(vinv.number.startsWith("INV"), vinv.number);
-  assert.equal(vinv.adjustments, 2);
+  assert.equal(vinv.adjustments, 3);
+  assert.equal((await one<{ stock: number }>(sql`select stock from inventory_items where id = ${goodie.id}::uuid`)).stock, 7);
   const lots3 = (await stockState({ productIds: [p3.id] }))[0].lots;
   assert.equal(lots3.find((x) => x.lotNumber === "L1")!.qty, "45.000"); // 50 − 2 (BL) − 3 (ajustement)
   assert.equal(lots3.find((x) => x.lotNumber === "L9")!.qty, "4.000");
@@ -356,11 +370,11 @@ async function main() {
   assert.equal(p2Line.gapQty, null);
   await refused("saisie sur un inventaire validé", () => K.addEntry(cnt, { productId: p2.id, quantity: "1" }, who), /pas ouvert/);
   await refused("modifier une ligne d'inventaire validé", () => db.execute(sql`update stock_count_lines set counted_qty = 0 where count_id = ${cnt}::uuid`), /clos/);
-  console.log(`✓ inventaire ${vinv.number} validé : 2 ajustements (lot L1 −3, lot L9 +4), non comptés non ajustés, motif exigé, inventaire figé`);
+  console.log(`✓ inventaire ${vinv.number} validé : 3 ajustements (lot L1 −3, lot L9 +4, goodie 10 → 7), non comptés non ajustés, motif exigé, inventaire figé`);
 
   // Pièce datée d'avant le comptage, saisie après son démarrage : elle entre dans le théorique, sinon
   // l'ajustement reprendrait une sortie déjà passée au journal (« Stock insuffisant » à la validation).
-  const cnt2 = await K.createCount({ title: "IT inventaire tardif " + tag, warehouseKey: "PRINCIPAL", brandIds: [brand.id], blind: false, countDate: day, notes: null }, who);
+  const cnt2 = await K.createCount({ title: "IT inventaire tardif " + tag, warehouseKey: "PRINCIPAL", brandIds: [brand.id], blind: false, countDate: day, notes: null, counterIds: [], includeMaterials: false }, who);
   await K.startCount(cnt2, who);
   const frozen2 = (await K.getCount(cnt2))!.lines.find((l) => l.productId === p2.id && !l.lotNumber)!.theoreticalQty;
   const yesterday = iso(new Date(new Date(`${day}T12:00:00Z`).getTime() - 86400000));

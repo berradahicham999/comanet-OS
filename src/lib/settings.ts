@@ -56,6 +56,8 @@ export type ComanetSettings = {
   medicalOverdueVisitDays: number;
   /** Nombre moyen d'échantillons distribués par visite (pour la prévision de stock). */
   medicalSamplesPerVisitDefault: number;
+  /** Alertes médicales dans l'Action Center (relances, objectifs, échantillons, contrôle terrain). Désactivées par défaut tant que les visites n'ont pas assez d'historique. */
+  medicalActionCenter: boolean;
   /**
    * Taux de conversion vers le MAD, par devise (ex. { EUR: 10.85, USD: 9.9 }).
    * Les comptes publicitaires COMANET facturent en EUR et en USD. Aucun taux n'est deviné :
@@ -827,6 +829,7 @@ export const DEFAULT_SETTINGS: ComanetSettings = {
   medicalDefaultVisitFrequencyDays: 30,
   medicalOverdueVisitDays: 60,
   medicalSamplesPerVisitDefault: 1,
+  medicalActionCenter: false,
   fxRates: {},
   metaAttributionWindow: "7d_click,1d_view",
   metaSyncWindowDays: 28,

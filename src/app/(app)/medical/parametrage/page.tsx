@@ -31,6 +31,10 @@ export default async function MedicalParametragePage() {
           <Field name="medicalDefaultVisitFrequencyDays" label="Fréquence de visite par défaut (j)" value={s.medicalDefaultVisitFrequencyDays} hint="Utilisée si la fiche médecin ne précise pas de fréquence." />
           <Field name="medicalOverdueVisitDays" label="Seuil de retard (j)" value={s.medicalOverdueVisitDays} hint="Au-delà, un médecin jamais visité est signalé en retard." />
           <Field name="medicalSamplesPerVisitDefault" label="Échantillons moyens / visite" value={s.medicalSamplesPerVisitDefault} hint="Utilisé pour estimer le besoin en échantillons des visites planifiées." />
+          <label className="sm:col-span-2 flex items-start gap-2 text-[13px]">
+            <input type="checkbox" name="medicalActionCenter" defaultChecked={s.medicalActionCenter} className="mt-0.5" />
+            <span><span className="font-medium">Alertes médicales dans l&apos;Action Center</span><span className="text-[11px] text-faint block">Médecins à relancer, objectifs des déléguées, échantillons, contrôle GPS, visites non clôturées, journées sans visite, cabinets à valider. Désactivées par défaut : à activer quand les visites chronométrées auront assez d&apos;historique.</span></span>
+          </label>
           <div className="sm:col-span-2"><button className="btn-primary" type="submit">Enregistrer</button></div>
         </form>
       </Card>

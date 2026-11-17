@@ -1359,6 +1359,10 @@ export const stockCounts = pgTable(
     status: text("status").notNull().default("BROUILLON"),
     warehouseKey: text("warehouse_key").notNull().default("PRINCIPAL").references(() => warehouses.key, { onUpdate: "cascade" }),
     brandIds: jsonb("brand_ids").$type<string[]>().notNull().default([]),
+    /** Compteurs désignés (magasiniers) : notifiés à la préparation et à l'ouverture du comptage (migration 0058). */
+    counterIds: jsonb("counter_ids").$type<string[]>().notNull().default([]),
+    /** Le matériel marketing (goodies, PLV, print : `inventory_items`) est compté avec les produits. */
+    includeMaterials: boolean("include_materials").notNull().default(true),
     /** À l'aveugle : les compteurs ne voient pas le théorique. */
     blind: boolean("blind").notNull().default(true),
     countDate: date("count_date").notNull(),
@@ -1383,7 +1387,9 @@ export const stockCountLines = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     countId: uuid("count_id").notNull().references(() => stockCounts.id, { onDelete: "cascade" }),
-    productId: uuid("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
+    /** Un produit OU un article de matériel marketing (contrainte en base, migration 0058). */
+    productId: uuid("product_id").references(() => products.id, { onDelete: "restrict" }),
+    inventoryItemId: uuid("inventory_item_id").references(() => inventoryItems.id, { onDelete: "restrict" }),
     lotNumber: text("lot_number"),
     expiryDate: date("expiry_date"),
     theoreticalQty: numeric("theoretical_qty", { precision: 12, scale: 3 }).notNull().default("0"),
@@ -1397,8 +1403,10 @@ export const stockCountLines = pgTable(
     addedDuringCount: boolean("added_during_count").notNull().default(false),
   },
   (t) => [
-    uniqueIndex("stock_count_lines_uq").on(t.countId, t.productId, sql`coalesce(${t.lotNumber}, '')`),
+    uniqueIndex("stock_count_lines_uq").on(t.countId, sql`coalesce(${t.productId}, ${t.inventoryItemId})`, sql`coalesce(${t.lotNumber}, '')`),
     index("stock_count_lines_product_idx").on(t.productId),
+    index("stock_count_lines_item_idx").on(t.inventoryItemId),
+    check("stock_count_lines_article_ck", sql`num_nonnulls(${t.productId}, ${t.inventoryItemId}) = 1`),
   ],
 );
 
@@ -1407,7 +1415,8 @@ export const stockCountEntries = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     countId: uuid("count_id").notNull().references(() => stockCounts.id, { onDelete: "cascade" }),
-    productId: uuid("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "restrict" }),
+    inventoryItemId: uuid("inventory_item_id").references(() => inventoryItems.id, { onDelete: "restrict" }),
     lotNumber: text("lot_number"),
     expiryDate: date("expiry_date"),
     quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
@@ -1415,7 +1424,7 @@ export const stockCountEntries = pgTable(
     counterName: text("counter_name"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("stock_count_entries_count_idx").on(t.countId, t.productId)],
+  (t) => [index("stock_count_entries_count_idx").on(t.countId, t.productId), check("stock_count_entries_article_ck", sql`num_nonnulls(${t.productId}, ${t.inventoryItemId}) = 1`)],
 );
 
 /* ------------------------------------------------------------------ */

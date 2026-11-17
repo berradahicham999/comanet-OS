@@ -9,7 +9,7 @@ import { useRouter } from "next/navigation";
  * lot, on tape la quantité, on ajoute ; chaque saisie s'additionne à celles des autres compteurs.
  * À l'aveugle, le stock théorique n'est jamais envoyé à cet écran.
  */
-export type ScanProduct = { id: string; name: string; ref: string | null; ean: string | null; brand: string | null; trackLots: boolean; lots: { lot: string; expiry: string | null; theoretical?: string }[]; theoretical?: string };
+export type ScanProduct = { id: string; kind?: "PRODUIT" | "MATERIEL"; name: string; ref: string | null; ean: string | null; brand: string | null; trackLots: boolean; lots: { lot: string; expiry: string | null; theoretical?: string }[]; theoretical?: string };
 export type MyEntry = { id: string; product: string; ref: string | null; lot_number: string | null; quantity: string; created_at: string };
 
 type Detector = { detect: (src: HTMLVideoElement) => Promise<{ rawValue: string }[]> };
@@ -20,7 +20,7 @@ export function CountScanner({ countId, products, entries, blind, add, remove }:
   products: ScanProduct[];
   entries: MyEntry[];
   blind: boolean;
-  add: (countId: string, input: { productId: string; lotNumber: string | null; expiryDate: string | null; quantity: string }) => Promise<{ ok: boolean; error?: string }>;
+  add: (countId: string, input: { productId?: string | null; itemId?: string | null; lotNumber: string | null; expiryDate: string | null; quantity: string }) => Promise<{ ok: boolean; error?: string }>;
   remove: (countId: string, entryId: string) => Promise<{ ok: boolean; error?: string }>;
 }) {
   const router = useRouter();
@@ -92,7 +92,7 @@ export function CountScanner({ countId, products, entries, blind, add, remove }:
     if (picked.trackLots && !lotValue) { setMsg({ tone: "err", text: "Article suivi par lot : indiquez le lot." }); return; }
     if (qty.trim() === "" || Number(qty.replace(",", ".")) < 0) { setMsg({ tone: "err", text: "Quantité comptée ?" }); return; }
     start(async () => {
-      const r = await add(countId, { productId: picked.id, lotNumber: lotValue, expiryDate: newLot && expiry ? expiry : null, quantity: qty.replace(",", ".") });
+      const r = await add(countId, { ...(picked.kind === "MATERIEL" ? { itemId: picked.id } : { productId: picked.id }), lotNumber: lotValue, expiryDate: newLot && expiry ? expiry : null, quantity: qty.replace(",", ".") });
       if (!r.ok) { setMsg({ tone: "err", text: r.error ?? "Saisie refusée." }); return; }
       setMsg({ tone: "ok", text: `${picked.name}${lotValue ? ` · lot ${lotValue}` : ""} : ${qty} ajouté(s).` });
       setPicked(null); setQty(""); setLot(""); setNewLot(false);

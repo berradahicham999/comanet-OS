@@ -160,8 +160,11 @@ Règles :
   Stock insuffisant : refus (ou alerte, selon le réglage). Un avoir dont le motif porte un dépôt de retour fait rentrer
   la marchandise dans ce dépôt (modifiable ligne par ligne), sur le lot livré à l'origine (avoir de facture) ou sur le
   lot désigné (avoir libre).
-- **Facture d'articles = depuis les BL.** Une facture directe ne porte que des services ou des frais ; un article
-  stocké se facture toujours depuis son BL (c'est le BL qui a sorti le stock). Une facture regroupe les BL d'un
+- **Facture d'articles : depuis les BL, ou directe.** C'est le BL qui sort le stock et alimente les ventes. Une
+  facture directe (onglet Factures → « Nouvelle facture ») peut porter des produits, des services ou des frais :
+  ses produits ne font **aucun mouvement de stock** et **n'alimentent pas les ventes** (sell-in) ; ils comptent en
+  facturation, en règlements et au P&L (vente en bloc). Son avoir ne fait ni retour en stock ni vente négative
+  (`directInvoiceCredits()`). Les blocages commerciaux s'appliquent comme sur un BL. Une facture regroupe les BL d'un
   seul client, de même nature (réelle / simulation) et de même remise globale ; les UG suivent la première
   facturation d'une ligne. Pas de double facturation : la base vérifie le reste à facturer.
 - **Avoir** : sur une facture validée, lignes non encore créditées reprises (à ajuster), motif obligatoire. Le TTC
@@ -261,6 +264,19 @@ sur le serveur Next : `/gestion/pieces/<id>/pdf`.
 - **Cycle.** En préparation → Comptage en cours (théorique et CMUP de chaque article × lot du périmètre figés au
   démarrage ; un article sans stock a une ligne à 0) → Validé (numéro INV sans trou) ou Annulé. Un inventaire clos est
   figé par la base (migration 0028). Seul `src/lib/gestion/counts.ts` écrit les inventaires (test).
+- **Compteurs désignés** (migration 0058) : la préparation choisit les compteurs (personnes ayant Créer sur Stock). Ils
+  reçoivent une notification (cloche et push, type `COUNT_ASSIGNED`) dès la préparation, puis une seconde à l'ouverture du
+  comptage qui mène droit à la feuille. Un compteur ajouté ensuite est prévenu ; la liste des inventaires affiche en tête
+  « Inventaires qui vous sont confiés ».
+- **Feuille de comptage** : « Compter » liste TOUS les articles de la session (produits par marque, une ligne par lot,
+  puis matériel par catégorie) avec une case quantité à côté de chacun ; la valeur est enregistrée en quittant la case
+  (Entrée passe à la suivante). La case est la quantité de CE compteur sur la ligne (`setMyCount()` remplace sa saisie) ;
+  celles des autres compteurs s'additionnent. Vide = pas encore compté. Le scanner reste dessous pour un lot ou un article
+  absent de la liste.
+- **Matériel marketing** (goodies, PLV, print : `inventory_items`) : compté dans la même session si « Compter aussi le
+  matériel » est coché (par défaut ; avec un périmètre de marques, seul le matériel de ces marques). Théorique = stock de
+  l'article au démarrage, coût = son coût unitaire ; unités entières, sans lot. À la validation, chaque écart devient un
+  AJUSTEMENT de `recordMovement()` (motif « Inventaire INV… »), jamais une écriture directe du stock.
 - **Plusieurs compteurs** : chaque saisie est une ligne (compteur, heure) ; le compté d'une ligne est la **somme** des
   saisies (lot comparé sans casse). Un article ou un lot trouvé en rayon sans théorique crée sa ligne.
 - **Non compté ≠ zéro.** Une ligne sans saisie n'est ni juste ni fausse : elle n'est pas ajustée. « Non comptés → 0 »

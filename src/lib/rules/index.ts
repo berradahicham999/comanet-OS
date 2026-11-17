@@ -56,6 +56,14 @@ export const RULES: Rule[] = [
   ...crmRules,
 ];
 
+/** Règles médicales : coupées tant que `settings.medicalActionCenter` est faux (Médical → Paramétrage). */
+const MEDICAL_RULES = new Set<Rule>([...medicalRules, ...medicalFieldRules]);
+
+/** Règles réellement exécutées avec ces réglages (moteur et liste « Règles actives »). */
+export function activeRules(settings: Pick<RuleContext["settings"], "medicalActionCenter">): Rule[] {
+  return settings.medicalActionCenter ? RULES : RULES.filter((r) => !MEDICAL_RULES.has(r));
+}
+
 async function buildContext(): Promise<RuleContext> {
   const { ref } = await getRefDate();
   const [settings, stocks, clients] = await Promise.all([getSettings(), productStocks({}, ref), clientIntel({}, ref)]);
@@ -68,7 +76,7 @@ async function buildContext(): Promise<RuleContext> {
  */
 export const allRecommendations = cache(async (): Promise<RecommendationWithState[]> => {
   const ctx = await buildContext();
-  const results = await Promise.all(RULES.map(async (r) => {
+  const results = await Promise.all(activeRules(ctx.settings).map(async (r) => {
     try { return await r.run(ctx); } catch (e) { console.error(`Règle ${r.id} en erreur`, e); return []; }
   }));
   // Alertes de contrôle terrain : seulement pour la direction et le manager de la déléguée concernée.

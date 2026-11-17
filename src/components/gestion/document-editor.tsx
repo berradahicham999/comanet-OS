@@ -145,15 +145,15 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
     return data.clients.filter((c) => norm(`${c.name} ${c.legalName ?? ""} ${c.city ?? ""}`).includes(q)).slice(0, 8);
   }, [clientQuery, data.clients]);
 
-  // Commande et BL : articles stockés ; facture directe : services et frais (un article stocké se facture depuis son BL).
+  // Commande et BL : articles stockés ; facture directe : articles stockés (sans sortie de stock), services et frais.
   const productMatches = useMemo(() => {
     const q = norm(query.trim());
     if (!q) return [];
     return data.products
-      .filter((p) => (stocked || freeCredit ? p.kind === "PRODUIT" : p.kind !== "PRODUIT"))
+      .filter((p) => (type === "FACTURE" ? true : stocked || freeCredit ? p.kind === "PRODUIT" : p.kind !== "PRODUIT"))
       .filter((p) => p.ean === query.trim() || norm(`${p.name} ${p.ref ?? ""} ${p.brand ?? ""}`).includes(q))
       .slice(0, 10);
-  }, [query, data.products, stocked, freeCredit]);
+  }, [query, data.products, stocked, freeCredit, type]);
   // BL : le matériel marketing (goodies, PLV, print) se cherche dans la même liste.
   const materialMatches = useMemo(() => {
     const q = norm(query.trim());
@@ -349,7 +349,7 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
         )}
         {!locked && (
           <div className="relative">
-            <input className="input h-10" placeholder={type === "BL" ? "Ajouter un produit ou du matériel (goodie, PLV) : nom, référence, marque, code-barres…" : freeCredit ? "Ajouter un produit rendu ou crédité : nom, référence, marque ou code-barres…" : stocked ? "Ajouter un article : nom, référence, marque ou code-barres…" : "Ajouter un service ou des frais…"} value={query} onChange={(e) => setQuery(e.target.value)}
+            <input className="input h-10" placeholder={type === "BL" ? "Ajouter un produit ou du matériel (goodie, PLV) : nom, référence, marque, code-barres…" : freeCredit ? "Ajouter un produit rendu ou crédité : nom, référence, marque ou code-barres…" : stocked ? "Ajouter un article : nom, référence, marque ou code-barres…" : "Ajouter un produit, un service ou des frais : nom, référence, marque, code-barres…"} value={query} onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (productMatches[0]) addProduct(productMatches[0]); } }} />
             {(productMatches.length > 0 || materialMatches.length > 0) && (
               <ul className="absolute z-20 left-0 right-0 mt-1 card p-1 max-h-80 overflow-auto shadow-lg">
@@ -373,7 +373,7 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
             )}
           </div>
         )}
-        {type === "FACTURE" && !locked && <p className="text-[12px] text-muted">Les articles stockés se facturent depuis leurs bons de livraison (onglet « Facturer des BL ») : c&apos;est le BL qui sort le stock.</p>}
+        {type === "FACTURE" && !locked && <p className="text-[12px] text-muted">Facture directe : les produits ajoutés ici ne sortent pas du stock et n&apos;alimentent pas les ventes. Pour sortir le stock, passez par un bon de livraison puis « Facturer des BL ».</p>}
 
         {lines.length === 0 ? (
           <p className="text-muted py-4 text-center">Aucune ligne.</p>

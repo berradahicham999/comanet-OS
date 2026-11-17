@@ -73,6 +73,9 @@ export async function resyncProjection(tx: DbLike, c: CutoverLike, f: SalesFromD
     from sales_documents d join sales_document_lines l on l.document_id = d.id left join products p on p.id = l.product_id
     where d.type in ('BL', 'AVOIR') and d.status not in ('BROUILLON', 'ANNULE') and d.source = 'COMANET_OS' and d.number is not null
       and ${isCommercialClientSql(sql`d.client_id`)}
+      -- Avoir sur une facture directe (sans BL) : la facture n'a pas alimenté les ventes, son avoir non plus.
+      and not exists (select 1 from sales_document_lines f join sales_documents fd on fd.id = f.document_id
+        where d.type = 'AVOIR' and f.id = l.source_line_id and fd.type = 'FACTURE' and f.source_line_id is null)
     order by d.date, d.number, l.position`)).rows;
   const byDoc = new Map<string, typeof rows>();
   for (const r of rows) byDoc.set(r.doc_id, [...(byDoc.get(r.doc_id) ?? []), r]);

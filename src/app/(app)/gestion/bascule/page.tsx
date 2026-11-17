@@ -10,14 +10,16 @@ import { fmtMoney } from "@/lib/gestion/money";
 import { fmtDate, iso, today } from "@/lib/format";
 import { PageHeader, Badge, Card } from "@/components/ui";
 import { GestionTabs } from "@/components/gestion/gestion-nav";
-import { importRepriseAction, saveSalesFromDocumentsAction, setModeAction } from "./actions";
+import { purgeSimulation } from "@/lib/gestion/documents";
+import { DOC_TYPE_LABELS, type DocType } from "@/lib/gestion/documents-shared";
+import { importRepriseAction, purgeSimulationAction, saveSalesFromDocumentsAction, setModeAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Bascule" };
 
 const MODE = { OFF: { label: "Sage fait foi", tone: "gray" }, PARALLELE: { label: "Période parallèle", tone: "purple" }, ACTIF: { label: "COMANET OS émet", tone: "green" } } as const;
 
-export default async function CutoverPage(props: { searchParams: Promise<{ month?: string; error?: string; done?: string; reprise?: string }> }) {
+export default async function CutoverPage(props: { searchParams: Promise<{ month?: string; error?: string; done?: string; reprise?: string; purge?: string; purgeFrom?: string; purgeTo?: string }> }) {
   const a = await requireAccessContext();
   if (!can(a.perms, "administration", "view")) redirect(a.home);
   const isAdmin = can(a.perms, "administration", "validate");
@@ -32,6 +34,12 @@ export default async function CutoverPage(props: { searchParams: Promise<{ month
       select b.name as brand, count(*)::int as n, sum(s.amount)::text as ht from sales s left join products p on p.id = s.product_id left join brands b on b.id = p.brand_id
       where s.source = 'COMANET_OS' group by 1 order by 1`),
   ]);
+  const isoDate = (v?: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v ?? "") ? v! : null);
+  const purgeFrom = isoDate(sp.purgeFrom), purgeTo = isoDate(sp.purgeTo);
+  const purge = isAdmin && sp.purge
+    ? await purgeSimulation({ from: purgeFrom, to: purgeTo }, { id: a.user.id, name: a.user.name }, { apply: false }).catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }))
+    : null;
+  if (purge && "error" in purge) redirect(`/gestion/bascule?error=${encodeURIComponent(purge.error)}#purge`);
   const sfd = g.salesFromDocuments;
   const blockers = cutoverBlockers(checks);
   const c = g.cutover;
@@ -130,7 +138,54 @@ export default async function CutoverPage(props: { searchParams: Promise<{ month
         </Card>
       </div>
 
-      <Card title={`Rapport de contrôle — ${fmtDate(`${month}-01`).replace(/^1 /, "")}`} action={<span className="flex gap-2"><Link href={`/gestion/bascule?month=${prevMonth}`} className="btn-ghost btn-sm">← Mois précédent</Link><Link href={`/gestion/bascule?month=${nextMonth}`} className="btn-ghost btn-sm">Mois suivant →</Link></span>}>
+      {isAdmin && (
+        <div id="purge" className="scroll-mt-20 mb-4">
+          <Card title="Purger les pièces de simulation">
+            <div className="text-[13px] space-y-3">
+              <p className="text-[12.5px] text-muted">
+                Supprime définitivement les BL, factures et avoirs de <b>simulation</b> (SIMBL / SIMFA / SIMAV) validés sur la période (bornes vides = tout).
+                Les pièces liées suivent, même hors période (facture d&apos;un BL purgé, avoir d&apos;une facture purgée, brouillons qui les reprennent).
+                Partent avec elles : ventes projetées, charges d&apos;échantillons, imputations de règlements (le règlement redevient non imputé) et relances qui ne portaient que sur elles.
+                <b> Restent</b> : les sorties de stock du journal et de matériel (la marchandise est partie), les quantités livrées des commandes BC et la numérotation SIM. Les pièces réelles ne sont jamais touchées.
+              </p>
+              <form className="flex flex-wrap items-end gap-2" action="/gestion/bascule#purge">
+                <label className="block"><span className="label block mb-1">Du</span><input type="date" name="purgeFrom" defaultValue={purgeFrom ?? ""} className="input h-9" /></label>
+                <label className="block"><span className="label block mb-1">Au</span><input type="date" name="purgeTo" defaultValue={purgeTo ?? ""} className="input h-9" /></label>
+                <input type="hidden" name="purge" value="1" />
+                <button className="btn-secondary btn-sm" type="submit">Aperçu</button>
+              </form>
+              {purge && (
+                <div className="rounded-xl border border-line p-3 space-y-2">
+                  {purge.documents === 0 ? <p className="text-muted">Aucune pièce de simulation validée sur cette période.</p> : (
+                    <>
+                      <p>
+                        <b>{purge.documents} pièce(s)</b> : {Object.entries(purge.byType).map(([k, n]) => `${n} ${DOC_TYPE_LABELS[k as DocType].many.toLowerCase()}`).join(", ")}
+                        {purge.linked > 0 && <> — dont {purge.linked} hors période, liée(s)</>}
+                        {purge.drafts > 0 && <> · {purge.drafts} brouillon(s) qui les reprennent</>} · {fmtMoney(purge.netHt)} HT (BL + factures − avoirs).
+                      </p>
+                      <p className="text-[12.5px] text-muted">
+                        Retirés : {purge.sales} ligne(s) de ventes projetées, {purge.charges} charge(s) d&apos;échantillons, {purge.allocations} imputation(s) de règlements, {purge.reminders} relance(s).
+                      </p>
+                      <p className="text-[12px] text-faint break-words">{purge.numbers.slice(0, 40).join(", ")}{purge.numbers.length > 40 ? ` … (+${purge.numbers.length - 40})` : ""}</p>
+                    </>
+                  )}
+                  {purge.blocked.length > 0 && <p className="text-red text-[12.5px]">Purge impossible : {purge.blocked.slice(0, 5).join(" ; ")}.</p>}
+                  {purge.documents > 0 && purge.blocked.length === 0 && (
+                    <form action={purgeSimulationAction} className="flex flex-wrap items-end gap-2 pt-2 border-t border-line">
+                      <input type="hidden" name="from" value={purgeFrom ?? ""} />
+                      <input type="hidden" name="to" value={purgeTo ?? ""} />
+                      <label className="block"><span className="label block mb-1">Tapez PURGER pour confirmer (irréversible)</span><input name="confirm" className="input h-9" placeholder="PURGER" autoComplete="off" /></label>
+                      <button className="btn-primary btn-sm !bg-red !border-red" type="submit">Purger {purge.documents} pièce(s)</button>
+                    </form>
+                  )}
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      <Card title={`Rapport de contrôle —${fmtDate(`${month}-01`).replace(/^1 /, "")}`} action={<span className="flex gap-2"><Link href={`/gestion/bascule?month=${prevMonth}`} className="btn-ghost btn-sm">← Mois précédent</Link><Link href={`/gestion/bascule?month=${nextMonth}`} className="btn-ghost btn-sm">Mois suivant →</Link></span>}>
         <p className="text-[12.5px] text-muted mb-3">COMANET OS (pièces du mois, simulation comprise) contre Sage (ventes importées) pour les sites qui basculent. Un écart d&apos;un centime par pièce au plus est un écart d&apos;arrondi, pas une anomalie.</p>
         <div className="overflow-x-auto mb-4">
           <table className="w-full text-[12.5px] tabular-nums">

@@ -182,6 +182,19 @@ export async function allocatePayment(paymentId: string, invoiceId: string, amou
   });
 }
 
+/**
+ * Purge des pièces de simulation (`purgeSimulation()`) : retire les imputations qui portent sur ces pièces (le
+ * règlement redevient non imputé, il n'est jamais supprimé) et les relances qui ne portaient que sur elles.
+ */
+export async function detachPurgedDocuments(tx: Tx, documentIds: string[]): Promise<{ allocations: number; reminders: number }> {
+  if (!documentIds.length) return { allocations: 0, reminders: 0 };
+  const ids = pgArray(documentIds);
+  const a = await tx.execute(sql`delete from payment_allocations where invoice_id = any(${ids}) or credit_note_id = any(${ids})`);
+  const r = await tx.execute(sql`delete from payment_reminders r where jsonb_array_length(r.invoices) > 0
+    and not exists (select 1 from jsonb_array_elements(r.invoices) e where not ((e->>'id') = any(${pgArray(documentIds, "text")})))`);
+  return { allocations: a.rowCount ?? 0, reminders: r.rowCount ?? 0 };
+}
+
 /** Impute un avoir (crédit client) sur une facture du même client. Utilisé aussi à la validation d'un avoir. */
 export async function allocateCreditIn(tx: Tx, creditNoteId: string, invoiceId: string, amount: bigint, actorId: string | null): Promise<string> {
   const v = (await tx.execute<{ client_id: string; is_simulation: boolean; type: string; status: string; number: string; left: string }>(sql`
