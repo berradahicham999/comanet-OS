@@ -5,12 +5,15 @@ import { db } from "@/db";
 import { doctorVisits, doctors, visitEvents, medicalGpsConsents } from "@/db/schema";
 import type { DbLike } from "@/lib/events/emit";
 import { audit, type AuditActor } from "@/lib/audit";
-import { getSettings, type MedicalFieldSettings } from "@/lib/settings";
+import { getSettings, type MedicalFieldSettings, type WebPlacesSettings } from "@/lib/settings";
 import { BUSINESS_TZ } from "@/lib/format";
 import {
   verifyVisit, eventTime, sendDelayMs, haversineM, pointOf, canProposeCabinet, visitDurationMinutes,
   type EventForCheck, type GpsError, type VerificationStatus, type Cabinet, type PreviousStop,
 } from "./gps-shared";
+import { webCheckOf } from "@/lib/places/store";
+import { webPositionAction, isOutOfZone, type GpsSource } from "@/lib/places/web-check-shared";
+import { alertOutOfZoneQuietly, type OutOfZoneInput } from "@/lib/places/out-of-zone";
 
 /**
  * Médical v2 — chrono de visite. Seul écrivain de `visit_events` et des champs horaires / GPS de
@@ -87,7 +90,8 @@ export async function doctorAllowed(tx: DbLike, doctorId: string, actorId: strin
  */
 export async function recordAction(actor: ChronoActor, input: ActionInput, opts: { ownOnly: boolean; settings?: MedicalFieldSettings }): Promise<ActionResult> {
   if (!input.clientEventId || input.clientEventId.length > 80) return { ok: false, code: "INVALID", message: "Identifiant d'action manquant." };
-  const s = opts.settings ?? (await getSettings()).medicalField;
+  const all = await getSettings();
+  const s = opts.settings ?? all.medicalField;
 
   const existing = await db.execute<{ visit_id: string }>(sql`select visit_id from visit_events where client_event_id = ${input.clientEventId}`);
   if (existing.rows[0]) return { ok: true, visitId: existing.rows[0].visit_id, duplicate: true };
@@ -108,9 +112,10 @@ export async function recordAction(actor: ChronoActor, input: ActionInput, opts:
   };
   const at = eventTime(ev);
   const late = !!input.queued || sendDelayMs(ev) > 120_000;
+  let alert: OutOfZoneInput | null = null;
 
   try {
-    return await db.transaction(async (tx) => {
+    const result: ActionResult = await db.transaction(async (tx): Promise<ActionResult> => {
       let visitId: string;
       let doctorId: string;
 
@@ -193,6 +198,13 @@ export async function recordAction(actor: ChronoActor, input: ActionInput, opts:
       const cab = await cabinetOf(tx, doctorId);
       const distance = cab && ev.lat !== null ? Math.round(haversineM({ lat: ev.lat, lng: ev.lng! }, cab)) : null;
       await insertEvent(tx, actor, visitId, input, ev, late, distance);
+      if (cab && isOutOfZone({ validated: cab.validated, distanceM: distance, accuracyM: ev.accuracyM, radiusM: s.radiusM })) {
+        const n = await tx.execute<{ name: string }>(sql`select first_name || ' ' || last_name as name from doctors where id = ${doctorId}::uuid`);
+        alert = {
+          kind: "medical", visitId, actorId: actor.id, actorName: actor.name, placeName: n.rows[0]?.name ?? "", eventType: input.type,
+          distanceM: distance!, radiusM: s.radiusM, accuracyM: ev.accuracyM, at,
+        };
+      }
 
       // Médecin sans position : le premier Démarrer précis est proposé comme position du cabinet, à valider.
       if (input.type === "START" && !cab && canProposeCabinet(ev, s)) {
@@ -200,11 +212,17 @@ export async function recordAction(actor: ChronoActor, input: ActionInput, opts:
           gpsLat: ev.lat!.toFixed(6), gpsLng: ev.lng!.toFixed(6), gpsSource: "PREMIERE_VISITE", gpsStatus: "A_CONFIRMER", updatedAt: new Date(),
         }).where(and(eq(doctors.id, doctorId), sql`${doctors.gpsLat} is null`));
       }
+      // Position à valider : validée d'office si Google Maps et le terrain concordent (`webPositionAction()`).
+      if (input.type === "START") {
+        await applyWebPositionToCabinet(tx, doctorId, { field: s, web: all.webPlaces, startPoint: canProposeCabinet(ev, s) ? pointOf(ev) : null });
+      }
 
       await refreshVerification(tx, visitId, s);
       await refreshDoctorVisitStats(tx, doctorId);
       return { ok: true, visitId };
     });
+    if (result.ok) await alertOutOfZoneQuietly(alert);
+    return result;
   } catch (e) {
     // Deux Démarrer simultanés (deux onglets) : l'index unique tranche.
     if (String((e as { code?: string })?.code ?? "") === "23505") {
@@ -415,7 +433,7 @@ export async function validateCabinet(actor: ChronoActor, doctorId: string, posi
     const next = {
       gpsLat: moved ? position!.lat.toFixed(6) : d.gps_lat,
       gpsLng: moved ? position!.lng.toFixed(6) : d.gps_lng,
-      gpsSource: (moved ? "MANUELLE" : (d.gps_source ?? "MANUELLE")) as "MANUELLE" | "PREMIERE_VISITE" | "ADRESSE",
+      gpsSource: (moved ? "MANUELLE" : (d.gps_source ?? "MANUELLE")) as GpsSource,
       gpsStatus: "VALIDEE" as const,
       gpsValidatedAt: new Date(),
       gpsValidatedBy: actor.id,
@@ -431,6 +449,41 @@ export async function validateCabinet(actor: ChronoActor, doctorId: string, posi
     for (const v of visits.rows) await refreshVerification(tx, v.id, s);
     return { ok: true };
   });
+}
+
+/**
+ * Applique le contrôle Internet à la position du cabinet (seule écriture d'une position venue de Google) :
+ * médecin sans position → position Google proposée « à valider » (origine INTERNET) ; position « à valider » qui
+ * concorde avec une seconde source → validée, tracée dans `audit_logs`, contrôles des visites recalculés.
+ * Appelée après une recherche Google (`web-check.ts`) et au démarrage d'une visite (avec la position du démarrage).
+ */
+export async function applyWebPositionToCabinet(
+  tx: DbLike,
+  doctorId: string,
+  opts: { field: MedicalFieldSettings; web: WebPlacesSettings; startPoint?: { lat: number; lng: number } | null },
+): Promise<"PROPOSE" | "VALIDATE" | null> {
+  const d = (await tx.execute<{ gps_lat: string | null; gps_lng: string | null; gps_source: GpsSource | null; gps_status: string | null; name: string }>(
+    sql`select gps_lat, gps_lng, gps_source, gps_status, first_name || ' ' || last_name as name from doctors where id = ${doctorId}::uuid for update`,
+  )).rows[0];
+  if (!d) return null;
+  const pos = d.gps_lat === null || d.gps_lng === null ? null : { lat: Number(d.gps_lat), lng: Number(d.gps_lng), validated: d.gps_status === "VALIDEE", source: d.gps_source };
+  const action = webPositionAction(pos, await webCheckOf(tx, "doctor", doctorId), opts.web, opts.startPoint ?? null);
+  if (!action) return null;
+  const actor = { id: null, name: "Contrôle Internet" };
+  const before = { lat: d.gps_lat, lng: d.gps_lng, source: d.gps_source, status: d.gps_status };
+  if (action.kind === "PROPOSE") {
+    const lat = action.position.lat.toFixed(6);
+    const lng = action.position.lng.toFixed(6);
+    await tx.update(doctors).set({ gpsLat: lat, gpsLng: lng, gpsSource: "INTERNET", gpsStatus: "A_CONFIRMER", updatedAt: new Date() })
+      .where(and(eq(doctors.id, doctorId), sql`${doctors.gpsLat} is null`));
+    await audit({ actor, action: "UPDATE", module: "medical", entity: "doctor_cabinet", entityId: doctorId, label: `Cabinet de Dr ${d.name} : ${action.label}`, before, after: { lat, lng, source: "INTERNET", status: "A_CONFIRMER" } }, tx);
+  } else {
+    await tx.update(doctors).set({ gpsStatus: "VALIDEE", gpsValidatedAt: new Date(), gpsValidatedBy: null, updatedAt: new Date() }).where(eq(doctors.id, doctorId));
+    await audit({ actor, action: "VALIDATE", module: "medical", entity: "doctor_cabinet", entityId: doctorId, label: `Cabinet de Dr ${d.name} : ${action.label}`, before, after: { ...before, status: "VALIDEE" } }, tx);
+  }
+  const visits = await tx.execute<{ id: string }>(sql`select id from doctor_visits where doctor_id = ${doctorId}::uuid and timing_source = 'CHRONO'`);
+  for (const v of visits.rows) await refreshVerification(tx, v.id, opts.field);
+  return action.kind;
 }
 
 /* ------------------------------------------------------------------ */

@@ -127,6 +127,16 @@ export default async function ParametresPage(props: { searchParams: Promise<{ ta
               <Field name="mobile_stockAlertHour" label="Alerte de stock (heure)" value={s.mobile.stockAlertHour} />
             </div>
           </Card>
+          <Card title="Cockpit">
+            <input type="hidden" name="cockpit_present" value="1" />
+            <label className="flex items-start gap-2 text-[13px]">
+              <input type="checkbox" name="cockpit_hideRegulatory" defaultChecked={s.cockpit.hideRegulatory} className="mt-0.5" />
+              <span>
+                <span className="font-medium">Réglementaire hors du Cockpit</span>
+                <span className="block text-[12px] text-muted">Pas de carte Réglementaire au Cockpit ; les dossiers à traiter ne remontent ni dans ses actions prioritaires, ni dans le brief du matin, ni dans les rapports du copilote. Le module Réglementaire, l&apos;Action Center et les tâches de la responsable ne changent pas.</span>
+              </span>
+            </label>
+          </Card>
           <Card title="Réglementaire">
             <Field name="regulatoryAlertDays" label="Alertes (jours avant expiration)" value={s.regulatoryAlertDays.join(" / ")} hint="Séparés par / ou virgule" />
             <div className="mt-2"><Field name="regulatoryRenewalDays" label="Lancer le renouvellement à J- (tâche automatique)" value={s.regulatoryRenewalDays} /></div>

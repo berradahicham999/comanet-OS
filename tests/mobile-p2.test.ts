@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { businessHour, isSundayIn, pushMessage, reminderDue, stockAlertDue, stockAlertText, subscriptionGone, validEndpoint } from "@/lib/mobile/push-shared";
-import { swipeDecision, SWIPE_THRESHOLD_PX } from "@/lib/mobile/validations-shared";
+import { swipeDecision, SWIPE_THRESHOLD_PX } from "@/lib/validations/shared";
 import { formDataFromPairs, readReport } from "@/lib/medical/report-input";
 import { settle } from "@/lib/mobile/outbox-shared";
 import { contentValidationKeys } from "@/lib/content/shared";

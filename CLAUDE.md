@@ -134,9 +134,11 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | P&L de gestion (nature des sites, CA direct / en bloc depuis les factures − avoirs / commissions, coût des ventes, marketing réel ventilé, contribution marketing, EBITDA, charges récurrentes, contribution par marque, point mort, détail jusqu'aux pièces) | `src/lib/pnl-shared.ts` + `src/lib/pnl.ts` (+ `budgetConsumptionByMonth()` dans `budget.ts`) | `classifySite()`, `chargeMonths()`, `buildPnl()` (seule définition du compte de résultat), `pnlStatement()`, `pnlLineSources()`, `createCharge()`, `reviseCharge()` |
 | Clients non commerciaux (clients internes « sorties marketing » + client « vente en bloc » du réglage) : exclus des ventes, segments, classements, CRM, copilote | `src/lib/analytics.ts` | `isCommercialClientSql()`, `nonCommercialClientIds()`, `BULK_CLIENT_SQL` |
 | Sorties marketing par BL (charge d'échantillons au coût figé par nature, matériel tracé sans charge, alertes de coût, annulation) | `src/lib/gestion/marketing-outputs-shared.ts` + `marketing-outputs.ts` | `outputCharges()`, `costIssues()`, `recordOutputCharges()` / `removeOutputCharges()` (seules écritures de `marketing_expenses.document_line_id`), `recordMaterialOutputs()` / `reverseMaterialOutputs()`, `activationOutputs()`, `setClientInternal()` (fiche) |
+| Rapport (cycle : valider, archiver, annuler la validation, désarchiver ; annonce de chaque nouveau rapport, agents compris, aux administrateurs et à « Valider » sur Rapports) | `src/lib/ai/report-decisions-shared.ts` + `src/lib/ai/reports.ts` | `reportMove()` (seule règle du cycle), `moveReport()` / `setReportStatus()` (seules écritures du statut), `notifyNewReports()` (seule annonce, réservation par `ai_reports.notified_at`, migration 0057) |
 | Ventilation du marketing réel (publicité, échantillons par nature, goodies, PLV, influence, activations, autres) | `src/lib/budget-categories.ts` | `marketingBucketOf()`, `MARKETING_BUCKET_LABELS` ; somme = consommé (`budgetConsumptionByMonth().breakdown`) |
 | Contrôle de présence d'une visite (distance, heure retenue, durée, vitesse implicite, statut et motifs) | `src/lib/medical/gps-shared.ts` | `haversineM()`, `eventTime()`, `visitDurationMinutes()`, `impliedSpeedKmh()`, `verifyVisit()` |
 | Chrono de visite (Démarrer / Terminer / non effectuée, clôture auto, correction, cabinet) | `src/lib/medical/chrono.ts` | `recordAction()` (seule écriture de `visit_events` et des heures de visite), `autoCloseStale()`, `correctVisit()`, `validateCabinet()`, `refreshVerification()` |
+| Contrôle Internet d'une position (requête Google, ressemblance des noms, lieu retenu, verdict concorde / écart, proposition ou validation automatique) et alerte « visite hors zone » | `src/lib/places/web-check-shared.ts` (pur) + `web-check.ts` + `google.ts` + `out-of-zone.ts` | `buildQuery()`, `placeNameScore()`, `pickPlace()`, `compareWithWeb()` (verdict calculé à la lecture, jamais stocké), `webPositionAction()`, `isOutOfZone()`, `runWebChecks()` (seule écriture de `place_web_checks`), `applyWebPositionToCabinet()` / `applyWebPositionToPointOfSale()` (seules écritures d'une position venue de Google), `alertOutOfZone()` |
 | Qui voit les heures et positions des visites | `src/lib/medical/field-access.ts` | `fieldScope()`, `inFieldScope()`, `requireFieldControl()` |
 | Journée terrain (ordre, temps en visite / entre visites) et indicateurs du suivi | `src/lib/medical/field-report-shared.ts` + `field-report.ts` | `buildTimeline()`, `fieldVisits()`, `fieldKpis()` |
 | Rapprochement d'un nom de médecin | `src/lib/medical/matching.ts` | `doctorNameTokens()`, `doctorAliasKey()`, `doctorNameScore()`, `matchDoctor()` |
@@ -155,7 +157,10 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Métier sur le téléphone (déduit des droits, jamais de `users.role`) et onglets | `src/lib/mobile/persona.ts` + `src/components/nav-config.ts` | `personaOf()`, `mobileTabsForPermissions()` |
 | File d'envoi de l'app mobile (état d'une saisie, rejeu, conflit) et saisies rejouées | `src/lib/mobile/outbox-shared.ts` + `outbox.ts` + `mutations.ts` | `settle()`, `sendable()`, `flushOutbox()`, `applyMutation()` (seule entrée des saisies du téléphone) |
 | Référentiels gardés sur le téléphone (portée, durée de vie), fiche courte d'un client, pack conseillé | `src/lib/mobile/snapshot.ts` + `snapshot-shared.ts` + `outbox-shared.ts` | `mobileSnapshot()`, `clientSheet()`, `sortPortfolio()`, `deliverablePack()`, `snapshotExpired()` |
-| File unique de validation du téléphone (contenus, activations, pièces bloquées) | `src/lib/mobile/validations.ts` + `validations-shared.ts` | `listValidations()`, `decideValidation()`, `swipeDecision()` |
+| File unique « À décider » de la direction, lue par le téléphone ET le Cockpit (contenus, dépenses par activation, pièces bloquées, décisions d'agents, rapports à lire, décisions marketing critiques ou hautes) | `src/lib/validations/shared.ts` + `queue.ts` | `listValidations()`, `decideValidation()` (ne font que déléguer aux écritures officielles de chaque file), `sortValidations()` (échéance puis montant), `readDecision()`, `swipeDecision()` |
+| Décision d'agent portée par un rapport (`ai_reports.sources.decisions[]`, contrat dans `docs/contrat-decisions-agents.md`) | `src/lib/ai/report-decisions-shared.ts` + `report-decisions.ts` | `parseAgentDecisions()`, `decisionStates()`, `withOutcome()` (bascule VALIDATED), `resolveOwner()`, `normalizeReportStatus()`, `decideReportDecision()` (seule écriture de `sources.outcomes`), `draftReports()` |
+| Création d'une tâche active | `src/lib/tasks.ts` | `createTask()`, `notifyTaskAssigned()` |
+| Ce que le pilotage de direction ne montre pas (réglementaire hors Cockpit, brief, rapports) | `src/lib/rules/visibility.ts` | `hiddenRuleIds()`, `hiddenTools()`, `directionRecommendations()` |
 | Web Push (abonnements, envoi) et relances | `src/lib/mobile/push.ts` + `push-shared.ts` + `reminders.ts` | `saveSubscription()`, `sendPush()` (seules écritures et seul envoi), `validEndpoint()`, `reminderDue()`, `runMobileCron()` |
 | Journée d'une déléguée (bureau et téléphone), lecture d'un compte rendu | `src/lib/medical/day.ts` + `report-input.ts` | `delegateDay()`, `visitHistory()`, `readReport()` |
 | Service worker (ce qui est mis en cache, et ce qui ne l'est jamais) | `src/lib/mobile/sw-source.ts` | `swSource()` |
@@ -220,6 +225,18 @@ cache), clé et modèles en variables d'environnement, limites dans `settings.ai
 quotidien, administrateurs), « Détailler » sur l'Action Center (`plans.ts`), rapports (`reports.ts`, module `rapports`).
 Ouvert aux profils hors portée OWN (`copilotAllowed()`).
 
+**Cockpit « À décider »** (`docs/contrat-decisions-agents.md`). Le haut du Cockpit est un poste de décision : une seule zone, la même file
+que `/m/validations` (`src/lib/validations/`), triée par échéance puis montant, dix lignes puis `/a-decider`. Chaque ligne passe par
+l'écriture officielle de sa file, qui revérifie les droits : `transition()`, `transitionActivation()`, `validateAndRender()`,
+`decideReportDecision()` / `setReportStatus()` (Rapports → Valider), `approveDecision()` / `rejectDecision()` (Marketing Créer / Modifier,
+décisions PROPOSED critiques ou hautes, « ne pas pousser » exclu). Un refus exige un motif (sauf archiver un rapport lu). Les agents
+externes écrivent `ai_reports` avec un `type` libre et un statut en minuscules (`draft`) : toujours lire le statut par
+`normalizeReportStatus()`. Une décision d'agent validée crée une tâche (`createTask()`, source AI, `source_key` `rapport:<id>:<décision>`),
+son sort s'écrit dans `sources.outcomes` sous verrou de ligne, et le rapport passe VALIDATED quand tout est tranché ; aucune table
+nouvelle. Un montant absent s'affiche « — ». **Réglementaire hors du Cockpit** : `settings.cockpit.hideRegulatory` (activé par défaut,
+Paramètres → Cockpit) retire la carte, la règle `regulatory-expiry` du Cockpit, et la section, la règle et l'outil
+`get_regulatory_alerts` du brief du matin et des rapports ; le module Réglementaire et l'Action Center ne changent pas.
+
 **Agent marketing** (`docs/guide-agent-marketing.md`). Le copilote avec la persona marketing
 (`src/lib/ai/prompts/marketing-agent.md`) et dix outils de lecture (`src/lib/ai/tools/marketing-*.ts`) posés sur la
 couche `src/lib/marketing-intel/` (pure, dépendances injectées, aucune formule maison : elle appelle les fonctions du
@@ -274,7 +291,7 @@ fiabilité et pistes (`counts-shared.ts` : `lineGap()`, `countStats()`, `gapLead
 (`stock_counts.counter_ids`, notifiés `COUNT_ASSIGNED` à la préparation et à l'ouverture) ; feuille de comptage = tous les
 articles listés, case quantité à côté (`setMyCount()` : la quantité de CE compteur) ; matériel marketing (`inventory_items`)
 compté dans la même session (`include_materials`, ligne `product_id` OU `inventory_item_id`), ajusté par `recordMovement()`
-(migration 0058). Scan mobile (BarcodeDetector) pour un lot hors liste ; à l'aveugle, le théorique ne quitte pas le serveur. Droits : `stock` (Créer =
+(migration 0060). Scan mobile (BarcodeDetector) pour un lot hors liste ; à l'aveugle, le théorique ne quitte pas le serveur. Droits : `stock` (Créer =
 compter, Valider = valider).
 Lot 5 livré : règlements et bascule. `payments` (RG, figés par triggers) + `payment_allocations` (règlement ou avoir →
 facture) + `payment_reminders` ; seul `src/lib/gestion/payments.ts` les écrit. Solde, balance âgée, relances, imputation
@@ -282,7 +299,7 @@ proposée : `receivables-shared.ts`. Un avoir s'impute sur sa facture à la vali
 source du « réel ou simulation »), `importBlockedByCutover()` (C5), page `/gestion/bascule` (`cutover.ts` : contrôles,
 mode, rapport), reprise Sage (`importOpeningInvoices()`, source SAGE_REPRISE). Envoi au comptable : sélection multiple des pièces et ZIP de leurs PDF assemblé dans le navigateur (`piece-exporter.tsx`) + récapitulatif Excel du mois (`exports.ts`). Retours de tests : P.U. TTC sur le BL, nom du client imprimé corrigeable sur une pièce validée (`renameDocumentClient()`, seule clé `legalName` de l'identité figée, migration 0030), changement de client d'un BL ou d'une commande validés (`reassignDocumentClient()` : client, identité figée reprise de la fiche, empreinte, ventes projetées via `reassignProjection()`, PDF ; la commande emporte ses BL ; jamais une facture ou un avoir ni un BL facturé ; garde-fou ouvert par `comanet.reassign_client`, migration 0050 ; la liste des pièces affiche le nom figé), avoir libre sans origine (migration 0053 : produits au dernier prix du client, marques ou libellés ; le motif porte le dépôt de retour `credit_reasons.return_warehouse_key` — bon état → vendable, périmé ou abîmé → non vendable, sans retour ou financier → aucun mouvement ; lot rendu choisi ou saisi, `clientReturnContext()`). Facture directe de produits (sans BL) : permise, **aucun mouvement de
 stock, aucune vente projetée** (décision 10/11/2026) ; son avoir non plus (`directInvoiceCredits()`). Purge des simulations
-(`purgeSimulation()`, carte de `/gestion/bascule`, administrateurs, migration 0057, garde-fou ouvert par `comanet.purge_simulation`) :
+(`purgeSimulation()`, carte de `/gestion/bascule`, administrateurs, migration 0059, garde-fou ouvert par `comanet.purge_simulation`) :
 pièces SIM validées d'une période + pièces liées (et brouillons qui les reprennent) ; ventes projetées, charges d'échantillons,
 imputations et relances retirées (`detachPurgedDocuments()`) ; mouvements de stock, sorties de matériel, quantités livrées des BC et
 numérotation SIM gardés ; une pièce réelle liée bloque la purge.
@@ -332,6 +349,15 @@ observée, tournée) : `/medical/analyses`. Copilote : `get_doctor_profile`, `ge
 Test d'intégration : `MEDICAL_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/medical-integration.ts`.
 Les règles médicales de l'Action Center (`medicalRules`, `medicalFieldRules`) ne tournent que si `settings.medicalActionCenter`
 est vrai (faux par défaut, case dans Médical → Paramétrage) : `activeRules()` dans `src/lib/rules/index.ts`.
+
+**Positions vérifiées sur Internet** (`docs/guide-positions-internet.md`, migration 0058). Chaque médecin et point de vente est
+recherché sur Google Maps (Places API « Text Search », nom + ville, Maroc seulement ; clé `GOOGLE_MAPS_API_KEY`) par lots du cron
+horaire médical (`settings.webPlaces`). Google n'est jamais une preuve : fiche sans position → position Google proposée « à valider »
+(origine INTERNET), validée seulement par un Démarrer sur place ; position « à valider » (premier Démarrer, historique) qui concorde
+avec Google à moins de `concordanceM` → validée d'office (`audit()` « Contrôle Internet ») ; position validée jamais modifiée, un
+écart est signalé (panneau « Positions vérifiées sur Internet » de `/medical/suivi` et `/clients/visites`, notification PLACE_WEB_GAP).
+Alerte immédiate VISIT_OUT_OF_ZONE (application + push) aux administrateurs et au manager quand un Démarrer / Terminer / non effectuée
+tombe hors du rayon d'une position VALIDÉE, incertitude GPS déduite, une fois par visite.
 
 **CRM commercial** (`docs/guide-crm-commercial.md`, plan `docs/plan-crm-commercial.md`, migration 0045). Portefeuille =
 `clients.account_manager_id` (un commercial attitré par client, il entre dans sa portée « assignés ») ; fréquence de visite

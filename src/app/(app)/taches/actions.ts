@@ -1,18 +1,14 @@
 "use server";
 
-import { notify } from "@/lib/content/notify";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { tasks, taskComments, type TaskPriority, type TaskStatus } from "@/db/schema";
 import { requireAccess, isOwnOnly, canDo, requirePermission } from "@/lib/access";
+import { createTask, notifyTaskAssigned as notifyAssigned } from "@/lib/tasks";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim() || null;
-
-async function notifyAssigned(assigneeId: string, title: string, taskId: string, actorId: string) {
-  await notify([assigneeId], { type: "TASK_ASSIGNED", title: `Tâche assignée : ${title}`, href: `/taches/${taskId}`, entityType: "task", entityId: taskId }, { except: actorId });
-}
 
 export async function saveTask(formData: FormData) {
   const user = await requireAccess("taches");
@@ -38,7 +34,7 @@ export async function saveTask(formData: FormData) {
     revalidatePath(`/taches/${id}`);
     revalidatePath("/taches");
   } else {
-    const [row] = await db.insert(tasks).values({ ...values, createdById: user.id, source: (str(formData, "source") as "MANUAL" | null) ?? "MANUAL" }).returning();
+    const row = await createTask({ ...values, createdById: user.id, source: (str(formData, "source") as "MANUAL" | null) ?? "MANUAL" });
     if (values.assigneeId) await notifyAssigned(values.assigneeId, title, row.id, user.id);
     revalidatePath("/taches");
     const back = str(formData, "redirectTo");

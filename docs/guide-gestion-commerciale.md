@@ -264,7 +264,7 @@ sur le serveur Next : `/gestion/pieces/<id>/pdf`.
 - **Cycle.** En préparation → Comptage en cours (théorique et CMUP de chaque article × lot du périmètre figés au
   démarrage ; un article sans stock a une ligne à 0) → Validé (numéro INV sans trou) ou Annulé. Un inventaire clos est
   figé par la base (migration 0028). Seul `src/lib/gestion/counts.ts` écrit les inventaires (test).
-- **Compteurs désignés** (migration 0058) : la préparation choisit les compteurs (personnes ayant Créer sur Stock). Ils
+- **Compteurs désignés** (migration 0060) : la préparation choisit les compteurs (personnes ayant Créer sur Stock). Ils
   reçoivent une notification (cloche et push, type `COUNT_ASSIGNED`) dès la préparation, puis une seconde à l'ouverture du
   comptage qui mène droit à la feuille. Un compteur ajouté ensuite est prévenu ; la liste des inventaires affiche en tête
   « Inventaires qui vous sont confiés ».

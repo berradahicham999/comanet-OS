@@ -8,6 +8,8 @@ import { mapsUrl } from "@/lib/medical/gps-shared";
 import { fmtTime, fmtDate } from "@/lib/format";
 import { FieldMap, type MapVisit, type MapCabinet } from "@/components/medical/field-map";
 import { VerificationBadge } from "@/components/medical/verification-badge";
+import { WebCheckPanel } from "@/components/places/web-check-panel";
+import { withWebPositions } from "@/lib/places/web-check";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Suivi terrain médical" };
@@ -48,10 +50,10 @@ export default async function SuiviPage(props: { searchParams: Promise<{ delegat
     label: `${v.delegateName ?? ""} · ${fmtDate(v.date)}`, status: v.status, verificationStatus: v.verificationStatus,
     events: v.events.map((e) => ({ type: e.type, lat: e.lat, lng: e.lng, accuracyM: e.accuracyM, at: e.at, atLabel: fmtTime(e.at) })), cabinet: v.cabinet,
   }));
-  const mapCabinets: MapCabinet[] = [
+  const mapCabinets: MapCabinet[] = await withWebPositions("doctor", [
     ...visits.filter((v) => v.cabinet).map((v) => ({ doctorId: v.doctorId, name: v.doctorName, lat: v.cabinet!.lat, lng: v.cabinet!.lng, validated: v.cabinet!.validated })),
     ...cabinets.map((c) => ({ doctorId: c.doctorId, name: c.name, lat: c.lat, lng: c.lng, validated: false })),
-  ];
+  ]);
   const qs = new URLSearchParams({ ...(delegateId ? { delegate: delegateId } : {}), from, to }).toString();
 
   return (
@@ -89,12 +91,14 @@ export default async function SuiviPage(props: { searchParams: Promise<{ delegat
 
       {cabinets.length > 0 && (
         <Card className="mb-6" title={`Positions de cabinet à valider (${cabinets.length})`}>
-          <p className="text-[13px] text-muted mb-2">Proposées au premier démarrage d&apos;une visite. Tant qu&apos;elles ne sont pas validées, les visites de ces médecins restent « à vérifier ». Ouvrez le carré orange sur la carte, déplacez-le si besoin, puis validez.</p>
+          <p className="text-[13px] text-muted mb-2">Proposées au premier démarrage d&apos;une visite, par l&apos;historique ou par Google Maps (confirmées seulement par une visite sur place). Tant qu&apos;elles ne sont pas validées, les visites de ces médecins restent « à vérifier ». Ouvrez le carré orange sur la carte, déplacez-le si besoin, puis validez.</p>
           <div className="flex flex-wrap gap-1.5">
             {cabinets.slice(0, 30).map((c) => <Badge key={c.doctorId} tone="orange">Dr {c.name}{c.city ? ` · ${c.city}` : ""}</Badge>)}
           </div>
         </Card>
       )}
+
+      {scope.all && <WebCheckPanel kind="doctor" />}
 
       <Section title="Carte" description="Points numérotés dans l'ordre de la journée de chaque déléguée.">
         <Card><FieldMap visits={mapVisits} cabinets={mapCabinets} editable /></Card>

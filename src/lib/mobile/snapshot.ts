@@ -15,7 +15,7 @@ import { getRefDate } from "@/lib/ref-date";
 import { productStocks } from "@/lib/stock";
 import { isAiConfigured } from "@/lib/ai/client";
 import { delegateDay, visitHistory } from "@/lib/medical/day";
-import { personaOf } from "./persona";
+import { personasOf } from "./persona";
 import { monthFigures, sortPortfolio, type ClientSheet, type CommercialSnapshot, type DirectionSnapshot, type LastStock, type MedicalSnapshot, type MobileClient, type MobileMonth, type MobileSnapshot, type TerrainSnapshot } from "./snapshot-shared";
 
 /** Version de l'avis GPS de la saisie terrain, dans la table de consentement commune (médical, CRM). */
@@ -202,17 +202,18 @@ async function medicalSnapshot(access: Access): Promise<MedicalSnapshot> {
 }
 
 async function directionSnapshot(access: Access): Promise<DirectionSnapshot> {
-  // À la demande : ce module tire les trois files de validation, inutiles aux autres métiers.
-  const { listValidations } = await import("./validations");
+  // À la demande : ce module tire toutes les files de la direction (même file que le Cockpit), inutiles aux autres métiers.
+  const { listValidations } = await import("@/lib/validations/queue");
   return { aiConfigured: isAiConfigured(), pendingValidations: (await listValidations(access)).length };
 }
 
 export async function mobileSnapshot(access: Access): Promise<MobileSnapshot> {
-  const persona = personaOf(access.perms, access.scope);
-  const terrain = persona === "ANIMATRICE";
-  const commercial = persona === "COMMERCIAL" ? await commercialSnapshot(access) : null;
-  const medical = persona === "DELEGUE" ? await medicalSnapshot(access) : null;
-  const direction = persona === "DIRECTION" ? await directionSnapshot(access) : null;
+  // Une déléguée qui anime aussi garde les deux jeux de données : chaque côté marche sans réseau.
+  const personas = personasOf(access.perms, access.scope);
+  const terrain = personas.includes("ANIMATRICE");
+  const commercial = personas.includes("COMMERCIAL") ? await commercialSnapshot(access) : null;
+  const medical = personas.includes("DELEGUE") ? await medicalSnapshot(access) : null;
+  const direction = personas.includes("DIRECTION") ? await directionSnapshot(access) : null;
   const [settings, gpsNoticeAccepted, data] = await Promise.all([
     getSettings(),
     terrain ? hasAcceptedTerrainNotice(access.user.id) : Promise.resolve(false),
@@ -221,7 +222,8 @@ export async function mobileSnapshot(access: Access): Promise<MobileSnapshot> {
   return {
     generatedAt: new Date().toISOString(),
     user: { id: access.user.id, name: access.user.name },
-    persona,
+    persona: personas[0],
+    personas,
     home: access.home,
     gpsNoticeAccepted,
     gpsTimeoutS: settings.mobile.gpsTimeoutS,

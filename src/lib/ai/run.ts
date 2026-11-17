@@ -38,6 +38,8 @@ export type RunOptions = {
   maxToolCalls: number;
   timeoutMs: number;
   allowWrites: boolean;
+  /** Outils que la surface retire (ex. le réglementaire, hors du brief et des rapports). */
+  hiddenTools?: string[];
   effort?: "low" | "medium" | "high";
   maxTokens?: number;
   callModel: CallModel;
@@ -68,7 +70,7 @@ function toolResultBlock(id: string, r: ToolResult): Anthropic.ToolResultBlockPa
 export async function runCopilot(o: RunOptions): Promise<RunResult> {
   const started = Date.now();
   const emit = o.onEvent ?? (() => undefined);
-  const allowed = toolsFor(o.toolCtx.access, { allowWrites: o.allowWrites });
+  const allowed = toolsFor(o.toolCtx.access, { allowWrites: o.allowWrites }).filter((t) => !(o.hiddenTools ?? []).includes(t.name));
   const tools = toolDefinitions(allowed) as Anthropic.Tool[];
   const messages: Anthropic.MessageParam[] = [...o.history, { role: "user", content: o.question }];
   const appended: Anthropic.MessageParam[] = [{ role: "user", content: o.question }];
@@ -109,6 +111,8 @@ export async function runCopilot(o: RunOptions): Promise<RunResult> {
         else if (controller.signal.aborted) r = { available: false, reason: "Délai dépassé.", howToFix: "Répondre avec les données déjà obtenues." };
         // Un outil d'écriture sur une surface en lecture seule (explication, brief, plan, rapport) est refusé même si le modèle le nomme.
         else if (!o.allowWrites && TOOLS.find((t) => t.name === u.name)?.writes) r = { available: false, reason: `L'outil « ${u.name} » n'est pas disponible sur cette surface (lecture seule).`, howToFix: "Répondre sans écrire ; la personne créera la tâche ou le rapport elle-même." };
+        // Un outil retiré de la surface (réglementaire hors du brief et des rapports) est refusé même si le modèle le nomme.
+        else if ((o.hiddenTools ?? []).includes(u.name)) r = { available: false, reason: `L'outil « ${u.name} » n'est pas disponible sur cette surface.`, howToFix: "Ne pas traiter ce sujet ici : il est suivi dans son module." };
         else { toolBudget--; r = await executeTool(u.name, u.input, o.toolCtx); }
         toolResults.push(r);
         toolCalls.push({ id: u.id, name: u.name, input: u.input, ok: r.available, summary: summarize(r), rowCount: r.available ? r.rowCount : 0 });

@@ -1,13 +1,13 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { capturePosition, flushQueue, newId } from "@/lib/medical/field-client";
 import { clearUserCache, syncLocalUser, wipeSessionData } from "@/lib/mobile/local-data";
 import { clearRefs, flushOutbox, lastUser, listOutbox, putOutbox, readRef, removeOutbox, writeRef } from "@/lib/mobile/outbox";
 import { snapshotExpired, type OutboxItem, type OutboxKind } from "@/lib/mobile/outbox-shared";
-import { hasMobileScreens, homePathOf, screenAllowed, type Persona } from "@/lib/mobile/persona";
-import { sheetsToPreload, type ClientSheet, type MobileSnapshot } from "@/lib/mobile/snapshot-shared";
+import { hasMobileScreens, homePathOf, redirectFor, sideFor, type Persona } from "@/lib/mobile/persona";
+import { sheetsToPreload, snapshotPersonas, type ClientSheet, type MobileSnapshot } from "@/lib/mobile/snapshot-shared";
 import type { DoctorBrief } from "@/lib/medical/prescriptions";
 
 /**
@@ -19,6 +19,14 @@ type Phase = "LOADING" | "READY" | "NO_DATA";
 type Mobile = {
   phase: Phase;
   snapshot: MobileSnapshot | null;
+  /** Ses métiers de terrain ; deux pour une déléguée qui anime aussi. */
+  personas: Persona[];
+  /** Le côté affiché : ses onglets, son accueil. */
+  side: Persona | null;
+  /** Le premier aiguillage est fait : l'écran affiché est bien celui où la personne va rester. */
+  settled: boolean;
+  /** Passe de la visite médicale à l'animation (ou l'inverse) et le retient pour la prochaine ouverture. */
+  switchSide: (p: Persona) => void;
   online: boolean;
   /** Session expirée ou appareil révoqué : les saisies restent ici, elles partiront après reconnexion. */
   authLost: boolean;
@@ -41,8 +49,21 @@ export function useMobile(): Mobile {
   return v;
 }
 
-function goHomeIfNeeded(persona: Persona, path: string) {
-  if (!screenAllowed(persona, path) && hasMobileScreens(persona)) window.location.replace(homePathOf(persona));
+/** Dernier côté choisi, par compte et sur ce téléphone seulement. Simple confort : sans lui, le métier principal. */
+const sideKey = (userId: string) => `comanet.m.cote:${userId}`;
+
+function readSide(userId: string): Persona | null {
+  try {
+    return (localStorage.getItem(sideKey(userId)) as Persona | null) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSide(userId: string, p: Persona) {
+  try {
+    localStorage.setItem(sideKey(userId), p);
+  } catch { /* navigation privée : le côté ne sera pas retenu */ }
 }
 
 type SheetKind = "client" | "doctor";
@@ -85,6 +106,7 @@ async function preloadSheets(userId: string, ids: string[], kind: SheetKind) {
 
 export function MobileApp({ children }: { children: React.ReactNode }) {
   const path = usePathname();
+  const router = useRouter();
   const [phase, setPhase] = useState<Phase>("LOADING");
   const [snapshot, setSnapshot] = useState<MobileSnapshot | null>(null);
   const [items, setItems] = useState<OutboxItem[]>([]);
@@ -100,12 +122,29 @@ export function MobileApp({ children }: { children: React.ReactNode }) {
   }, []);
 
   const refreshRef = useRef<(hasLocal: boolean) => Promise<void>>(async () => {});
-  const personaRef = useRef<Persona | null>(null);
+  const personasRef = useRef<Persona[]>([]);
+  const [remembered, setRemembered] = useState<Persona | null>(null);
+  const rememberedRef = useRef<Persona | null>(null);
+  // Premier aiguillage pas encore fait : `/m` vaut encore « ouvrir l'app », pas « l'onglet Aujourd'hui ».
+  const entryRef = useRef(true);
+  const [settled, setSettled] = useState(false);
+
+  const adopt = useCallback((snap: MobileSnapshot) => {
+    personasRef.current = snapshotPersonas(snap);
+    if (rememberedRef.current === null) {
+      rememberedRef.current = readSide(snap.user.id);
+      setRemembered(rememberedRef.current);
+    }
+    const to = redirectFor(personasRef.current, pathRef.current, rememberedRef.current, entryRef.current);
+    entryRef.current = false;
+    setSettled(true);
+    if (to) window.location.replace(to);
+  }, []);
 
   const flush = useCallback(async () => {
     if (!uid.current) return;
-    // Un compte rendu dépend de sa visite : la file des visites part d'abord.
-    if (personaRef.current === "DELEGUE") await flushQueue().catch(() => null);
+    // Un compte rendu dépend de sa visite : la file des visites part d'abord, même depuis le côté animation.
+    if (personasRef.current.includes("DELEGUE")) await flushQueue().catch(() => null);
     const r = await flushOutbox(uid.current);
     if (r.state === "AUTH") setAuthLost(true);
     await reload();
@@ -147,12 +186,11 @@ export function MobileApp({ children }: { children: React.ReactNode }) {
     setSnapshot(fresh);
     setAuthLost(false);
     setPhase("READY");
-    personaRef.current = fresh.persona;
-    goHomeIfNeeded(fresh.persona, pathRef.current);
+    adopt(fresh);
     await flush();
     if (fresh.commercial) void preloadSheets(fresh.user.id, fresh.commercial.clients.map((c) => c.id), "client");
     if (fresh.medical) void preloadSheets(fresh.user.id, [...new Set([...fresh.medical.day.planned.map((p) => p.doctorId), ...fresh.medical.day.doctors.map((d) => d.id)])], "doctor");
-  }, [flush]);
+  }, [flush, adopt]);
 
   useEffect(() => { refreshRef.current = refresh; }, [refresh]);
 
@@ -172,8 +210,7 @@ export function MobileApp({ children }: { children: React.ReactNode }) {
         if (local) {
           setSnapshot(local);
           setPhase("READY");
-          personaRef.current = local.persona;
-          goHomeIfNeeded(local.persona, pathRef.current);
+          adopt(local);
         }
         await reload().catch(() => {});
       }
@@ -181,7 +218,25 @@ export function MobileApp({ children }: { children: React.ReactNode }) {
     })();
     if (process.env.NODE_ENV === "production" && "serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
     return () => { alive = false; };
-  }, [refresh, reload]);
+  }, [refresh, reload, adopt]);
+
+  const personas = useMemo(() => (snapshot ? snapshotPersonas(snapshot).filter(hasMobileScreens) : []), [snapshot]);
+  const side = personas.length ? sideFor(personas, path, remembered) : null;
+
+  // Un écran propre à un côté (la tournée, la saisie) le rend courant : « À corriger » garde alors les bons onglets.
+  useEffect(() => {
+    if (!settled || personas.length < 2 || !side || !uid.current || side === rememberedRef.current) return;
+    rememberedRef.current = side;
+    setRemembered(side);
+    writeSide(uid.current, side);
+  }, [settled, personas.length, side]);
+
+  const switchSide = useCallback((p: Persona) => {
+    rememberedRef.current = p;
+    setRemembered(p);
+    if (uid.current) writeSide(uid.current, p);
+    router.push(homePathOf(p));
+  }, [router]);
 
   useEffect(() => {
     const goOnline = () => { setOnline(true); void flush(); };
@@ -240,11 +295,11 @@ export function MobileApp({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo<Mobile>(() => ({
-    phase, snapshot, online, authLost,
+    phase, snapshot, personas, side, settled, switchSide, online, authLost,
     pending: items.filter((i) => i.state === "PENDING"),
     toFix: items.filter((i) => i.state === "A_CORRIGER"),
     submit, abandon, retry: flush, refresh: () => void refreshRef.current(true), acceptNotice, logout,
-  }), [phase, snapshot, online, authLost, items, submit, abandon, flush, acceptNotice, logout]);
+  }), [phase, snapshot, personas, side, settled, switchSide, online, authLost, items, submit, abandon, flush, acceptNotice, logout]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

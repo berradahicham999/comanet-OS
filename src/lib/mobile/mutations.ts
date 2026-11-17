@@ -10,7 +10,7 @@ import { saveAnimation } from "@/lib/terrain/save-animation";
 import { canRecordReading, parseReadingLines } from "@/lib/client-stock-shared";
 import { recordReadings } from "@/lib/client-stock";
 import { iso, today } from "@/lib/format";
-import { personaOf } from "./persona";
+import { personasOf } from "./persona";
 import { formDataFromPairs, readReport } from "@/lib/medical/report-input";
 import { saveVisitReport } from "@/lib/medical/visits";
 import { baseUnitPriceHt } from "@/lib/gestion/calc";
@@ -98,7 +98,8 @@ async function saveStockEvent(access: Access, e: WireEvent): Promise<{ result: M
   const p = e.payload as StockPayload;
   if (!isUuid(p?.clientId)) return { result: ko(id, "INVALID", "Point de vente manquant ou inconnu.") };
   // Même table, deux canaux : l'animatrice relève en animation, le commercial en tournée (droits propres à chaque canal).
-  const channel = personaOf(access.perms, access.scope) === "ANIMATRICE" ? "ANIMATION" : "TOURNEE_COMMERCIALE";
+  // Le relevé du téléphone vient de l'écran Stock de l'animation : une déléguée qui anime aussi relève comme animatrice.
+  const channel = personasOf(access.perms, access.scope).includes("ANIMATRICE") ? "ANIMATION" : "TOURNEE_COMMERCIALE";
   const allowed = canRecordReading(
     { userId: access.user.id, perms: access.perms, scope: access.scope, clientIds: access.clientIds },
     { channel, clientId: p.clientId, animatriceId: access.user.id },

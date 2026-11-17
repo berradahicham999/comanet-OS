@@ -50,6 +50,10 @@ export type AskInput = {
   automatic?: boolean;
   /** Plafond d'appels d'outils propre à la surface (≤ settings.ai.maxToolCalls). */
   maxToolCalls?: number;
+  /** Règles de l'Action Center que la surface ne remonte pas (`hiddenRuleIds()` : brief du matin, rapports). */
+  hiddenRules?: string[];
+  /** Outils retirés de la surface (`hiddenTools()`), en plus de ceux que les droits de la personne écartent déjà. */
+  hiddenTools?: string[];
   /** Module de contexte de la conversation (« explain », « brief »… sont masqués de l'historique du panneau). */
   contextModule?: string | null;
   onEvent?: (e: RunEvent) => void;
@@ -67,7 +71,7 @@ export async function askCopilot(input: AskInput): Promise<AskOutput> {
 
   const question = input.question.trim().slice(0, 4000);
   if (!question) throw new CopilotError("Question vide.", 400);
-  const toolCtx = await buildToolContext();
+  const toolCtx = { ...(await buildToolContext()), hiddenRules: input.hiddenRules ?? [] };
   const model = modelFor(input.tier ?? "advanced");
 
   let conversationId = input.conversationId ?? null;
@@ -86,7 +90,7 @@ export async function askCopilot(input: AskInput): Promise<AskOutput> {
   const result = await runCopilot({
     model, system, history, question, toolCtx,
     maxToolCalls, timeoutMs: settings.ai.timeoutSeconds * 1000,
-    allowWrites: input.allowWrites ?? true, effort: input.tier === "fast" ? "low" : "medium",
+    allowWrites: input.allowWrites ?? true, hiddenTools: input.hiddenTools ?? [], effort: input.tier === "fast" ? "low" : "medium",
     callModel: callAnthropic, onEvent: input.onEvent,
   });
   const costUsd = estimateCostUsd(model, result.usage);

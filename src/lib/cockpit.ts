@@ -9,6 +9,8 @@ import { budgetConsumption } from "./budget";
 import { analyticsBlock } from "./analytics-marketing/cockpit";
 import { adSpend } from "./ad-spend";
 import { selloutSumSql } from "./sellout";
+import { getSettings } from "./settings";
+import { directionRecommendations } from "./rules/visibility";
 
 export async function cockpitData() {
   const refDate = await getRefDate();
@@ -21,6 +23,8 @@ export async function cockpitData() {
   const now = today();
   const d30 = iso(addDays(now, -30)), tomorrow = iso(addDays(now, 1));
 
+  // Réglementaire hors du pilotage de direction (Paramètres → Cockpit) : ni carte, ni recommandations de la règle.
+  const settings = await getSettings();
   const [cmp, objective, annualObj, ytdT, ytdN1T, series, seriesN1, brandRows, brands, stocks, recs, marketing, analytics, terrain, digital, regulatory, prevMonthBrands] = await Promise.all([
     compareMonth({}, ref),
     objectiveFor(year, month, null),
@@ -32,12 +36,12 @@ export async function cockpitData() {
     byDim("brand", monthRange.start, monthRange.end),
     db.execute(sql`select id, name, color from brands where active order by name`),
     productStocks({}, ref),
-    getRecommendations(),
+    getRecommendations().then((all) => directionRecommendations(all, settings)),
     marketingBlock(year),
     analyticsBlock(ref, year),
     terrainBlock(now, d30, tomorrow),
     digitalBlock(d30, tomorrow),
-    regulatoryBlock(now),
+    settings.cockpit.hideRegulatory ? Promise.resolve(null) : regulatoryBlock(now),
     byDim("brand", shiftRange(monthRange, -1).start, shiftRange(monthRange, -1).end),
   ]);
 

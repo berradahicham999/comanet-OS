@@ -27,7 +27,8 @@ export const getActionCenter: AiTool<typeof actionSchema> = {
   schema: actionSchema,
   async run(input, ctx): Promise<ToolResult> {
     const { deps, access } = ctx;
-    const all = await deps.recommendations();
+    const hidden = ctx.hiddenRules ?? [];
+    const all = (await deps.recommendations()).filter((r) => !hidden.includes(r.rule));
     let recs = all.filter((r) => (CATEGORY_MODULES[r.category] ?? []).some((m) => can(access.perms, m, "view")));
     recs = inBrandScope(recs, access, (r) => r.brandId);
     if (!input.include_with_task) recs = recs.filter((r) => !r.existingTask);

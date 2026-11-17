@@ -5,13 +5,13 @@ import { SignJWT, jwtVerify } from "jose";
 import { isPublicPath } from "@/lib/public-paths";
 import { RENEW_AFTER_S, deviceLabel, isPhone, sessionVerdict, touchDue } from "@/lib/sessions-shared";
 import { renewedToken, signSessionToken } from "@/lib/session-token";
-import { hasMobileScreens, homePathOf, personaOf, screenAllowed } from "@/lib/mobile/persona";
+import { hasMobileScreens, homePathOf, personaOf, personasOf, redirectFor, screenAllowed, sideFor } from "@/lib/mobile/persona";
 import { noPermissions, type PermissionSet } from "@/lib/permissions-shared";
 import { MODULE_KEYS, type ModuleKey } from "@/lib/access-shared";
 import { ANIMATRICE_TABS, mobileTabsForPermissions } from "@/components/nav-config";
 import { SHELL_PAGES, USER_PAGES, swSource } from "@/lib/mobile/sw-source";
 import manifest from "@/app/manifest";
-import { SHEET_MAX_AGE_MS, SHEET_PRELOAD, deliverablePack, monthFigures, sheetsToPreload, sortPortfolio } from "@/lib/mobile/snapshot-shared";
+import { SHEET_MAX_AGE_MS, SHEET_PRELOAD, deliverablePack, monthFigures, sheetsToPreload, snapshotPersonas, sortPortfolio } from "@/lib/mobile/snapshot-shared";
 
 const secret = new TextEncoder().encode("secret-de-test-0123456789");
 
@@ -158,6 +158,49 @@ describe("persona et onglets", () => {
     assert.equal(homePathOf("DIRECTION"), "/m/brief");
     assert.equal(homePathOf("ANIMATRICE"), "/m");
     for (const p of ["ANIMATRICE", "COMMERCIAL", "DELEGUE", "DIRECTION"] as const) assert.equal(screenAllowed(p, homePathOf(p)), true, p);
+  });
+
+  test("une déléguée qui anime aussi a les deux métiers, la visite médicale d'abord", () => {
+    const mixte = perms([["medical", ["view", "create"]], ["terrain", ["view", "create"]], ["clients", ["view", "create"]], ["commandes", ["view", "create"]], ["taches", ["view"]]]);
+    assert.deepEqual(personasOf(mixte, "OWN"), ["DELEGUE", "ANIMATRICE"]);
+    assert.equal(personaOf(mixte, "OWN"), "DELEGUE");
+    assert.deepEqual(personasOf(med, "OWN"), ["DELEGUE"]);
+    assert.deepEqual(personasOf(anim, "OWN"), ["ANIMATRICE"]);
+    assert.deepEqual(personasOf(com, "OWN"), ["COMMERCIAL"]);
+    assert.deepEqual(personasOf(adm, "ALL"), ["DIRECTION"]);
+    // Portée large : ni déléguée ni animatrice, quels que soient ses droits.
+    assert.deepEqual(personasOf(mixte, "ALL"), ["COMMERCIAL"]);
+  });
+
+  test("le côté affiché suit l'écran, sinon le dernier choisi, sinon la visite médicale", () => {
+    const both = ["DELEGUE", "ANIMATRICE"] as const;
+    assert.equal(sideFor([...both], "/m/tournee", "ANIMATRICE"), "DELEGUE");
+    assert.equal(sideFor([...both], "/m/saisie", "DELEGUE"), "ANIMATRICE");
+    assert.equal(sideFor([...both], "/m", "DELEGUE"), "ANIMATRICE");
+    assert.equal(sideFor([...both], "/m/a-corriger", "ANIMATRICE"), "ANIMATRICE");
+    assert.equal(sideFor([...both], "/m/a-corriger", null), "DELEGUE");
+    assert.equal(sideFor(["DELEGUE"], "/m/a-corriger", "ANIMATRICE"), "DELEGUE");
+  });
+
+  test("à l'ouverture, /m mène au dernier côté utilisé ; ensuite l'onglet Aujourd'hui reste", () => {
+    const both = ["DELEGUE", "ANIMATRICE"] as const;
+    assert.equal(redirectFor([...both], "/m", null, true), "/m/tournee");
+    assert.equal(redirectFor([...both], "/m", "DELEGUE", true), "/m/tournee");
+    assert.equal(redirectFor([...both], "/m", "ANIMATRICE", true), null);
+    assert.equal(redirectFor([...both], "/m", "DELEGUE", false), null);
+    assert.equal(redirectFor([...both], "/m/saisie", "DELEGUE", true), null);
+    assert.equal(redirectFor([...both], "/m/brief", "ANIMATRICE", false), "/m");
+    // Profils à un seul métier : comportement d'avant.
+    assert.equal(redirectFor(["DELEGUE"], "/m", null, true), "/m/tournee");
+    assert.equal(redirectFor(["ANIMATRICE"], "/m", null, true), null);
+    assert.equal(redirectFor(["ANIMATRICE"], "/m/tournee", null, false), "/m");
+    assert.equal(redirectFor(["COMMERCIAL"], "/m/saisie", null, false), "/m");
+    assert.equal(redirectFor(["AUTRE"], "/m", null, true), null);
+  });
+
+  test("une copie locale d'avant le double métier se lit encore", () => {
+    assert.deepEqual(snapshotPersonas({ persona: "ANIMATRICE" }), ["ANIMATRICE"]);
+    assert.deepEqual(snapshotPersonas({ persona: "DELEGUE", personas: ["DELEGUE", "ANIMATRICE"] }), ["DELEGUE", "ANIMATRICE"]);
   });
 
   test("un onglet n'apparaît que si le droit existe", () => {
