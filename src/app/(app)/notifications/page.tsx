@@ -11,7 +11,7 @@ export const metadata = { title: "Notifications" };
 const TYPE_LABEL: Record<string, { label: string; tone: "gray" | "blue" | "yellow" | "orange" | "green" | "red" | "purple" }> = {
   BRIEF_ASSIGNED: { label: "Brief assigné", tone: "blue" }, BRIEF_UPDATED: { label: "Brief disponible", tone: "blue" }, DELIVERABLE_UPLOADED: { label: "Livrable déposé", tone: "purple" },
   VALIDATION_REQUESTED: { label: "À valider", tone: "yellow" }, CORRECTIONS_REQUESTED: { label: "Corrections", tone: "orange" },
-  TASK_ASSIGNED: { label: "Tâche", tone: "blue" }, STOCK_ALERT: { label: "Stock", tone: "orange" }, SAISIE_REMINDER: { label: "Saisie", tone: "yellow" }, ORDER_DRAFT: { label: "Commande", tone: "yellow" },
+  TASK_ASSIGNED: { label: "Tâche", tone: "blue" }, STOCK_ALERT: { label: "Stock", tone: "orange" }, SAISIE_REMINDER: { label: "Saisie", tone: "yellow" }, ORDER_DRAFT: { label: "Commande", tone: "yellow" }, COUNT_ASSIGNED: { label: "Inventaire", tone: "blue" },
   VISIT_OUT_OF_ZONE: { label: "Visite hors zone", tone: "red" }, PLACE_WEB_GAP: { label: "Position à revoir", tone: "orange" },
   CONTENT_VALIDATED: { label: "Validé", tone: "green" }, DEADLINE_PASSED: { label: "Retard", tone: "red" }, COMMENT: { label: "Commentaire", tone: "gray" },
   REPORT_DRAFT: { label: "Rapport", tone: "purple" }, APPROVAL_REQUESTED: { label: "Déblocage", tone: "yellow" },

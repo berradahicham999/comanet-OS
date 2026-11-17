@@ -8,7 +8,7 @@ import { requireAdmin } from "@/lib/access";
 import { getSettings } from "@/lib/settings";
 import { errorParam, str } from "@/lib/gestion/form";
 import { setCutoverMode, setSalesFromDocuments } from "@/lib/gestion/cutover";
-import { importOpeningInvoices, type OpeningInvoice } from "@/lib/gestion/documents";
+import { importOpeningInvoices, purgeSimulation, type OpeningInvoice } from "@/lib/gestion/documents";
 import { repriseColumns, repriseMissing } from "@/lib/gestion/receivables-shared";
 import { formatScaled, parseDecimal } from "@/lib/gestion/money";
 import { parseSheet } from "@/lib/import/parse";
@@ -43,6 +43,21 @@ export async function saveSalesFromDocumentsAction(fd: FormData) {
   }
   revalidatePath("/", "layout");
   redirect(`/gestion/bascule?reprise=${encodeURIComponent(msg)}#ventes-pieces`);
+}
+
+/** Purge des pièces de simulation d'une période (bornes vides = tout) : administration, confirmation « PURGER ». */
+export async function purgeSimulationAction(fd: FormData) {
+  let msg: string;
+  try {
+    const user = await requireAdmin();
+    if (str(fd, "confirm")?.trim().toUpperCase() !== "PURGER") throw new Error("Tapez PURGER pour confirmer la purge.");
+    const r = await purgeSimulation({ from: str(fd, "from") || null, to: str(fd, "to") || null }, { id: user.id, name: user.name }, { apply: true });
+    msg = `Purge faite : ${r.documents} pièce(s) de simulation supprimée(s)${r.drafts ? ` et ${r.drafts} brouillon(s)` : ""} ; ${r.sales} ligne(s) de ventes, ${r.charges} charge(s), ${r.allocations} imputation(s) et ${r.reminders} relance(s) retirées. Stock inchangé.`;
+  } catch (e) {
+    redirect(`/gestion/bascule?error=${errorParam(e)}#purge`);
+  }
+  revalidatePath("/", "layout");
+  redirect(`/gestion/bascule?reprise=${encodeURIComponent(msg)}#purge`);
 }
 
 /**

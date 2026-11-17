@@ -4,7 +4,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { can, requireAccessContext } from "@/lib/access";
 import { auditTrail } from "@/lib/audit";
-import { listBrands } from "@/lib/users";
+import { listBrands, usersWithPermission } from "@/lib/users";
 import { gapAnalysis, getCount } from "@/lib/gestion/counts";
 import { COUNT_STATUS_META, countStats, type CountStatus } from "@/lib/gestion/counts-shared";
 import { fmtMoney } from "@/lib/gestion/money";
@@ -31,9 +31,10 @@ export default async function CountPage(props: { params: Promise<{ id: string }>
   const status = c.status as CountStatus;
   const canCreate = can(a.perms, "stock", "create");
   const canValidate = can(a.perms, "stock", "validate");
-  const [history, reasons] = await Promise.all([
+  const [history, reasons, counterOptions] = await Promise.all([
     auditTrail("stock_count", id),
     db.execute<{ key: string; label: string }>(sql`select key, label from count_gap_reasons where active order by sort, key`),
+    status === "BROUILLON" && canCreate ? usersWithPermission("stock", "create") : Promise.resolve([]),
   ]);
   const stats = status === "VALIDE" && c.stats ? (c.stats as ReturnType<typeof countStats>) : countStats(c.lines.map((l) => ({ theoreticalQty: l.theoreticalQty, countedQty: l.counted, cmup: l.cmup })));
   const analysis = status !== "BROUILLON" && canValidate ? await gapAnalysis(id) : [];
@@ -47,7 +48,7 @@ export default async function CountPage(props: { params: Promise<{ id: string }>
       <PageHeader
         eyebrow={<Link href="/gestion/inventaires" className="hover:underline">Inventaires</Link>}
         title={<span className="flex items-center gap-2 flex-wrap">{c.title}{c.number && <span className="font-mono text-[14px] text-muted">{c.number}</span>}<Badge tone={COUNT_STATUS_META[status].tone}>{COUNT_STATUS_META[status].label}</Badge>{c.blind && <Badge tone="gray">à l&apos;aveugle</Badge>}</span>}
-        subtitle={`${c.warehouseKey} · ${fmtDate(c.countDate)} · ${c.brands.length ? c.brands.map((b) => b.name).join(", ") : "tout le stock"}${c.startedAt ? ` · théorique figé le ${fmtDate(c.startedAt)} à ${fmtTime(c.startedAt)}` : ""}`}
+        subtitle={`${c.warehouseKey} · ${fmtDate(c.countDate)} · ${c.brands.length ? c.brands.map((b) => b.name).join(", ") : "tout le stock"}${c.includeMaterials ? " + matériel marketing" : ""}${c.assigned.length ? ` · compteurs : ${c.assigned.map((u) => u.name).join(", ")}` : ""}${c.startedAt ? ` · théorique figé le ${fmtDate(c.startedAt)} à ${fmtTime(c.startedAt)}` : ""}`}
         actions={status === "EN_COURS" && canCreate ? <Link href={`/gestion/inventaires/${id}/compter`} className="btn-primary btn-sm">Compter</Link> : undefined}
       />
       {sp.error && <Banner tone="red">{sp.error}</Banner>}
@@ -70,7 +71,10 @@ export default async function CountPage(props: { params: Promise<{ id: string }>
                 </div>
                 <div><span className="label block mb-1">Marques (aucune cochée = tout le stock)</span>
                   <div className="flex flex-wrap gap-x-3 gap-y-1">{(await listBrands()).map((b) => <label key={b.id} className="flex items-center gap-1"><input type="checkbox" name="brandIds" value={b.id} defaultChecked={c.brandIds.includes(b.id)} /> {b.name}</label>)}</div></div>
+                <label className="flex items-center gap-2"><input type="checkbox" name="includeMaterials" defaultChecked={c.includeMaterials} /> Compter aussi le matériel marketing (goodies, PLV, print)</label>
                 <label className="flex items-center gap-2"><input type="checkbox" name="blind" defaultChecked={c.blind} /> À l&apos;aveugle</label>
+                <div><span className="label block mb-1">Compteurs (un compteur ajouté est notifié)</span>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1">{counterOptions.map((u) => <label key={u.id} className="flex items-center gap-1"><input type="checkbox" name="counterIds" value={u.id} defaultChecked={c.counterIds.includes(u.id)} /> {u.name}</label>)}</div></div>
                 <label className="block"><span className="label block mb-1">Consignes</span><textarea name="notes" defaultValue={c.notes ?? ""} className="input min-h-14 py-2" /></label>
                 <button className="btn-secondary btn-sm" type="submit">Enregistrer</button>
               </form>
@@ -81,7 +85,7 @@ export default async function CountPage(props: { params: Promise<{ id: string }>
               <Card title="Démarrer le comptage">
                 <form action={startCountAction} className="space-y-2 text-[13px]">
                   <input type="hidden" name="id" value={id} />
-                  <p className="text-muted">Le stock théorique de chaque article et lot du périmètre est figé à cet instant. Idéalement, plus aucun BL ni réception n&apos;est validé sur ce dépôt jusqu&apos;à la fin du comptage : sinon l&apos;écart le signalera.</p>
+                  <p className="text-muted">Le stock théorique de chaque article et lot du périmètre est figé à cet instant{c.includeMaterials ? ", matériel marketing compris" : ""}{c.assigned.length ? `, et ${c.assigned.map((u) => u.name).join(", ")} reçoi${c.assigned.length > 1 ? "vent" : "t"} une notification pour compter` : ""}. Idéalement, plus aucun BL ni réception n&apos;est validé sur ce dépôt jusqu&apos;à la fin du comptage : sinon l&apos;écart le signalera.</p>
                   <button className="btn-primary btn-sm" type="submit">Démarrer</button>
                 </form>
               </Card>

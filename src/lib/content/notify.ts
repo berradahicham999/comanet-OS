@@ -13,7 +13,7 @@ export type NotificationType =
   // Copilote IA
   | "REPORT_DRAFT"
   // Gestion commerciale
-  | "APPROVAL_REQUESTED"
+  | "APPROVAL_REQUESTED" | "COUNT_ASSIGNED"
   // App mobile
   | "TASK_ASSIGNED" | "STOCK_ALERT" | "SAISIE_REMINDER" | "ORDER_DRAFT"
   // Contrôle des positions (`src/lib/places/`)

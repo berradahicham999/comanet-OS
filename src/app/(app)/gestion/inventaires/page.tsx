@@ -2,7 +2,7 @@ import Link from "next/link";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { can } from "@/lib/access";
-import { listBrands } from "@/lib/users";
+import { listBrands, usersWithPermission } from "@/lib/users";
 import { listCounts } from "@/lib/gestion/counts";
 import { COUNT_STATUS_META, type CountStatus } from "@/lib/gestion/counts-shared";
 import { fmtMoney } from "@/lib/gestion/money";
@@ -19,10 +19,12 @@ export default async function CountsPage(props: { searchParams: Promise<{ error?
   const access = await requireGestionView();
   const sp = await props.searchParams;
   const canCreate = can(access.perms, "stock", "create");
-  const [counts, brands, warehouses] = await Promise.all([
+  const [counts, brands, warehouses, counters] = await Promise.all([
     listCounts(), listBrands(),
     db.execute<{ key: string; label: string }>(sql`select key, label from warehouses where active and kind = 'INTERNE' order by sort, key`),
+    canCreate ? usersWithPermission("stock", "create") : Promise.resolve([]),
   ]);
+  const mine = counts.filter((c) => (c.status === "BROUILLON" || c.status === "EN_COURS") && (c.counter_ids ?? []).includes(access.user.id));
 
   return (
     <>
@@ -31,6 +33,19 @@ export default async function CountsPage(props: { searchParams: Promise<{ error?
         <GestionTabs current="/gestion/inventaires" />
       </PageHeader>
       {sp.error && <div className="mb-4 rounded-2xl bg-red-soft border border-red/30 px-4 py-3 text-[13px] text-red">{sp.error}</div>}
+      {mine.length > 0 && (
+        <div className="mb-4 rounded-2xl bg-blue-soft border border-blue/30 px-4 py-3 text-[13px] space-y-1.5">
+          <div className="font-semibold">Inventaires qui vous sont confiés</div>
+          {mine.map((c) => (
+            <div key={c.id} className="flex flex-wrap items-center gap-2">
+              <span>{c.title} · {fmtDate(c.count_date)}</span>
+              {c.status === "EN_COURS"
+                ? <Link href={`/gestion/inventaires/${c.id}/compter`} className="btn-primary btn-sm">Compter</Link>
+                : <Link href={`/gestion/inventaires/${c.id}`} className="btn-secondary btn-sm">{canCreate ? "Ouvrir / démarrer" : "Ouvrir"}</Link>}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-[1fr_360px] gap-4">
         <div>
@@ -76,7 +91,12 @@ export default async function CountsPage(props: { searchParams: Promise<{ error?
               <div><span className="label block mb-1">Marques (aucune cochée = tout le stock)</span>
                 <div className="flex flex-wrap gap-x-3 gap-y-1 max-h-40 overflow-auto">{brands.map((b) => <label key={b.id} className="flex items-center gap-1"><input type="checkbox" name="brandIds" value={b.id} /> {b.name}</label>)}</div>
               </div>
+              <label className="flex items-center gap-2"><input type="checkbox" name="includeMaterials" defaultChecked /> Compter aussi le matériel marketing (goodies, PLV, print)</label>
               <label className="flex items-center gap-2"><input type="checkbox" name="blind" defaultChecked /> À l&apos;aveugle : les compteurs ne voient pas le stock théorique</label>
+              <div><span className="label block mb-1">Compteurs (notifiés dès maintenant, puis à l&apos;ouverture du comptage)</span>
+                {counters.length ? <div className="flex flex-wrap gap-x-3 gap-y-1 max-h-32 overflow-auto">{counters.map((u) => <label key={u.id} className="flex items-center gap-1"><input type="checkbox" name="counterIds" value={u.id} /> {u.name}</label>)}</div>
+                  : <p className="text-[12px] text-faint">Personne n&apos;a le droit de compter (Créer sur Stock).</p>}
+              </div>
               <label className="block"><span className="label block mb-1">Consignes</span><textarea name="notes" className="input min-h-14 py-2" placeholder="Zone, ordre de passage, qui compte quoi…" /></label>
               <button className="btn-primary btn-sm" type="submit">Préparer</button>
             </form>

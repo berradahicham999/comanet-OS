@@ -414,6 +414,20 @@
       "when": 1790001300000,
       "tag": "0058_positions_internet",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1790004800000,
+      "tag": "0059_purge_simulation",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1790004900000,
+      "tag": "0060_inventaire_compteurs_materiel",
+      "breakpoints": true
     }
   ]
 }

@@ -19,9 +19,11 @@ export async function updateMedicalSettings(formData: FormData) {
     medicalDefaultVisitFrequencyDays: Math.max(1, Math.round(num(formData, "medicalDefaultVisitFrequencyDays", cur.medicalDefaultVisitFrequencyDays))),
     medicalOverdueVisitDays: Math.max(1, Math.round(num(formData, "medicalOverdueVisitDays", cur.medicalOverdueVisitDays))),
     medicalSamplesPerVisitDefault: Math.max(0, num(formData, "medicalSamplesPerVisitDefault", cur.medicalSamplesPerVisitDefault)),
+    medicalActionCenter: formData.get("medicalActionCenter") === "on",
   };
   await saveSettings(next);
   revalidatePath("/medical", "layout");
+  revalidatePath("/actions");
 }
 
 /** Seuils du chrono, du contrôle GPS et des analyses d'ordonnances (bornés, jamais négatifs). Tracé dans l'audit. */

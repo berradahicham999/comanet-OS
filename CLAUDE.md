@@ -287,14 +287,22 @@ facture fournisseur est rapprochée des réceptions (écarts signalés, jamais c
 Lot 4 livré : inventaires. `stock_counts` + `stock_count_lines` (théorique et CMUP figés au démarrage) +
 `stock_count_entries` (une saisie par compteur, sommées) + `count_gap_reasons` ; seul `src/lib/gestion/counts.ts` les
 écrit (`validateCount()` : motif obligatoire, un AJUSTEMENT_INVENTAIRE par écart, numéro INV). Non compté ≠ zéro. Écart,
-fiabilité et pistes (`counts-shared.ts` : `lineGap()`, `countStats()`, `gapLeads()` — donnée ≠ hypothèse). Comptage
-mobile avec scan (BarcodeDetector) ; à l'aveugle, le théorique ne quitte pas le serveur. Droits : `stock` (Créer =
+fiabilité et pistes (`counts-shared.ts` : `lineGap()`, `countStats()`, `gapLeads()` — donnée ≠ hypothèse). Compteurs désignés
+(`stock_counts.counter_ids`, notifiés `COUNT_ASSIGNED` à la préparation et à l'ouverture) ; feuille de comptage = tous les
+articles listés, case quantité à côté (`setMyCount()` : la quantité de CE compteur) ; matériel marketing (`inventory_items`)
+compté dans la même session (`include_materials`, ligne `product_id` OU `inventory_item_id`), ajusté par `recordMovement()`
+(migration 0060). Scan mobile (BarcodeDetector) pour un lot hors liste ; à l'aveugle, le théorique ne quitte pas le serveur. Droits : `stock` (Créer =
 compter, Valider = valider).
 Lot 5 livré : règlements et bascule. `payments` (RG, figés par triggers) + `payment_allocations` (règlement ou avoir →
 facture) + `payment_reminders` ; seul `src/lib/gestion/payments.ts` les écrit. Solde, balance âgée, relances, imputation
 proposée : `receivables-shared.ts`. Un avoir s'impute sur sa facture à la validation. Bascule : `emitsReal()` (seule
 source du « réel ou simulation »), `importBlockedByCutover()` (C5), page `/gestion/bascule` (`cutover.ts` : contrôles,
-mode, rapport), reprise Sage (`importOpeningInvoices()`, source SAGE_REPRISE). Envoi au comptable : sélection multiple des pièces et ZIP de leurs PDF assemblé dans le navigateur (`piece-exporter.tsx`) + récapitulatif Excel du mois (`exports.ts`). Retours de tests : P.U. TTC sur le BL, nom du client imprimé corrigeable sur une pièce validée (`renameDocumentClient()`, seule clé `legalName` de l'identité figée, migration 0030), changement de client d'un BL ou d'une commande validés (`reassignDocumentClient()` : client, identité figée reprise de la fiche, empreinte, ventes projetées via `reassignProjection()`, PDF ; la commande emporte ses BL ; jamais une facture ou un avoir ni un BL facturé ; garde-fou ouvert par `comanet.reassign_client`, migration 0050 ; la liste des pièces affiche le nom figé), avoir libre sans origine (migration 0053 : produits au dernier prix du client, marques ou libellés ; le motif porte le dépôt de retour `credit_reasons.return_warehouse_key` — bon état → vendable, périmé ou abîmé → non vendable, sans retour ou financier → aucun mouvement ; lot rendu choisi ou saisi, `clientReturnContext()`).
+mode, rapport), reprise Sage (`importOpeningInvoices()`, source SAGE_REPRISE). Envoi au comptable : sélection multiple des pièces et ZIP de leurs PDF assemblé dans le navigateur (`piece-exporter.tsx`) + récapitulatif Excel du mois (`exports.ts`). Retours de tests : P.U. TTC sur le BL, nom du client imprimé corrigeable sur une pièce validée (`renameDocumentClient()`, seule clé `legalName` de l'identité figée, migration 0030), changement de client d'un BL ou d'une commande validés (`reassignDocumentClient()` : client, identité figée reprise de la fiche, empreinte, ventes projetées via `reassignProjection()`, PDF ; la commande emporte ses BL ; jamais une facture ou un avoir ni un BL facturé ; garde-fou ouvert par `comanet.reassign_client`, migration 0050 ; la liste des pièces affiche le nom figé), avoir libre sans origine (migration 0053 : produits au dernier prix du client, marques ou libellés ; le motif porte le dépôt de retour `credit_reasons.return_warehouse_key` — bon état → vendable, périmé ou abîmé → non vendable, sans retour ou financier → aucun mouvement ; lot rendu choisi ou saisi, `clientReturnContext()`). Facture directe de produits (sans BL) : permise, **aucun mouvement de
+stock, aucune vente projetée** (décision 10/11/2026) ; son avoir non plus (`directInvoiceCredits()`). Purge des simulations
+(`purgeSimulation()`, carte de `/gestion/bascule`, administrateurs, migration 0059, garde-fou ouvert par `comanet.purge_simulation`) :
+pièces SIM validées d'une période + pièces liées (et brouillons qui les reprennent) ; ventes projetées, charges d'échantillons,
+imputations et relances retirées (`detachPurgedDocuments()`) ; mouvements de stock, sorties de matériel, quantités livrées des BC et
+numérotation SIM gardés ; une pièce réelle liée bloque la purge.
 Commandes clients (migration 0042) : type `COMMANDE`, série `BC` toujours réelle (pas une pièce fiscale), statuts
 VALIDE (confirmée) → LIVRE_PARTIEL → LIVRE, `delivered_qty` par ligne ; saisie mobile avec produits habituels du client
 (`/api/gestion/produits-habituels/[clientId]`), **remise négociée par le commercial** (par ligne, pré-remplie avec celle du
@@ -339,6 +347,8 @@ différer). Ordonnances : import `PRESCRIPTIONS` (liste blanche, colonne patient
 `/medical/ordonnances`. Potentiel AUTO jamais par-dessus une valeur MANUELLE. Analyses (segments, impact = corrélation
 observée, tournée) : `/medical/analyses`. Copilote : `get_doctor_profile`, `get_field_control` (aucune coordonnée).
 Test d'intégration : `MEDICAL_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/medical-integration.ts`.
+Les règles médicales de l'Action Center (`medicalRules`, `medicalFieldRules`) ne tournent que si `settings.medicalActionCenter`
+est vrai (faux par défaut, case dans Médical → Paramétrage) : `activeRules()` dans `src/lib/rules/index.ts`.
 
 **Positions vérifiées sur Internet** (`docs/guide-positions-internet.md`, migration 0058). Chaque médecin et point de vente est
 recherché sur Google Maps (Places API « Text Search », nom + ville, Maroc seulement ; clé `GOOGLE_MAPS_API_KEY`) par lots du cron

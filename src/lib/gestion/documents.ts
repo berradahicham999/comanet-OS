@@ -21,7 +21,7 @@ import { allocateNumber } from "./numbering";
 import { attachInvoiceNumber, productBrands, projectDocument, reassignProjection, removeProjection } from "./projection";
 import { OutputError, recordMaterialOutputs, recordOutputCharges, removeOutputCharges, reverseMaterialOutputs } from "./marketing-outputs";
 import { refreshAfterWrite } from "@/lib/analytics-marketing/refresh";
-import { allocateCreditIn } from "./payments";
+import { allocateCreditIn, detachPurgedDocuments } from "./payments";
 
 /**
  * Pièces de vente — SEUL module qui crée, valide, livre, annule ou facture une pièce (garde-fou
@@ -263,7 +263,8 @@ export async function saveDraft(input: DraftInput, actor: AuditActor): Promise<s
       const p = l.productId ? products.get(l.productId) : null;
       if (l.productId && !p) throw new DocumentError(`Ligne ${i + 1} : article introuvable.`);
       if ((input.type === "BL" || input.type === "COMMANDE") && (!p || p.kind !== "PRODUIT")) throw new DocumentError(`Ligne ${i + 1} : ${input.type === "BL" ? "un bon de livraison" : "une commande client"} ne porte que des articles stockés ou du matériel.`);
-      if (input.type === "FACTURE" && p && p.kind === "PRODUIT" && !l.sourceLineId) throw new DocumentError(`Ligne ${i + 1} : un article stocké se facture depuis son bon de livraison (sortie de stock).`);
+      // Facture directe d'un article stocké (sans BL) : permise, sans aucun mouvement de stock ni vente projetée
+      // (la marchandise sort par un BL, ou est déjà sortie hors du journal).
       const designation = p?.name ?? l.designation?.trim();
       if (!designation) throw new DocumentError(`Ligne ${i + 1} : désignation manquante.`);
       const qty = parseDecimal(l.quantity, SCALE.qty);
@@ -387,12 +388,13 @@ export async function createCreditNote(invoiceId: string, actor: AuditActor): Pr
   const open = (await db.execute<{ id: string }>(sql`select id from sales_documents where origin_document_id = ${invoiceId}::uuid and type = 'AVOIR' and status = 'BROUILLON' limit 1`)).rows[0];
   if (open) throw new DocumentError("Un avoir brouillon existe déjà sur cette facture : terminez-le ou supprimez-le.");
   const back = (await db.execute<{ wh: string | null }>(sql`select return_warehouse_key as wh from credit_reasons where key = 'RETOUR'`)).rows[0]?.wh ?? "PRINCIPAL";
+  // Ligne facturée directement (sans BL) : elle n'a rien sorti du stock, son avoir n'y fait rien rentrer.
   return saveDraft({
     type: "AVOIR", clientId: inv.clientId, legalEntityId: inv.legalEntityId, date: iso(today()), site: inv.site, deliveryAddress: null, salesRepId: inv.salesRepId,
     paymentModeKey: inv.paymentModeKey, globalDiscountPct: inv.globalDiscountPct, notes: null, reasonKey: "RETOUR", originDocumentId: inv.id,
     lines: lines.map((l) => ({
       productId: l.productId, designation: l.designation, quantity: remainingQty(l.quantity, l.creditedQty), freeQuantity: "0", unitPriceHt: l.unitPriceHt,
-      discountPct: l.discountPct, taxRate: l.taxRate, sourceLineId: l.id, returnWarehouseKey: l.productId ? back : null,
+      discountPct: l.discountPct, taxRate: l.taxRate, sourceLineId: l.id, returnWarehouseKey: l.productId && l.sourceLineId ? back : null,
     })),
   }, actor);
 }
@@ -655,8 +657,11 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
     const reason = doc.reasonKey ? (await tx.execute<{ with_return: boolean; return_warehouse_key: string | null }>(sql`
       select with_return, return_warehouse_key from credit_reasons where key = ${doc.reasonKey}`)).rows[0] : null;
     const returnLots: { lineId: string; productId: string; lotNumber: string; qty: string }[] = [];
+    // Lignes d'avoir reprises d'une facture DIRECTE (sans BL) : ni stock sorti, ni vente projetée — rien à rendre.
+    const directIds = type === "AVOIR" ? await directInvoiceCredits(tx, doc.lines) : new Set<string>();
     if (type === "AVOIR" && reason?.with_return) {
       for (const l of doc.lines) {
+        if (directIds.has(l.id)) continue;
         const warehouseKey = l.returnWarehouseKey ?? reason.return_warehouse_key;
         if (!l.productId || !warehouseKey || l.productKind !== "PRODUIT") continue;
         // Lot du retour : celui qu'avait livré le BL d'origine (facture → BL) ; sur un avoir libre, celui saisi.
@@ -789,7 +794,7 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
     if (type === "BL" || type === "AVOIR") {
       const brandOf = await productBrands(tx, doc.lines.map((l) => l.productId));
       const fed = projectedLines(g.cutover, g.salesFromDocuments, { isSimulation: simulation, date: doc.date, site: doc.site },
-        doc.lines.map((l) => ({ id: l.id, productId: l.productId, designation: l.designation, quantity: l.quantity, freeQuantity: l.freeQuantity, netHt: l.netHt, brandId: l.productId ? brandOf.get(l.productId) ?? null : null })));
+        doc.lines.filter((l) => !directIds.has(l.id)).map((l) => ({ id: l.id, productId: l.productId, designation: l.designation, quantity: l.quantity, freeQuantity: l.freeQuantity, netHt: l.netHt, brandId: l.productId ? brandOf.get(l.productId) ?? null : null })));
       if (fed.length) await projectDocument(tx, { type, number, date: doc.date, clientId: doc.clientId, site: doc.site, salesRepName: doc.salesRepName, legalName: String(clientSnapshot.legalName) }, fed);
     }
     await audit({ actor, action: "VALIDATE", module: moduleOf(type), entity: "sales_document", entityId: id, label: number, after: { number, ttc: doc.ttc, simulation, approvals: approvals.length ? approvals : undefined, movements: movements.length, outputCharges: outputCharges || undefined } }, tx);
@@ -797,6 +802,19 @@ export async function validateDocument(id: string, actor: AuditActor, opts: { ov
   });
   if (res.outputCharges) await refreshAfterWrite(["EXPENSE"]);
   return { number: res.number, simulation: res.simulation };
+}
+
+/**
+ * Lignes d'avoir qui créditent une ligne de facture DIRECTE (facture sans BL : `source_line_id` vide) : la
+ * facture n'a ni sorti de stock ni alimenté les ventes, son avoir ne fait donc ni retour en stock ni vente négative.
+ */
+async function directInvoiceCredits(tx: Tx, lines: { id: string; sourceLineId: string | null }[]): Promise<Set<string>> {
+  const src = lines.filter((l) => l.sourceLineId);
+  if (!src.length) return new Set();
+  const direct = new Set((await tx.execute<{ id: string }>(sql`
+    select f.id from sales_document_lines f join sales_documents d on d.id = f.document_id
+    where f.id = any(${pgArray(src.map((l) => l.sourceLineId!))}) and d.type = 'FACTURE' and f.source_line_id is null`)).rows.map((r) => r.id));
+  return new Set(src.filter((l) => direct.has(l.sourceLineId!)).map((l) => l.id));
 }
 
 /* ------------------------------------------------------------------ */
@@ -983,6 +1001,127 @@ export async function importBulkInvoices(rows: BulkInvoiceInput[], actor: AuditA
     }
     if (opts.apply) await audit({ actor, action: "IMPORT", module: "facturation", entity: "sales_document", label: "Reprise des ventes en bloc Sage", after: { inserted, skipped: skipped.length } }, tx);
     return { inserted, skipped, preview };
+  };
+  return db.transaction(run);
+}
+
+/* ------------------------------------------------------------------ */
+/* Purge des pièces de simulation                                      */
+/* ------------------------------------------------------------------ */
+
+export type SimulationPurgeReport = {
+  documents: number;
+  byType: Partial<Record<DocType, number>>;
+  /** Pièces hors de la période emportées parce qu'elles sont liées (facture d'un BL purgé, avoir d'une facture purgée…). */
+  linked: number;
+  /** Brouillons qui reprenaient une pièce purgée (facture ou avoir en préparation) : supprimés avec elle. */
+  drafts: number;
+  netHt: string;
+  numbers: string[];
+  sales: number;
+  charges: number;
+  allocations: number;
+  reminders: number;
+  /** Pièce réelle liée à une simulation : la purge est refusée. */
+  blocked: string[];
+};
+
+/**
+ * Purge les pièces de SIMULATION (SIMBL / SIMFA / SIMAV) validées d'une période (bornes incluses, vides = tout).
+ * Les pièces liées suivent, même hors période : facture d'un BL purgé, avoir d'une facture purgée, BL d'une facture
+ * purgée, et les brouillons qui en reprenaient les lignes. Une pièce réelle liée bloque tout. Retirés avec elles :
+ * ventes projetées, charges d'échantillons, imputations de règlements (le règlement redevient non imputé) et relances
+ * qui ne portaient que sur elles. GARDÉS (décision d'Hicham, 10/11/2026) : les mouvements de stock du journal et les
+ * sorties de matériel (la marchandise est partie), la quantité livrée des commandes BC (toujours réelles) et la
+ * numérotation des séries SIM. `apply = false` : aperçu, rien n'est écrit.
+ */
+export async function purgeSimulation(range: { from: string | null; to: string | null }, actor: AuditActor, opts: { apply: boolean }): Promise<SimulationPurgeReport> {
+  for (const d of [range.from, range.to]) if (d && !/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new DocumentError("Date invalide.");
+  if (range.from && range.to && range.from > range.to) throw new DocumentError("La date de début est après la date de fin.");
+  const run = async (tx: Tx): Promise<SimulationPurgeReport> => {
+    const seed = (await tx.execute<{ id: string }>(sql`
+      select id from sales_documents where is_simulation and status <> 'BROUILLON' and number is not null and type <> 'COMMANDE' and source = 'COMANET_OS'
+        ${range.from ? sql`and date >= ${range.from}::date` : sql``} ${range.to ? sql`and date <= ${range.to}::date` : sql``}`)).rows.map((r) => r.id);
+    const ids = new Set(seed);
+    const blocked: string[] = [];
+    let drafts = 0;
+    // Composante liée : par l'origine de la pièce et par les lignes reprises, dans les deux sens. Une commande BC
+    // (réelle) reste ; un brouillon qui reprend une pièce purgée part avec elle ; une pièce réelle bloque.
+    for (let frontier = [...ids]; frontier.length;) {
+      const found = (await tx.execute<{ id: string; type: DocType; status: DocStatus; number: string | null; is_simulation: boolean }>(sql`
+        select distinct x.id, x.type, x.status, x.number, x.is_simulation from sales_documents x
+        where not (x.id = any(${pgArray([...ids])})) and (
+          x.origin_document_id = any(${pgArray(frontier)})
+          or x.id in (select origin_document_id from sales_documents where id = any(${pgArray(frontier)}))
+          or exists (select 1 from sales_document_lines l join sales_document_lines s on s.id = l.source_line_id where l.document_id = x.id and s.document_id = any(${pgArray(frontier)}))
+          or exists (select 1 from sales_document_lines l join sales_document_lines s on s.id = l.source_line_id where s.document_id = x.id and l.document_id = any(${pgArray(frontier)})))`)).rows;
+      frontier = [];
+      for (const x of found) {
+        if (x.type === "COMMANDE") continue;
+        if (x.status !== "BROUILLON" && !x.is_simulation) { blocked.push(`${DOC_TYPE_LABELS[x.type].one} ${x.number} (réelle) est liée à une pièce de simulation`); continue; }
+        if (x.status === "BROUILLON") drafts++;
+        ids.add(x.id);
+        frontier.push(x.id);
+      }
+    }
+    const all = [...ids];
+    const docs = all.length ? (await tx.execute<{ type: DocType; number: string | null; net_ht: string; date: string; status: DocStatus }>(sql`
+      select type, number, net_ht::text, date::text as date, status from sales_documents where id = any(${pgArray(all)}) order by date, number`)).rows : [];
+    const inRange = (d: string) => (!range.from || d >= range.from) && (!range.to || d <= range.to);
+    const validated = docs.filter((d) => d.status !== "BROUILLON");
+    const byType: Partial<Record<DocType, number>> = {};
+    let net = 0n;
+    for (const d of validated) {
+      byType[d.type] = (byType[d.type] ?? 0) + 1;
+      net += (parseDecimal(d.net_ht, SCALE.money) ?? 0n) * (d.type === "AVOIR" ? -1n : 1n);
+    }
+    const lineIds = all.length ? (await tx.execute<{ id: string }>(sql`select id from sales_document_lines where document_id = any(${pgArray(all)})`)).rows.map((r) => r.id) : [];
+    const count = async (q: ReturnType<typeof sql>) => (await tx.execute<{ n: number }>(q)).rows[0]?.n ?? 0;
+    const ids_ = pgArray(all.length ? all : ["00000000-0000-0000-0000-000000000000"]);
+    const lines_ = pgArray(lineIds.length ? lineIds : ["00000000-0000-0000-0000-000000000000"]);
+    const [salesN, chargesN, allocN, remindersN] = await Promise.all([
+      count(sql`select count(*)::int as n from sales where source = 'COMANET_OS' and document_line_id = any(${lines_})`),
+      count(sql`select count(*)::int as n from marketing_expenses where document_line_id = any(${lines_})`),
+      count(sql`select count(*)::int as n from payment_allocations where invoice_id = any(${ids_}) or credit_note_id = any(${ids_})`),
+      count(sql`select count(*)::int as n from payment_reminders r where jsonb_array_length(r.invoices) > 0
+        and not exists (select 1 from jsonb_array_elements(r.invoices) e where not ((e->>'id') = any(${pgArray(all.length ? all : [""], "text")})))`),
+    ]);
+    const report: SimulationPurgeReport = {
+      documents: validated.length, byType, linked: validated.filter((d) => !inRange(d.date)).length, drafts,
+      netHt: formatScaled(net, SCALE.money), numbers: validated.map((d) => d.number!).filter(Boolean),
+      sales: salesN, charges: chargesN, allocations: allocN, reminders: remindersN, blocked,
+    };
+    if (!opts.apply) return report;
+    if (blocked.length) throw new DocumentError(`Purge refusée : ${blocked.slice(0, 3).join(" ; ")}${blocked.length > 3 ? "…" : ""}.`);
+    if (!all.length) throw new DocumentError("Aucune pièce de simulation sur cette période.");
+
+    // Le garde-fou de la table ne laisse supprimer une pièce de simulation que dans cette transaction.
+    await tx.execute(sql`select set_config('comanet.purge_simulation', 'on', true)`);
+    await removeProjection(tx, lineIds);
+    await removeOutputCharges(tx, lineIds);
+    if (lineIds.length) await tx.execute(sql`update sales set document_line_id = null where document_line_id = any(${lines_})`);
+    // Sorties de matériel : gardées (la marchandise est partie), détachées de la ligne supprimée.
+    if (lineIds.length) await tx.execute(sql`update inventory_movements set document_line_id = null where document_line_id = any(${lines_})`);
+    await detachPurgedDocuments(tx, all);
+    // Lignes puis pièces, des plus en aval (avoir, facture) aux plus en amont (BL) : les clés de reprise sont restrictives.
+    for (let guard = 0; guard < 10; guard++) {
+      const r = await tx.execute(sql`delete from sales_document_lines l where l.document_id = any(${ids_})
+        and not exists (select 1 from sales_document_lines c where c.source_line_id = l.id)`);
+      if (!r.rowCount) break;
+    }
+    for (let guard = 0; guard < 10; guard++) {
+      const r = await tx.execute(sql`delete from sales_documents d where d.id = any(${ids_})
+        and not exists (select 1 from sales_documents c where c.origin_document_id = d.id)`);
+      if (!r.rowCount) break;
+    }
+    const left = await count(sql`select count(*)::int as n from sales_documents where id = any(${ids_})`);
+    if (left) throw new DocumentError("Purge interrompue : des pièces liées n'ont pas pu être supprimées.");
+    await audit({
+      actor, action: "PURGE", module: "facturation", entity: "sales_document",
+      label: `Purge des pièces de simulation${range.from || range.to ? ` (${range.from ?? "début"} → ${range.to ?? "aujourd'hui"})` : ""}`,
+      after: { ...report, numbers: report.numbers.slice(0, 200) },
+    }, tx);
+    return report;
   };
   return db.transaction(run);
 }

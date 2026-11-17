@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { can, requireAccessContext, requirePermission } from "@/lib/access";
 import { bool, errorParam, isUuid, str } from "@/lib/gestion/form";
 import {
-  addEntry, cancelCount, createCount, deleteCount, deleteEntry, setLineReason, startCount, updateCount, validateCount, zeroUncounted, type CountInput,
+  addEntry, cancelCount, createCount, deleteCount, deleteEntry, setLineReason, setMyCount, startCount, updateCount, validateCount, zeroUncounted, type CountInput,
 } from "@/lib/gestion/counts";
 
 /**
@@ -19,6 +19,7 @@ function readCount(fd: FormData): CountInput {
   return {
     title: str(fd, "title") ?? "", warehouseKey: str(fd, "warehouseKey") ?? "PRINCIPAL", brandIds: fd.getAll("brandIds").map(String).filter(isUuid),
     blind: bool(fd, "blind"), countDate: str(fd, "countDate") ?? "", notes: str(fd, "notes"),
+    counterIds: fd.getAll("counterIds").map(String).filter(isUuid), includeMaterials: bool(fd, "includeMaterials"),
   };
 }
 
@@ -70,10 +71,22 @@ export async function startCountAction(fd: FormData) {
 }
 
 /** Saisie d'un compteur (appelée depuis l'écran de comptage, sans rechargement). */
-export async function addEntryAction(countId: string, input: { productId: string; lotNumber: string | null; expiryDate: string | null; quantity: string }): Promise<{ ok: boolean; error?: string }> {
+export async function addEntryAction(countId: string, input: { productId?: string | null; itemId?: string | null; lotNumber: string | null; expiryDate: string | null; quantity: string }): Promise<{ ok: boolean; error?: string }> {
   try {
-    if (!isUuid(countId) || !isUuid(input.productId)) throw new Error("Saisie invalide.");
+    if (!isUuid(countId) || !(isUuid(input.productId) || isUuid(input.itemId))) throw new Error("Saisie invalide.");
     await addEntry(countId, input, actorOf(await requirePermission("stock", "create")));
+    revalidatePath(`/gestion/inventaires/${countId}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** Feuille de comptage : la quantité de ce compteur pour une ligne (vide = retirer sa saisie). */
+export async function setMyCountAction(countId: string, input: { productId?: string | null; itemId?: string | null; lotNumber: string | null; quantity: string | null }): Promise<{ ok: boolean; error?: string }> {
+  try {
+    if (!isUuid(countId) || !(isUuid(input.productId) || isUuid(input.itemId))) throw new Error("Saisie invalide.");
+    await setMyCount(countId, input, actorOf(await requirePermission("stock", "create")));
     revalidatePath(`/gestion/inventaires/${countId}`);
     return { ok: true };
   } catch (e) {

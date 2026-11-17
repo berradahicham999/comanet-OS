@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireAnyModule, getUserPermissions } from "@/lib/access";
-import { allRecommendations, RULES, CATEGORY_META, CATEGORY_MODULES, type RecCategory } from "@/lib/rules";
+import { getSettings } from "@/lib/settings";
+import { allRecommendations, activeRules, CATEGORY_META, CATEGORY_MODULES, type RecCategory } from "@/lib/rules";
 import { listUsers } from "@/lib/users";
 import { PageHeader, Tabs, Card, Empty, Badge } from "@/components/ui";
 import { RecommendationCard } from "@/components/recommendation-card";
@@ -18,7 +19,7 @@ export default async function ActionCenterPage(props: { searchParams: Promise<{ 
   await requireAnyModule();
   const perms = await getUserPermissions();
   const sp = await props.searchParams;
-  const [recs, users, refDate, access] = await Promise.all([allRecommendations(), listUsers(), getRefDate(), requireAccessContext()]);
+  const [recs, users, refDate, access, settings] = await Promise.all([allRecommendations(), listUsers(), getRefDate(), requireAccessContext(), getSettings()]);
   const copilot = copilotAllowed(access);
   const plans = copilot ? await listPlans(recs.map((r) => r.key)) : new Map();
   const showAll = sp.all === "1";
@@ -83,7 +84,7 @@ export default async function ActionCenterPage(props: { searchParams: Promise<{ 
         <aside className="space-y-3">
           <Card title="Règles actives">
             <ul className="space-y-2.5 text-[12.5px]">
-              {RULES.map((r) => (
+              {activeRules(settings).map((r) => (
                 <li key={r.id}>
                   <div className="font-medium">{r.label}</div>
                   <div className="text-muted leading-snug">{r.description}</div>
