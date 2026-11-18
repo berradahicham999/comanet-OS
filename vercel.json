@@ -22,6 +22,10 @@
       "schedule": "30 6 * * *"
     },
     {
+      "path": "/api/cron/sales-feed",
+      "schedule": "30 * * * *"
+    },
+    {
       "path": "/api/cron/medical",
       "schedule": "15 * * * *"
     },

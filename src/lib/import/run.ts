@@ -19,6 +19,7 @@ import { cabinetFromHistory } from "@/lib/medical/gps-shared";
 import { pgArray } from "@/lib/sql-array";
 import { getSettings } from "@/lib/settings";
 import { importBlockedByCutover, importSkippedForDocuments } from "@/lib/gestion/documents-shared";
+import { importSkippedForFeed } from "./sales-feed-shared";
 import {
   VARIANT_TYPES, normalizeBool, normalizeDocumentType, normalizeObservation,
   normalizePackaging, normalizeSize, normalizeState, normalizeVariantType, regulatoryKey,
@@ -60,7 +61,7 @@ type Mapping = Record<string, string>;
 /* Résolveur d'entités (cache mémoire + création à la volée)           */
 /* ------------------------------------------------------------------ */
 
-class Resolver {
+export class Resolver {
   brands: { id: string; name: string; aliases: string[] }[] = [];
   brandKeys: string[] = [];
   products: ProductCandidate[] = [];
@@ -283,8 +284,10 @@ async function importSales(rows: Record<string, unknown>[], mapping: Mapping, op
   });
   const values: (typeof s.sales.$inferInsert)[] = [];
   const seenHash = new Set<string>();
-  const { cutover, salesFromDocuments } = (await getSettings()).gestion;
-  let fromDocuments = 0;
+  const allSettings = await getSettings();
+  const { cutover, salesFromDocuments } = allSettings.gestion;
+  const feed = allSettings.salesFeed;
+  let fromDocuments = 0, fromFeed = 0;
   for (const { r, i } of ordered) {
     const rowNo = i + 2;
     const date = toISODate(get(r, mapping, "date"));
@@ -310,7 +313,10 @@ async function importSales(rows: Record<string, unknown>[], mapping: Mapping, op
     if (!productId) { out.errors.push({ row: rowNo, message: `Produit non résolu : ${productName}` }); continue; }
     const site = txt(r, mapping, "site")?.toUpperCase() ?? null;
     // « Ventes depuis les pièces » : cette marque, sur ce site, vient des BL saisis dans COMANET OS.
-    if (importSkippedForDocuments(cutover, salesFromDocuments, date, site, R.products.find((p) => p.id === productId)?.brandId ?? brandId)) { fromDocuments++; continue; }
+    const lineBrandId = R.products.find((p) => p.id === productId)?.brandId ?? brandId;
+    if (importSkippedForDocuments(cutover, salesFromDocuments, date, site, lineBrandId)) { fromDocuments++; continue; }
+    // Flux automatique : cette marque, sur ce site, vient du fichier du prestataire relu chaque heure.
+    if (importSkippedForFeed(feed, date, site, lineBrandId)) { fromFeed++; continue; }
     const clientName = txt(r, mapping, "clientName");
     const clientRaw = txt(r, mapping, "clientRaw");
     const clientCode = txt(r, mapping, "clientCode");
@@ -332,6 +338,7 @@ async function importSales(rows: Record<string, unknown>[], mapping: Mapping, op
     });
   }
   if (fromDocuments) out.warnings.push(`${fromDocuments} ligne(s) non importée(s) : depuis le ${salesFromDocuments.from!.split("-").reverse().join("/")}, les ventes de ces marques sur les sites ${cutover.sites.join(", ")} viennent des pièces de vente de COMANET OS (Gestion commerciale → Bascule).`);
+  if (fromFeed) out.warnings.push(`${fromFeed} ligne(s) non importée(s) : depuis le ${feed.from!.split("-").reverse().join("/")}, les ventes de cette marque sur le site ${feed.site} viennent du flux automatique (Imports → Flux automatique).`);
   for (let i = 0; i < values.length; i += 500) {
     const chunk = values.slice(i, i + 500);
     const res = await db.insert(s.sales).values(chunk).onConflictDoNothing({ target: s.sales.lineHash }).returning({ id: s.sales.id });

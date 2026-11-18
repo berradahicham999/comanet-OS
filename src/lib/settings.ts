@@ -109,7 +109,34 @@ export type ComanetSettings = {
   cockpit: CockpitSettings;
   /** Contrôle Internet des positions (Google Maps) et alerte de visite hors zone (`src/lib/places/`). */
   webPlaces: WebPlacesSettings;
+  /** Flux de ventes automatique (fichier d'un distributeur relu chaque heure, `src/lib/import/sales-feed.ts`). */
+  salesFeed: SalesFeedSettings;
 };
+
+/**
+ * Flux de ventes automatique : un fichier partagé par un prestataire (Pharmafirst pour Auracos), réécrit chaque heure,
+ * relu par le cron `/api/cron/sales-feed`. Le lien vit dans la variable d'environnement `SALES_FEED_URL`, jamais en base
+ * ni dans le code (le dépôt est public). À partir de `from`, les ventes du `site` pour la marque `brandId` sont
+ * exactement celles du fichier, et l'import manuel ignore ces lignes. `enabled` faux = rien n'est lu ni écrit.
+ */
+export type SalesFeedSettings = {
+  enabled: boolean;
+  /** Site des ventes remplacées (PHARMAFIRST). */
+  site: string;
+  /** Marque des ventes remplacées ; NULL = flux inactif. */
+  brandId: string | null;
+  /** Première date couverte par le flux (AAAA-MM-JJ) ; NULL = flux inactif. */
+  from: string | null;
+  /** Échantillons gratuits (0 DH, remarque « Echantillon ») : exclus des ventes. */
+  excludeSamples: boolean;
+  /**
+   * Garde-fou : un fichier qui ferait baisser le CA déjà enregistré sur la fenêtre de plus de N % est refusé
+   * (fichier tronqué, mauvais export). Les lignes restent celles d'avant ; une synchro manuelle peut forcer.
+   */
+  maxDropPct: number;
+};
+
+export const DEFAULT_SALES_FEED: SalesFeedSettings = { enabled: false, site: "PHARMAFIRST", brandId: null, from: null, excludeSamples: true, maxDropPct: 20 };
 
 export type CockpitSettings = {
   /**
@@ -890,6 +917,7 @@ export const DEFAULT_SETTINGS: ComanetSettings = {
   creative: DEFAULT_CREATIVE,
   cockpit: DEFAULT_COCKPIT,
   webPlaces: DEFAULT_WEB_PLACES,
+  salesFeed: DEFAULT_SALES_FEED,
 };
 
 export const SETTINGS_KEY = "comanet.rules";
@@ -924,6 +952,7 @@ export function mergeSettings(stored: Partial<ComanetSettings> | null | undefine
     creative: { ...DEFAULT_CREATIVE, ...(stored.creative ?? {}) },
     cockpit: { ...DEFAULT_COCKPIT, ...(stored.cockpit ?? {}) },
     webPlaces: { ...DEFAULT_WEB_PLACES, ...(stored.webPlaces ?? {}) },
+    salesFeed: { ...DEFAULT_SALES_FEED, ...(stored.salesFeed ?? {}) },
   };
 }
 
