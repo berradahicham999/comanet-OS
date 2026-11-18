@@ -14,6 +14,7 @@ import { COLLAB_STATUS, CAMPAIGN_STATUS } from "@/lib/marketing-shared";
 import { listCollaborations, collabKpis, scoreCollaborations, rankInfluencers, collabPipeline, influenceTotals, influenceAdvice } from "@/lib/influence";
 import { saveInfluencer, saveCollaboration, setCollaborationStatus, deleteCollaboration, saveCampaign } from "../actions";
 
+import { MarketingSectionTabs } from "@/components/marketing-sections";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Influence" };
 
@@ -70,8 +71,9 @@ export default async function InfluencePage(props: { searchParams: Promise<{ bra
 
   return (
     <>
+      <MarketingSectionTabs section="operations" current="/marketing/influence" />
       <PageHeader
-        eyebrow="Marketing Command Center"
+        eyebrow="Marketing · Opérations"
         title="Influence"
         subtitle={`${period.label} · ${totals.collabs} collaboration(s), ${totals.influencers} influenceuse(s). Le CA n'est compté comme attribué que lorsqu'un code promo ou un lien tracké le mesure.`}
         actions={<><Link href="/marketing" className="btn-secondary btn-sm">Vue d&apos;ensemble</Link><Link href="/marketing/campagnes" className="btn-ghost btn-sm">Campagnes</Link></>}

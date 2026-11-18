@@ -106,7 +106,7 @@ function intelPriority(d: IntelDecision): TaskPriority {
 export function fromMarketingIntel(d: IntelDecision, brandId: string, period: { start: string; end: string; label: string }, now: Date, reviewDays: number): UnifiedDecision {
   return {
     id: `marketing-intel:${d.key}:${brandId}`, domain: "MARKETING_INTEL", source: "marketing-intel/decide",
-    entity: d.productId ? { type: "product", id: d.productId, name: d.productName ?? d.brandName, href: `/produits/${d.productId}` } : { type: "brand", id: brandId, name: d.brandName, href: `/marketing/agent?brand=${brandId}` },
+    entity: d.productId ? { type: "product", id: d.productId, name: d.productName ?? d.brandName, href: `/produits/${d.productId}` } : { type: "brand", id: brandId, name: d.brandName, href: `/marketing?brand=${brandId}` },
     brandId, brandName: d.brandName, productId: d.productId,
     title: `${d.productName ?? d.brandName} — ${d.title}`, why: d.why, evidence: d.data, impact: d.expectedImpact,
     confidence: { level: d.confidence, pct: null, why: d.confidenceWhy },

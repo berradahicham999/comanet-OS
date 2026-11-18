@@ -168,7 +168,7 @@ function intelFromRow(row: Record<string, unknown>, s: ComanetSettings, t: Date,
   if (segment === "INACTIF") {
     recommendation = { kind: "REACTIVATION", title: "Réactivation commerciale", detail: `Aucune commande depuis ${daysSinceLast === null ? "toujours" : daysSinceLast + " jours"}. Visite ou appel du commercial avec offre de réassort ciblée sur les marques historiques${brands.length ? ` (${brands.slice(0, 3).join(", ")})` : ""}.` };
   } else if (highFieldStock) {
-    recommendation = { kind: "ANIMATION", title: "Ne pas pousser de commande — activer le sell-out", detail: `Stock rayon constaté élevé (${fieldStock} u.) pour un sell-out faible (${fieldSellOut60} u. / 60 j). Programmer une animation ou une activation marketing locale et analyser les produits concernés avant toute relance.` };
+    recommendation = { kind: "ANIMATION", title: "Ne pas pousser de commande — activer le sell-out", detail: `Stock rayon constaté élevé (${fieldStock} u.) pour un sell-out faible (${fieldSellOut60} u. / 60 j). Programmer une animation ou une opération marketing locale et analyser les produits concernés avant toute relance.` };
   } else if (segment === "A_RISQUE" && dropping) {
     recommendation = { kind: "ANALYSE", title: "Analyser la baisse et visiter", detail: `CA 3 mois ${Math.round(growthPct!)} % vs 3 mois précédents. Vérifier stock dormant, concurrence et visibilité rayon ; proposer animation si la rotation est bonne.` };
   } else if (segment === "A_RISQUE") {

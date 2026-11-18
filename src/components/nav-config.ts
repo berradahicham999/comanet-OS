@@ -20,6 +20,8 @@ export type NavItem = {
   /** Interrupteur transverse requis (ou module Administration avec Valider). */
   flag?: FlagKey;
   exact?: boolean;
+  /** Autres pages qui allument cet item (pages regroupées sous un même onglet : Opérations, Plan & budget). */
+  match?: string[];
 };
 
 export type NavGroup = { title: string; items: NavItem[] };
@@ -64,20 +66,11 @@ export const NAV: NavGroup[] = [
   {
     title: "Marketing",
     items: [
-      { href: "/marketing", label: "Command Center", icon: "Megaphone", module: "marketing", exact: true },
-      { href: "/marketing/plan", label: "Plan marketing", icon: "Map", module: "marketing" },
-      { href: "/marketing/priorites", label: "Priorités & actions", icon: "Zap", module: "marketing" },
-      { href: "/marketing/bibliotheque", label: "Bibliothèque d'actions", icon: "LibraryBig", module: "marketing" },
-      { href: "/marketing/campagnes", label: "Campagnes", icon: "Rocket", module: "marketing" },
-      { href: "/marketing/influence", label: "Influence", icon: "Heart", module: "influence" },
-      { href: "/marketing/ads", label: "Digital Ads", icon: "MousePointerClick", module: "marketing" },
+      { href: "/marketing", label: "Pilotage", icon: "Megaphone", module: "marketing", exact: true },
+      { href: "/marketing/activations", label: "Opérations", icon: "PartyPopper", module: ["marketing", "clients"], match: ["/marketing/campagnes", "/marketing/influence", "/marketing/materiel"] },
       { href: "/marketing/planning", label: "Contenu", icon: "CalendarDays", module: "marketing" },
-      { href: "/marketing/studio", label: "Studio créatif", icon: "Clapperboard", module: "marketing" },
-      { href: "/marketing/activations", label: "Activations", icon: "PartyPopper", module: ["marketing", "clients"] },
-      { href: "/marketing/materiel", label: "Matériel & goodies", icon: "Boxes", module: ["marketing", "clients"] },
-      { href: "/marketing/budgets", label: "Budget & dépenses", icon: "Wallet", module: "budgets" },
-      { href: "/marketing/analytics", label: "Analytics", icon: "ChartLine", module: "marketing" },
-      { href: "/marketing/agent", label: "Agent marketing", icon: "Sparkles", module: "marketing" },
+      { href: "/marketing/ads", label: "Digital Ads", icon: "MousePointerClick", module: "marketing" },
+      { href: "/marketing/plan", label: "Plan & budget", icon: "Map", module: ["marketing", "budgets"], match: ["/marketing/budgets", "/marketing/analytics"] },
     ],
   },
   {

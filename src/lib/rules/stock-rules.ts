@@ -63,7 +63,7 @@ export const stockCoverageRule: Rule = {
 export const overstockRule: Rule = {
   id: "stock-overstock",
   label: "Surstock",
-  description: "Produit avec plus de 6 mois de couverture : ne pas alimenter le marketing sans plan d'écoulement, ou lancer une activation si la marge le justifie.",
+  description: "Produit avec plus de 6 mois de couverture : ne pas alimenter le marketing sans plan d'écoulement, ou lancer une opération si la marge le justifie.",
   async run({ stocks, settings }) {
     const out: Recommendation[] = [];
     for (const p of stocks) {
@@ -87,10 +87,10 @@ export const overstockRule: Rule = {
         ],
         why: `${fmtMAD(p.stockValue, { compact: true })} immobilisés pour ${months(p.coverageMonths)} de ventes${lowSellOut ? ", avec une rotation qui ne progresse pas" : ""}.`,
         action: activation
-          ? "Marge élevée + stock élevé + rotation faible → lancer un plan d'activation marketing (contenu, animation ciblée, offre trade) plutôt que de laisser dormir le stock."
+          ? "Marge élevée + stock élevé + rotation faible → lancer un plan d'opération marketing (contenu, animation ciblée, offre trade) plutôt que de laisser dormir le stock."
           : "Ne pas augmenter les investissements marketing sur ce produit ; proposer une offre trade ciblée aux clients à forte rotation et suspendre les achats.",
         impact: activation ? "Transforme du stock dormant en CA à marge élevée." : "Évite d'immobiliser davantage de trésorerie.",
-        task: { title: activation ? `Plan d'activation ${p.name}` : `Plan d'écoulement stock ${p.name}`, dueInDays: 10, role: activation ? "MARKETING" : "TRADE" },
+        task: { title: activation ? `Plan d'opération ${p.name}` : `Plan d'écoulement stock ${p.name}`, dueInDays: 10, role: activation ? "MARKETING" : "TRADE" },
         entity: { type: "product", id: p.productId, href: `/produits/${p.productId}` },
         brandId: p.brandId,
         score: p.stockValue,

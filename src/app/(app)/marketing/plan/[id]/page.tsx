@@ -54,8 +54,8 @@ export default async function MarketingPlanPage(props: { params: Promise<{ id: s
           <Badge tone={st.tone}>{st.label}</Badge>
           {canValidate && plan.status !== "ACTIVE" && <form action={setPlanStatusAction}><input type="hidden" name="id" value={plan.id} /><input type="hidden" name="status" value="ACTIVE" /><button className="btn-primary btn-sm" type="submit">Activer le plan</button></form>}
           {canValidate && plan.status === "ACTIVE" && <form action={setPlanStatusAction}><input type="hidden" name="id" value={plan.id} /><input type="hidden" name="status" value="CLOSED" /><button className="btn-secondary btn-sm" type="submit">Clôturer</button></form>}
-          <Link href={`/marketing?brand=${plan.brandId}`} className="btn-secondary btn-sm">Command Center</Link>
-          <Link href={`/marketing/priorites?brand=${plan.brandId}`} className="btn-secondary btn-sm">Priorités & actions</Link>
+          <Link href={`/marketing?brand=${plan.brandId}`} className="btn-secondary btn-sm">Pilotage</Link>
+          <Link href="#actions-du-plan" className="btn-secondary btn-sm">Actions du plan</Link>
         </>}>
         <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
           <Kpi label="CA objectif" value={money(framing.revenueTarget)} sub={framing.revenueTarget === null ? "non renseigné" : `objectif ${plan.year} (Paramètres → Objectifs)`} />
@@ -182,7 +182,7 @@ export default async function MarketingPlanPage(props: { params: Promise<{ id: s
                   <td className="text-muted whitespace-nowrap">{a.periodStart ? `${fmtDateShort(a.periodStart)} → ${fmtDateShort(a.periodEnd)}` : "tout le plan"}</td>
                   <td className="num font-medium">{fmtMAD(a.budget, { suffix: false })}</td>
                   <td className={`num ${a.budget > 0 && a.committed > a.budget ? "text-red font-medium" : ""}`}>{a.committed ? fmtMAD(a.committed, { suffix: false }) : "—"}</td>
-                  <td className="num"><Link href={`/marketing/priorites?brand=${plan.brandId}&axe=${a.id}`} className="text-accent hover:underline">{a.actions}</Link></td>
+                  <td className="num"><Link href="#actions-du-plan" className="text-accent hover:underline">{a.actions}</Link></td>
                   <td>{canValidate && <form action={deleteAxisAction}><input type="hidden" name="planId" value={plan.id} /><input type="hidden" name="axisId" value={a.id} /><button className="text-faint hover:text-red" type="submit" title="Supprimer l'axe (les éléments rattachés sont conservés)">×</button></form>}</td>
                 </tr>
               ))}
@@ -207,7 +207,7 @@ export default async function MarketingPlanPage(props: { params: Promise<{ id: s
       </Section>
 
       {/* ------------------------------ Plan mensuel ------------------------------ */}
-      <Section title="Plan mensuel" description="Produit prioritaire, objectif et budget de chaque mois. « Générer une action » ouvre le générateur pré-rempli (marque, mois, produit, budget restant du mois) : il propose des actions concrètes et chiffrées, à ajouter au plan en un clic.">
+      <Section title="Plan mensuel" description="Produit prioritaire, objectif et budget de chaque mois, et les actions qui s'y rattachent. Une opération terrain se crée depuis « + Opération ».">
         <div className="space-y-2">
           {months.map((m) => {
             const open = m.actions.filter((a) => isOpenStatus(a.status));
@@ -239,10 +239,9 @@ export default async function MarketingPlanPage(props: { params: Promise<{ id: s
                     )}
                     <div>
                       <div className="flex items-center justify-between mb-2"><div className="label">Actions du mois ({m.actions.length})</div>
-                        {canEdit && <Link href={`/marketing/priorites/generer?${new URLSearchParams({ brand: plan.brandId, mois: m.month.slice(0, 7), ...(m.focusProductId ? { produit: m.focusProductId } : {}), ...(m.budget - m.actionsBudget > 0 ? { budget: String(Math.round(m.budget - m.actionsBudget)) } : {}) }).toString()}`} className="btn-primary btn-sm">+ Générer une action</Link>}
-                        <Link href={`/marketing/priorites?brand=${plan.brandId}&mois=${m.month}`} className="text-[12px] text-accent hover:underline">Ouvrir dans Priorités</Link>
+                        {canEdit && <Link href="/marketing/activations/nouvelle" className="btn-primary btn-sm">+ Opération</Link>}
                       </div>
-                      {m.actions.length === 0 ? <p className="text-[12.5px] text-muted">{m.budget > 0 ? "Aucune action : générer une action concrète pour ce mois." : "Renseigner le budget du mois, puis générer une action."}</p> : (
+                      {m.actions.length === 0 ? <p className="text-[12.5px] text-muted">{m.budget > 0 ? "Aucune action ce mois : créer une opération, ou approuver une décision dans Pilotage." : "Renseigner le budget du mois, puis créer une opération."}</p> : (
                         <ul className="space-y-1.5">
                           {m.actions.map((a) => (
                             <li key={a.id} className="flex items-center gap-2 text-[12.5px]">
@@ -263,7 +262,8 @@ export default async function MarketingPlanPage(props: { params: Promise<{ id: s
       </Section>
 
       {/* ------------------------------ Actions ------------------------------ */}
-      <Section title={`Actions du plan (${openActions.length} ouverte${openActions.length > 1 ? "s" : ""})`} description="Chaque action a un budget prévu, un responsable, une échéance et un statut (porté par sa tâche). La dépense réelle se rattache à l'action depuis Budget & dépenses." action={<Link href={`/marketing/priorites?brand=${plan.brandId}`} className="btn-secondary btn-sm">Priorités & actions</Link>}>
+      <div id="actions-du-plan" className="scroll-mt-20" />
+      <Section title={`Actions du plan (${openActions.length} ouverte${openActions.length > 1 ? "s" : ""})`} description="Chaque action a un budget prévu, un responsable, une échéance et un statut (porté par sa tâche). La dépense réelle se rattache à l'action depuis Budget & dépenses.">
         <Card pad={false}>
           <table className="tbl text-[12.5px]">
             <thead><tr><th>Action</th><th>Mois</th><th>Canal</th><th>Responsable</th><th>Échéance</th><th>Priorité</th><th>Statut</th><th className="num">Prévu</th><th className="num">Engagé</th></tr></thead>

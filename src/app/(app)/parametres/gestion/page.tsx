@@ -43,7 +43,7 @@ export default async function GestionSettingsPage(props: { searchParams: Promise
   return (
     <>
       <PageHeader eyebrow="Administration" title="Paramètres" subtitle="Gestion commerciale : identité de la société imprimée sur les pièces, TVA, modes de paiement, dépôts, numérotation, politiques et bascule depuis Sage. Rien n'est codé en dur.">
-        <Tabs current="/parametres/gestion" tabs={[{ href: "/parametres?tab=regles", label: "Règles & seuils" }, { href: "/parametres?tab=objectifs", label: "Objectifs" }, { href: "/parametres/utilisateurs", label: "Utilisateurs & droits" }, { href: "/parametres/modeles", label: "Modèles de rôle" }, { href: "/parametres/contenus", label: "Contenus" }, { href: "/parametres/activations", label: "Activations" }, { href: "/parametres/gestion", label: "Gestion commerciale" }, { href: "/parametres?tab=demo", label: "Données de démo" }]} />
+        <Tabs current="/parametres/gestion" tabs={[{ href: "/parametres?tab=regles", label: "Règles & seuils" }, { href: "/parametres?tab=objectifs", label: "Objectifs" }, { href: "/parametres/utilisateurs", label: "Utilisateurs & droits" }, { href: "/parametres/modeles", label: "Modèles de rôle" }, { href: "/parametres/contenus", label: "Contenus" }, { href: "/parametres/activations", label: "Opérations" }, { href: "/parametres/gestion", label: "Gestion commerciale" }, { href: "/parametres?tab=demo", label: "Données de démo" }]} />
       </PageHeader>
       {sp.error && <div className="mb-4 rounded-2xl bg-red-soft border border-red/30 px-4 py-3 text-[13px] text-red">{sp.error}</div>}
       {sp.done && <div className="mb-4 rounded-2xl bg-green-soft border border-green/30 px-4 py-3 text-[13px] text-green">Enregistré.</div>}

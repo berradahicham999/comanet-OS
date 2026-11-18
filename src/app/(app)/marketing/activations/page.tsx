@@ -11,8 +11,9 @@ import { ActivationBoard, type BoardView } from "@/components/activation-board";
 import { moveActivation, changeActivationStatus } from "./actions";
 import { fmtMAD, fmtDateShort, iso, today, startOfMonth, addMonths, fmtMonth } from "@/lib/format";
 
+import { MarketingSectionTabs } from "@/components/marketing-sections";
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Activations" };
+export const metadata = { title: "Opérations" };
 
 type SP = { vue?: string; brand?: string; type?: string; status?: string; city?: string; responsible?: string; q?: string; periode?: string; m?: string };
 
@@ -50,16 +51,17 @@ export default async function ActivationsPage(props: { searchParams: Promise<SP>
 
   return (
     <>
-      <PageHeader eyebrow="Marketing" title="Activations" subtitle="Événements, PLV, sampling, salons, opérations pharmacie : ce qui est prévu, ce que ça coûte, ce qui est en retard, ce qui a marché."
+      <MarketingSectionTabs section="operations" current="/marketing/activations" />
+      <PageHeader eyebrow="Marketing" title="Opérations" subtitle="Grossistes, événements en parapharmacie, PLV, sampling, salons, opérations pharmacie : ce qui est prévu, ce que ça coûte, ce qui est en retard, ce qui a marché."
         actions={<>
           <Link href="/marketing/activations/bord" className="btn-ghost btn-sm">Tableau de bord</Link>
           {awaiting > 0 && isValidator && <Link href="/marketing/activations/validation" className="btn-secondary btn-sm">À valider · {awaiting}</Link>}
           {canCreate && <Link href="/marketing/activations/nouvelle?rapide=1" className="btn-secondary btn-sm sm:hidden">Créer depuis la pharmacie</Link>}
-          {canCreate && <Link href="/marketing/activations/nouvelle" className="btn-primary btn-sm">Nouvelle activation</Link>}
+          {canCreate && <Link href="/marketing/activations/nouvelle" className="btn-primary btn-sm">Nouvelle opération</Link>}
         </>} />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-        <Kpi label={periode === "mois" ? `Activations · ${fmtMonth(monthAnchor)}` : "Activations"} value={String(rows.length)} sub={`${rows.filter((r) => st.get(r.status)?.isValidated).length} validées`} />
+        <Kpi label={periode === "mois" ? `Opérations · ${fmtMonth(monthAnchor)}` : "Opérations"} value={String(rows.length)} sub={`${rows.filter((r) => st.get(r.status)?.isValidated).length} validées`} />
         <Kpi label="Budget prévu" value={fmtMAD(totals.planned, { compact: true })} sub={`${fmtMAD(totals.committed, { compact: true })} engagé`} />
         <Kpi label="Coût complet" value={fmtMAD(totals.spent, { compact: true })} sub="dépensé + matériel" />
         <Kpi label="En retard" value={String(late)} tone={late ? "red" : "green"} sub={awaiting ? `${awaiting} à valider` : "statut, checklist, résultats, budget"} />
@@ -97,8 +99,8 @@ export default async function ActivationsPage(props: { searchParams: Promise<SP>
       )}
 
       {vue !== "liste" ? null : rows.length === 0 ? (
-        <Empty title="Aucune activation sur cette période" hint={<>Proposez une activation depuis « Nouvelle activation » (un modèle la pré-remplit en moins d&apos;une minute), ou élargissez la période avec « Tout ».</>}
-          action={canCreate ? <Link href="/marketing/activations/nouvelle" className="btn-primary btn-sm">Nouvelle activation</Link> : undefined} />
+        <Empty title="Aucune opération sur cette période" hint={<>Proposez une opération depuis « Nouvelle opération » (un modèle la pré-remplit en moins d&apos;une minute), ou élargissez la période avec « Tout ».</>}
+          action={canCreate ? <Link href="/marketing/activations/nouvelle" className="btn-primary btn-sm">Nouvelle opération</Link> : undefined} />
       ) : (
         <>
           {/* Mobile : cartes */}
@@ -118,7 +120,7 @@ export default async function ActivationsPage(props: { searchParams: Promise<SP>
           <Card pad={false} className="hidden sm:block">
             <div className="table-wrap">
               <table className="w-full text-[13px]">
-                <thead><tr className="text-left text-muted"><th className="px-3 py-2">Activation</th><th className="px-3 py-2">Marque</th><th className="px-3 py-2">Dates</th><th className="px-3 py-2">Ville</th><th className="px-3 py-2">Pilote</th><th className="px-3 py-2 text-right">Prévu</th><th className="px-3 py-2 text-right">Engagé</th><th className="px-3 py-2 text-right">Coût complet</th><th className="px-3 py-2">Statut</th><th className="px-3 py-2">Alertes</th></tr></thead>
+                <thead><tr className="text-left text-muted"><th className="px-3 py-2">Opération</th><th className="px-3 py-2">Marque</th><th className="px-3 py-2">Dates</th><th className="px-3 py-2">Ville</th><th className="px-3 py-2">Pilote</th><th className="px-3 py-2 text-right">Prévu</th><th className="px-3 py-2 text-right">Engagé</th><th className="px-3 py-2 text-right">Coût complet</th><th className="px-3 py-2">Statut</th><th className="px-3 py-2">Alertes</th></tr></thead>
                 <tbody>
                   {rows.map((r) => {
                     const s = st.get(r.status); const t = tp.get(r.type);

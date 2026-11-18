@@ -11,7 +11,7 @@ import { ActivationTypeIcon } from "@/components/activation-type-icon";
 import { fmtMAD, fmtDateShort, fmtMonth, iso, today, startOfMonth, addMonths } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Tableau de bord Activations" };
+export const metadata = { title: "Tableau de bord Opérations" };
 
 /**
  * Le module en une minute : ce qui est prévu ce mois, ce que ça coûte par marque, ce qui est
@@ -56,30 +56,30 @@ export default async function ActivationsBoardPage(props: { searchParams: Promis
 
   return (
     <>
-      <PageHeader eyebrow={<Link href="/marketing/activations" className="hover:underline">Activations</Link>} title="Tableau de bord" subtitle="Ce qui est prévu, ce que ça coûte, ce qui est en retard, ce qui a marché."
+      <PageHeader eyebrow={<Link href="/marketing/activations" className="hover:underline">Opérations</Link>} title="Tableau de bord" subtitle="Ce qui est prévu, ce que ça coûte, ce qui est en retard, ce qui a marché."
         actions={<><Link href={`/marketing/activations/bord?m=${prevM}`} className="btn-ghost btn-sm">‹</Link><span className="text-[13px] font-medium capitalize">{fmtMonth(month)}</span><Link href={`/marketing/activations/bord?m=${nextM}`} className="btn-ghost btn-sm">›</Link><Link href="/marketing/activations/comparatif" className="btn-secondary btn-sm">Comparatif</Link></>} />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-        <Kpi label={`Activations · ${fmtMonth(month)}`} value={String(ofMonth.length)} sub={`${running.length} en cours · ${awaiting.length} à valider`} href={`/marketing/activations?m=${iso(month).slice(0, 7)}`} />
+        <Kpi label={`Opérations · ${fmtMonth(month)}`} value={String(ofMonth.length)} sub={`${running.length} en cours · ${awaiting.length} à valider`} href={`/marketing/activations?m=${iso(month).slice(0, 7)}`} />
         <Kpi label="Prévu ce mois" value={fmtMAD(monthPlanned, { compact: true })} sub={`${fmtMAD(monthEngaged, { compact: true })} engagé`} />
         <Kpi label="Coût complet ce mois" value={fmtMAD(monthCost, { compact: true })} sub="dépensé + matériel" />
-        <Kpi label="En retard" value={String(late.length)} tone={late.length ? "red" : "green"} sub="toutes activations ouvertes" href="/actions?cat=MARKETING" />
+        <Kpi label="En retard" value={String(late.length)} tone={late.length ? "red" : "green"} sub="toutes opérations ouvertes" href="/actions?cat=MARKETING" />
       </div>
 
       <div className="grid xl:grid-cols-2 gap-4">
         <Card title={`Budget par marque · ${year}`}>
-          {brandRows.length === 0 ? <p className="text-[13px] text-muted">Aucune activation cette année.</p> : (
+          {brandRows.length === 0 ? <p className="text-[13px] text-muted">Aucune opération cette année.</p> : (
             <div className="space-y-2">
               {brandRows.map((b) => (
                 <div key={b.brand} className="text-[12.5px]">
-                  <div className="flex items-center gap-2"><BrandDot color={b.color ?? "#999"} /><Link href={`/marketing/activations?brand=${b.brandId ?? ""}&periode=tout`} className="font-medium hover:underline">{b.brand}</Link><span className="text-muted">{b.n} activation{b.n > 1 ? "s" : ""}</span><span className="ml-auto tabular-nums">{fmtMAD(b.engaged, { compact: true })} / {fmtMAD(b.planned, { compact: true })}</span></div>
+                  <div className="flex items-center gap-2"><BrandDot color={b.color ?? "#999"} /><Link href={`/marketing/activations?brand=${b.brandId ?? ""}&periode=tout`} className="font-medium hover:underline">{b.brand}</Link><span className="text-muted">{b.n} opération{b.n > 1 ? "s" : ""}</span><span className="ml-auto tabular-nums">{fmtMAD(b.engaged, { compact: true })} / {fmtMAD(b.planned, { compact: true })}</span></div>
                   <Progress value={b.planned > 0 ? (b.engaged / b.planned) * 100 : 0} tone={b.planned > 0 && b.engaged > b.planned ? "red" : "accent"} className="mt-1" />
                   <div className="text-[11px] text-muted mt-0.5">Coût complet {fmtMAD(b.cost, { compact: true })}</div>
                 </div>
               ))}
             </div>
           )}
-          {silent.length > 0 && <p className="mt-3 text-[12px] text-muted">Sans activation ce mois-ci : {silent.map((b) => b.name).join(", ")}.</p>}
+          {silent.length > 0 && <p className="mt-3 text-[12px] text-muted">Sans opération ce mois-ci : {silent.map((b) => b.name).join(", ")}.</p>}
         </Card>
 
         <Card title={`En retard (${late.length})`}>
@@ -99,7 +99,7 @@ export default async function ActivationsBoardPage(props: { searchParams: Promis
         </Card>
 
         <Card title={`Ce qui a marché · ${year}`} action={<Link href="/marketing/activations/comparatif" className="text-[12px] text-accent hover:underline">Comparatif complet</Link>}>
-          {top.length === 0 ? <Empty title="Pas encore d'activation terminée" hint="Le retour se mesure sur les activations terminées avec des points de vente rattachés." /> : (
+          {top.length === 0 ? <Empty title="Pas encore d'opération terminée" hint="Le retour se mesure sur les opérations terminées avec des points de vente rattachés." /> : (
             <ul className="space-y-1.5 text-[12.5px]">
               {top.slice(0, 6).map((r) => (
                 <li key={r.key} className="flex items-center gap-2"><span className="font-medium">{r.label}</span><span className="text-muted">{r.count} · {fmtMAD(r.fullCost, { compact: true })}</span><span className="ml-auto tabular-nums">{r.roi != null ? <Badge tone={safeTone(r.roi >= settings.activations.roiRepeatMin ? "green" : r.roi > 0 ? "orange" : "red")}>× {r.roi.toFixed(2)}</Badge> : <span className="text-muted">pas encore comparable</span>}</span></li>
@@ -122,10 +122,10 @@ export default async function ActivationsBoardPage(props: { searchParams: Promis
         </Card>
       </div>
 
-      <Card title={`Activations de ${fmtMonth(month)}`} className="mt-4" pad={false}>
-        {ofMonth.length === 0 ? <p className="p-4 text-[13px] text-muted">Aucune activation ce mois-ci.</p> : (
+      <Card title={`Opérations de ${fmtMonth(month)}`} className="mt-4" pad={false}>
+        {ofMonth.length === 0 ? <p className="p-4 text-[13px] text-muted">Aucune opération ce mois-ci.</p> : (
           <div className="table-wrap"><table className="w-full text-[13px]">
-            <thead><tr className="text-left text-muted"><th className="px-3 py-2">Activation</th><th className="px-3 py-2">Marque</th><th className="px-3 py-2">Dates</th><th className="px-3 py-2">Ville</th><th className="px-3 py-2 text-right">Prévu</th><th className="px-3 py-2 text-right">Coût complet</th><th className="px-3 py-2">Statut</th></tr></thead>
+            <thead><tr className="text-left text-muted"><th className="px-3 py-2">Opération</th><th className="px-3 py-2">Marque</th><th className="px-3 py-2">Dates</th><th className="px-3 py-2">Ville</th><th className="px-3 py-2 text-right">Prévu</th><th className="px-3 py-2 text-right">Coût complet</th><th className="px-3 py-2">Statut</th></tr></thead>
             <tbody>{ofMonth.map((a) => (
               <tr key={a.id} className="border-t border-line"><td className="px-3 py-1.5"><Link href={`/marketing/activations/${a.id}`} className="font-medium hover:underline">{a.name}</Link></td><td className="px-3 py-1.5">{a.brand ? <span className="inline-flex items-center gap-1.5"><BrandDot color={a.color ?? "#999"} />{a.brand}</span> : "—"}</td><td className="px-3 py-1.5 whitespace-nowrap">{fmtDateShort(a.date)}{a.endDate && a.endDate !== a.date ? ` → ${fmtDateShort(a.endDate)}` : ""}</td><td className="px-3 py-1.5">{a.city ?? "—"}</td><td className="px-3 py-1.5 text-right tabular-nums">{a.planned ? fmtMAD(a.planned, { suffix: false }) : "—"}</td><td className="px-3 py-1.5 text-right tabular-nums">{a.fullCost ? fmtMAD(a.fullCost, { suffix: false }) : "—"}</td><td className="px-3 py-1.5"><Badge tone={safeTone(st.get(a.status)?.tone)}>{st.get(a.status)?.label ?? a.status}</Badge></td></tr>
             ))}</tbody>

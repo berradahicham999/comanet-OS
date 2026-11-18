@@ -57,7 +57,7 @@ async function activations(): Promise<ValidationItem[]> {
   const allowed = new Map<string, boolean>();
   for (const b of new Set(items.map((i) => i.brandId).filter((x): x is string => !!x))) allowed.set(b, await canValidateActivation(b));
   return items.filter((i) => canAll || (i.brandId && allowed.get(i.brandId))).map((i) => ({
-    kind: "ACTIVATION", id: i.id, title: i.name, context: `Dépense · activation · ${i.brand ?? "Sans marque"} · ${ISO(i.date)}${i.city ? ` · ${i.city}` : ""}`,
+    kind: "ACTIVATION", id: i.id, title: i.name, context: `Dépense · opération · ${i.brand ?? "Sans marque"} · ${ISO(i.date)}${i.city ? ` · ${i.city}` : ""}`,
     why: oneLine(i.description) ?? `Valider engage ${i.lines.length} poste${i.lines.length > 1 ? "s" : ""} du budget pour leur montant prévu.`,
     detail: i.description?.slice(0, 400) ?? null, lines: i.lines.map((l) => `${l.label} : ${mad(Number(l.planned))}`),
     amountMad: Number(i.planned), dueDate: i.date.slice(0, 10), href: `/marketing/activations/${i.id}`, refuseLabel: "À corriger", needsReason: true,
@@ -122,7 +122,7 @@ async function marketingDecisions(access: Access): Promise<ValidationItem[]> {
     why: oneLine(d.why[0] ?? d.action), detail: d.action,
     lines: [d.impact ? `Impact attendu : ${d.impact}` : null, `Priorité : ${d.priority === "CRITICAL" ? "critique" : "haute"}`, `Revue le ${fmtDate(d.expectedReviewDate)}`].filter((l): l is string => !!l),
     amountMad: d.amount, dueDate: iso(addDays(scope.ctx.now, d.task.dueInDays)),
-    href: `/marketing/priorites${d.brandId ? `?brand=${d.brandId}` : ""}`, refuseLabel: "Refuser", needsReason: true,
+    href: `/marketing${d.brandId ? `?brand=${d.brandId}` : ""}`, refuseLabel: "Refuser", needsReason: true,
   }));
 }
 
@@ -212,4 +212,4 @@ export async function decideValidation(access: Access, d: ValidationDecision): P
 }
 
 /** Pages à rafraîchir après une décision, quel que soit l'écran qui l'a prise. */
-export const VALIDATION_PATHS = ["/", "/a-decider", "/marketing/planning", "/marketing/activations", "/gestion/pieces", "/rapports", "/taches", "/marketing", "/marketing/priorites", "/actions"];
+export const VALIDATION_PATHS = ["/", "/a-decider", "/marketing/planning", "/marketing/activations", "/gestion/pieces", "/rapports", "/taches", "/marketing", "/actions"];

@@ -58,7 +58,7 @@ export default async function MaterielItemPage(props: { params: Promise<{ id: st
                 <label className="block"><span className="label block">Coût unit. (entrée)</span><input name="unitCost" inputMode="decimal" className="input h-8 text-[12px]" placeholder={String(item.unitCost)} /></label>
                 <label className="block"><span className="label block">Date</span><input type="date" name="date" defaultValue={todayIso} className="input h-8 text-[12px]" /></label>
                 <label className="block sm:col-span-2"><span className="label block">Motif / client (sortie libre)</span><div className="flex gap-1"><input name="reason" className="input h-8 text-[12px]" placeholder="Réception fournisseur, dotation Karim…" /><select name="clientId" className="select h-8 text-[12px] w-[140px]" defaultValue=""><option value="">Client…</option>{clients.rows.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div></label>
-                <div className="col-span-2 sm:col-span-6 flex items-center gap-2"><button className="btn-primary btn-sm h-8" type="submit">Enregistrer le mouvement</button><span className="text-[11px] text-muted">Une sortie vers une activation se fait depuis la fiche de l&apos;activation, bloc « Matériel ».</span></div>
+                <div className="col-span-2 sm:col-span-6 flex items-center gap-2"><button className="btn-primary btn-sm h-8" type="submit">Enregistrer le mouvement</button><span className="text-[11px] text-muted">Une sortie vers une opération se fait depuis la fiche de l&apos;opération, bloc « Matériel ».</span></div>
               </form>
             )}
           </Card>

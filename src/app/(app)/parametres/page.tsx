@@ -45,7 +45,7 @@ export default async function ParametresPage(props: { searchParams: Promise<{ ta
   return (
     <>
       <PageHeader eyebrow="Administration" title="Paramètres" subtitle="Seuils des règles, objectifs et données de démonstration. Les comptes et leurs droits se gèrent dans « Utilisateurs & droits ». Aucune règle métier n'est codée en dur : tout se règle ici.">
-        <Tabs current={`/parametres?tab=${tab}`} tabs={[{ href: "/parametres?tab=regles", label: "Règles & seuils" }, { href: "/parametres?tab=objectifs", label: "Objectifs" }, { href: "/parametres/utilisateurs", label: "Utilisateurs & droits" }, { href: "/parametres/modeles", label: "Modèles de rôle" }, { href: "/parametres/contenus", label: "Contenus" }, { href: "/parametres/activations", label: "Activations" }, { href: "/parametres/gestion", label: "Gestion commerciale" }, { href: "/parametres/analytics", label: "Analytics marketing" }, { href: "/parametres/ia", label: "Copilote IA" }, { href: "/parametres?tab=demo", label: "Données de démo" }]} />
+        <Tabs current={`/parametres?tab=${tab}`} tabs={[{ href: "/parametres?tab=regles", label: "Règles & seuils" }, { href: "/parametres?tab=objectifs", label: "Objectifs" }, { href: "/parametres/utilisateurs", label: "Utilisateurs & droits" }, { href: "/parametres/modeles", label: "Modèles de rôle" }, { href: "/parametres/contenus", label: "Contenus" }, { href: "/parametres/activations", label: "Opérations" }, { href: "/parametres/gestion", label: "Gestion commerciale" }, { href: "/parametres/analytics", label: "Analytics marketing" }, { href: "/parametres/ia", label: "Copilote IA" }, { href: "/parametres?tab=demo", label: "Données de démo" }]} />
       </PageHeader>
 
       {tab === "regles" && (
@@ -258,11 +258,11 @@ export default async function ParametresPage(props: { searchParams: Promise<{ ta
             <form action={seedContentDemoAction}><button className="btn-primary btn-sm" type="submit">Charger la démo du planning</button></form>
             <form action={purgeContentDemoAction}><button className="btn-secondary btn-sm text-red" type="submit">Purger la démo du planning</button></form>
           </div>
-          <h3 className="font-medium text-[13.5px] mt-5 mb-1">Activations et matériel</h3>
-          <p className="text-[13px] text-ink-2 mb-2">Quatorze activations sur vos marques et vos villes (Casablanca, Rabat, Marrakech, Agadir, Tanger, Fès, Tétouan) : terminées avec résultats, en cours, validées avec checklist, proposées, idées ; budgets par poste engagés et facturés, matériel sorti d&apos;un inventaire de démo, historique. Les ventes ne sont pas touchées : l&apos;impact ventes n&apos;apparaît que si des ventes existent sur les clients rattachés.</p>
+          <h3 className="font-medium text-[13.5px] mt-5 mb-1">Opérations et matériel</h3>
+          <p className="text-[13px] text-ink-2 mb-2">Quatorze opérations sur vos marques et vos villes (Casablanca, Rabat, Marrakech, Agadir, Tanger, Fès, Tétouan) : terminées avec résultats, en cours, validées avec checklist, proposées, idées ; budgets par poste engagés et facturés, matériel sorti d&apos;un inventaire de démo, historique. Les ventes ne sont pas touchées : l&apos;impact ventes n&apos;apparaît que si des ventes existent sur les clients rattachés.</p>
           <div className="flex flex-wrap gap-2 items-center">
-            <form action={seedActivationDemoAction}><button className="btn-primary btn-sm" type="submit">Charger la démo des activations</button></form>
-            <form action={purgeActivationDemoAction}><button className="btn-secondary btn-sm text-red" type="submit">Purger la démo des activations</button></form>
+            <form action={seedActivationDemoAction}><button className="btn-primary btn-sm" type="submit">Charger la démo des opérations</button></form>
+            <form action={purgeActivationDemoAction}><button className="btn-secondary btn-sm text-red" type="submit">Purger la démo des opérations</button></form>
           </div>
         </Card>
       )}

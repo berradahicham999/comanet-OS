@@ -227,7 +227,7 @@ export const getProductPerformance: AiTool<typeof perfSchema> = {
         tags: { revenue_mad: "CONFIRMED", growth_pct: "CALCULATED", contribution_pct: "CALCULATED", trend_3m_pct: "CALCULATED", days_of_stock: "CALCULATED", category: "INFERRED" }, legend: DATA_TAGS_LEGEND,
       },
       rowCount: shown.length,
-      links: [{ label: "Ouvrir Analytics par produit", href: `/marketing/analytics/produits${brand ? `?brand=${brand.id}` : ""}` }],
+      links: [{ label: "Résultats (plan vs réel)", href: `/marketing/analytics/plan${brand ? `?brand=${brand.id}` : ""}` }],
       notes: [...freshnessNotes(ctx, perf.inventory ? perf.inventory.stockDate : undefined), ...(perf.comparable ? [] : ["Période précédente sans vente sell-in : croissances non mesurables, catégories limitées à CASH_COW / STABLE."]), ...(ictx.gates.stock ? [] : ["Stock non accessible avec vos droits."])],
     };
   },

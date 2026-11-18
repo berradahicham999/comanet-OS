@@ -10,7 +10,7 @@ import { getSettings } from "@/lib/settings";
 import { saveType, saveStatus, saveTransition, deleteTransition, saveSimple, deleteRef, saveTemplate, deleteTemplate, saveActivationSettings } from "./actions";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Paramètres — Activations" };
+export const metadata = { title: "Paramètres — Opérations" };
 
 const TONES = ["gray", "blue", "purple", "yellow", "orange", "green", "accent", "red"] as const;
 const ICONS = ["PartyPopper", "Handshake", "Landmark", "LayoutPanelTop", "FlaskConical", "Gift", "Store", "Newspaper", "UserRound", "Sparkles"];
@@ -61,8 +61,8 @@ export default async function ActivationsSettingsPage() {
 
   return (
     <>
-      <PageHeader eyebrow="Administration" title="Paramètres" subtitle="Référentiels du module Activations : types et checklists, statuts et transitions, objectifs, cibles, postes budgétaires, catégories d'inventaire, modèles, fenêtres de mesure. Rien n'est codé en dur.">
-        <Tabs current="/parametres/activations" tabs={[{ href: "/parametres?tab=regles", label: "Règles & seuils" }, { href: "/parametres?tab=objectifs", label: "Objectifs" }, { href: "/parametres/utilisateurs", label: "Utilisateurs & droits" }, { href: "/parametres/modeles", label: "Modèles de rôle" }, { href: "/parametres/contenus", label: "Contenus" }, { href: "/parametres/activations", label: "Activations" }, { href: "/parametres?tab=demo", label: "Données de démo" }]} />
+      <PageHeader eyebrow="Administration" title="Paramètres" subtitle="Référentiels du module Opérations : types et checklists, statuts et transitions, objectifs, cibles, postes budgétaires, catégories d'inventaire, modèles, fenêtres de mesure. Rien n'est codé en dur.">
+        <Tabs current="/parametres/activations" tabs={[{ href: "/parametres?tab=regles", label: "Règles & seuils" }, { href: "/parametres?tab=objectifs", label: "Objectifs" }, { href: "/parametres/utilisateurs", label: "Utilisateurs & droits" }, { href: "/parametres/modeles", label: "Modèles de rôle" }, { href: "/parametres/contenus", label: "Contenus" }, { href: "/parametres/activations", label: "Opérations" }, { href: "/parametres?tab=demo", label: "Données de démo" }]} />
       </PageHeader>
 
       {(!ok.awaiting || !ok.validated || !ok.done || !ok.cancelled) && (
@@ -86,8 +86,8 @@ export default async function ActivationsSettingsPage() {
           </form>
         </Card>
 
-        <Card title="Types d'activation et checklists" className="xl:col-span-2">
-          <p className="text-[12.5px] text-muted mb-2">Le module pilote (Marketing ou Trade) sert au formulaire rapide ; la catégorie budget par défaut aux nouveaux postes ; la checklist par défaut pré-remplit les activations créées sans modèle (une étape par ligne).</p>
+        <Card title="Types d'opération et checklists" className="xl:col-span-2">
+          <p className="text-[12.5px] text-muted mb-2">Le module pilote (Marketing ou Trade) sert au formulaire rapide ; la catégorie budget par défaut aux nouveaux postes ; la checklist par défaut pré-remplit les opérations créées sans modèle (une étape par ligne).</p>
           <div className="space-y-1.5">
             {refs.types.map((t) => (
               <details key={t.key} className="rounded-lg border border-line">
@@ -116,7 +116,7 @@ export default async function ActivationsSettingsPage() {
         </Card>
 
         <Card title="Statuts et cycle de vie" className="xl:col-span-2">
-          <p className="text-[12.5px] text-muted mb-3">Les cases « sémantique » disent au code ce que signifie un statut : « validée » engage le budget dans le Command Center, « terminée » déclenche le rappel de résultats, « attend validation » alimente la file du DG.</p>
+          <p className="text-[12.5px] text-muted mb-3">Les cases « sémantique » disent au code ce que signifie un statut : « validée » engage le budget marketing, « terminée » déclenche le rappel de résultats, « attend validation » alimente la file du DG.</p>
           <div className="table-wrap"><table className="tbl text-[12.5px]">
             <thead><tr><th>Ordre</th><th>Clé</th><th>Libellé</th><th>Couleur</th>{FLAGS.map(([k, l]) => <th key={k} className="text-center">{l}</th>)}<th>Actif</th><th></th><th></th></tr></thead>
             <tbody>
@@ -173,18 +173,18 @@ export default async function ActivationsSettingsPage() {
         </Card>
 
         <Card title="Postes budgétaires">
-          <p className="text-[12.5px] text-muted mb-2">Chaque poste alimente une catégorie du budget marketing (Command Center).</p>
+          <p className="text-[12.5px] text-muted mb-2">Chaque poste alimente une catégorie du budget marketing (Plan & budget).</p>
           {simpleList("cost", refs.costItems, "Nouveau poste", true)}
         </Card>
         <Card title="Catégories d'inventaire">
-          <p className="text-[12.5px] text-muted mb-2">Catégorie budgétaire imputée quand une activation consomme du matériel.</p>
+          <p className="text-[12.5px] text-muted mb-2">Catégorie budgétaire imputée quand une opération consomme du matériel.</p>
           {simpleList("inventory", refs.inventoryCategories, "Nouvelle catégorie", true)}
         </Card>
         <Card title="Objectifs">{simpleList("objective", refs.objectives, "Nouvel objectif")}</Card>
         <Card title="Cibles">{simpleList("target", refs.targets, "Nouvelle cible")}</Card>
 
         <Card title="Modèles d'activation" className="xl:col-span-2">
-          <p className="text-[12.5px] text-muted mb-2">Un modèle pré-remplit une activation en moins d&apos;une minute : type, objectif, cible, description, dates (préparation, durée), postes prévus et checklist. Postes : une ligne « POSTE | libellé | montant », par exemple « LIEU | Salle | 15000 ».</p>
+          <p className="text-[12.5px] text-muted mb-2">Un modèle pré-remplit une opération en moins d&apos;une minute : type, objectif, cible, description, dates (préparation, durée), postes prévus et checklist. Postes : une ligne « POSTE | libellé | montant », par exemple « LIEU | Salle | 15000 ».</p>
           <div className="space-y-1.5">
             {templates.map((t) => (
               <details key={t.id} className="rounded-lg border border-line">

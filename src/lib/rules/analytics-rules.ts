@@ -58,7 +58,7 @@ export const reallocationRule: Rule = {
         action: reallocationSentence(r, labels),
         impact: r.expected ? `≈ ${r.expected.value.toLocaleString("fr-FR")} ${labels.result(r.expected.key).toLowerCase()} supplémentaires, si le coût par résultat se maintient.` : undefined,
         task: { title: `Réallouer ${fmtMAD(r.amount, { compact: true })} ${labels.channel(r.fromChannel)} → ${labels.channel(r.toChannel)} (${labels.brand(r.brandId)})`, dueInDays: 7, role: "MARKETING" },
-        entity: { type: "brand", id: r.brandId, href: `/marketing/analytics/canaux?period=last30&brand=${r.brandId}` },
+        entity: { type: "brand", id: r.brandId, href: `/marketing/analytics/revue/${r.brandId}` },
         brandId: r.brandId,
         score: r.amount,
       });
@@ -128,7 +128,7 @@ export const costDegradingRule: Rule = {
         why: `De ${fmtMAD(first)} à ${fmtMAD(last)} par résultat en ${n} semaines : la dépense achète de moins en moins.`,
         action: "Identifier ce qui a changé (créative, cible, point de vente, prestataire) et réduire la dépense tant que le coût ne redescend pas.",
         task: { title: `Analyser la dérive ${channel} · ${brand}`, dueInDays: 3, role: "MARKETING" },
-        entity: { type: "brand", id: brandId, href: `/marketing/analytics/canaux?period=last30&brand=${brandId}&channel=${channelKey}` },
+        entity: { type: "brand", id: brandId, href: `/marketing/analytics/revue/${brandId}` },
         brandId, score: last - first,
       });
     }
@@ -158,7 +158,7 @@ export const brandNoSpendRule: Rule = {
         why: "La marque décroche de son objectif sans aucune action marketing enregistrée : rien ne soutient les ventes.",
         action: "Planifier une action (animation, contenu, activation) ou vérifier que les dépenses réelles sont bien saisies.",
         task: { title: `Plan d'action marketing ${b.name}`, dueInDays: 7, role: "MARKETING" },
-        entity: { type: "brand", id: b.id, href: `/marketing/analytics/marques?period=last30&brand=${b.id}` },
+        entity: { type: "brand", id: b.id, href: `/marketing/analytics/revue/${b.id}` },
         brandId: b.id, score: (a.objective ?? 0) - a.sales.sellIn,
       });
     }
@@ -196,7 +196,7 @@ export const pushedNoEffectRule: Rule = {
         why: "Corrélation observée : la dépense n'a pas été suivie d'une hausse du sell-in dans la fenêtre d'attribution. Ce n'est pas une preuve de causalité, mais un signal à traiter.",
         action: "Arrêter ou changer d'angle (message, canal, cible) ; vérifier la disponibilité en pharmacie avant de conclure.",
         task: { title: `Revoir la mise en avant de ${p.name}`, dueInDays: 7, role: "MARKETING" },
-        entity: { type: "product", id: p.id, href: `/marketing/analytics/produits?period=last30&brand=${p.brand_id}` },
+        entity: { type: "product", id: p.id, href: `/produits/${p.id}` },
         brandId: p.brand_id, score: e.spend.spent,
       });
     }

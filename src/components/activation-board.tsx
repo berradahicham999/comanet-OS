@@ -134,7 +134,7 @@ export function ActivationBoard(props: {
       <span className="font-medium min-w-[140px] text-center">{cap(fmtMonth.format(d(props.monthStart)))}</span>
       <Link href={`${props.monthHrefBase}${props.monthEnd.slice(0, 7)}`} className="btn-secondary btn-sm h-8 w-8 p-0" aria-label="Mois suivant"><ChevronRight size={14} /></Link>
       <Link href={`${props.monthHrefBase}${props.todayIso.slice(0, 7)}`} className="text-muted hover:underline ml-1">Aujourd&apos;hui</Link>
-      {props.canEdit && <span className="text-[11.5px] text-faint ml-auto hidden sm:inline">Glissez une activation pour changer sa date de début.</span>}
+      {props.canEdit && <span className="text-[11.5px] text-faint ml-auto hidden sm:inline">Glissez une opération pour changer sa date de début.</span>}
     </div>
   );
   const calendar = () => (
@@ -177,7 +177,7 @@ export function ActivationBoard(props: {
                 const fullCost = r.items.reduce((a, c) => a + c.fullCost, 0);
                 return (
                   <tr key={r.id} className="border-t border-line">
-                    <td className="sticky left-0 bg-surface px-2 py-1.5"><div className="flex items-center gap-1.5 font-medium"><BrandDot color={r.color} />{r.name}</div><div className="text-muted">{r.items.length} activation{r.items.length > 1 ? "s" : ""}{fullCost > 0 ? ` · ${fmtMAD(fullCost, { compact: true })} dépensés` : ""}</div></td>
+                    <td className="sticky left-0 bg-surface px-2 py-1.5"><div className="flex items-center gap-1.5 font-medium"><BrandDot color={r.color} />{r.name}</div><div className="text-muted">{r.items.length} opération{r.items.length > 1 ? "s" : ""}{fullCost > 0 ? ` · ${fmtMAD(fullCost, { compact: true })} dépensés` : ""}</div></td>
                     {days.map((x) => {
                       const here = r.items.filter((c) => c.date <= x && (c.endDate ?? c.date) >= x);
                       return (
@@ -199,7 +199,7 @@ export function ActivationBoard(props: {
             </tbody>
           </table>
         </div>
-        <p className="text-[11.5px] text-muted mt-2">Une case colorée par jour couvert ; le pictogramme marque le début. Les marques sans activation ce mois-ci sont les trous à combler.</p>
+        <p className="text-[11.5px] text-muted mt-2">Une case colorée par jour couvert ; le pictogramme marque le début. Les marques sans opération ce mois-ci sont les trous à combler.</p>
       </>
     );
   };

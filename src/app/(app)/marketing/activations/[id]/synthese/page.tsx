@@ -37,7 +37,7 @@ export default async function SynthesePage(props: { params: Promise<{ id: string
   return (
     <div className="max-w-4xl print:max-w-none">
       <div className="print:hidden">
-        <PageHeader eyebrow={<Link href={`/marketing/activations/${a.id}`} className="hover:underline">← Fiche activation</Link>} title="Synthèse" subtitle="Ce qui a été fait, ce que ça a coûté, ce que ça a donné. Prête à imprimer ou à partager en PDF."
+        <PageHeader eyebrow={<Link href={`/marketing/activations/${a.id}`} className="hover:underline">← Fiche opération</Link>} title="Synthèse" subtitle="Ce qui a été fait, ce que ça a coûté, ce que ça a donné. Prête à imprimer ou à partager en PDF."
           actions={<PrintButton />} />
       </div>
 
@@ -45,7 +45,7 @@ export default async function SynthesePage(props: { params: Promise<{ id: string
         <Card>
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
-              <div className="label">Synthèse d&apos;activation · {fmtDate(todayIso)}</div>
+              <div className="label">Synthèse d&apos;opération · {fmtDate(todayIso)}</div>
               <h1 className="text-[22px] font-semibold tracking-tight leading-tight mt-1">{a.name}</h1>
               <div className="text-muted mt-1 flex items-center gap-2 flex-wrap">{a.brand && <span className="inline-flex items-center gap-1"><BrandDot color={a.color ?? "#999"} />{a.brand}{a.brandCount > 1 ? ` +${a.brandCount - 1}` : ""}</span>}<span>· {type?.label ?? a.type}</span><span>· {fmtDate(a.date)}{a.endDate && a.endDate !== a.date ? ` → ${fmtDate(a.endDate)} (${durationDays(a.date, a.endDate)} j)` : ""}</span>{a.city && <span>· {a.city}</span>}{a.place && <span>· {a.place}</span>}</div>
             </div>
@@ -85,7 +85,7 @@ export default async function SynthesePage(props: { params: Promise<{ id: string
             <p className="text-muted">Non mesurable : aucun point de vente ni ville rattaché à l&apos;activation. Rien n&apos;est estimé.</p>
           ) : (
             <>
-              <p className="text-[12px] text-muted mb-2">Périmètre : {impact.scopeLabel}. Fenêtres : {settings.activations.windowBeforeDays} j avant, l&apos;activation, {settings.activations.windowAfterDays} j après.</p>
+              <p className="text-[12px] text-muted mb-2">Périmètre : {impact.scopeLabel}. Fenêtres : {settings.activations.windowBeforeDays} j avant, l&apos;opération, {settings.activations.windowAfterDays} j après.</p>
               <div className="table-wrap"><table className="w-full text-[12.5px]">
                 <thead><tr className="text-left text-muted"><th className="py-1">Fenêtre</th><th className="py-1">Dates</th><th className="py-1 text-right">Jours</th><th className="py-1 text-right">Unités</th><th className="py-1 text-right">CA HT</th><th className="py-1 text-right">CA / jour</th></tr></thead>
                 <tbody>

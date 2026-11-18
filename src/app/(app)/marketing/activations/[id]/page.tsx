@@ -34,9 +34,9 @@ export const dynamic = "force-dynamic";
 
 export async function generateMetadata(props: { params: Promise<{ id: string }> }) {
   const { id } = await props.params;
-  if (!/^[0-9a-f-]{36}$/i.test(id)) return { title: "Activation" };
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return { title: "Opération" };
   const r = await db.execute<{ name: string }>(sql`select name from activations where id = ${id}::uuid`);
-  return { title: r.rows[0]?.name ?? "Activation" };
+  return { title: r.rows[0]?.name ?? "Opération" };
 }
 
 const FILE_KINDS = ["PHOTO", "DEVIS", "FACTURE", "VISUEL", "COMPTE_RENDU", "REFERENCE"] as const;
@@ -83,21 +83,21 @@ export default async function ActivationPage(props: { params: Promise<{ id: stri
 
   return (
     <>
-      <PageHeader eyebrow={<Link href="/marketing/activations" className="hover:underline">Activations</Link>}
+      <PageHeader eyebrow={<Link href="/marketing/activations" className="hover:underline">Opérations</Link>}
         title={<span className="inline-flex items-center gap-2"><ActivationTypeIcon icon={type?.icon} size={20} className="text-muted" />{a.name}</span>}
         subtitle={<span className="inline-flex items-center gap-2 flex-wrap">{a.brand && <span className="inline-flex items-center gap-1"><BrandDot color={a.color ?? "#999"} />{a.brand}{a.brandCount > 1 ? ` +${a.brandCount - 1}` : ""}</span>}<span>· {type?.label ?? a.type}</span><span>· {fmtDate(a.date)}{a.endDate && a.endDate !== a.date ? ` → ${fmtDate(a.endDate)} (${durationDays(a.date, a.endDate)} j)` : ""}</span>{a.city && <span>· {a.city}</span>}{a.campaign && <span>· <Link href={`/marketing/campagnes/${a.campaignId}`} className="hover:underline">{a.campaign}</Link></span>}</span>}
         actions={<>
           <Badge tone={safeTone(st?.tone)}>{st?.label ?? a.status}</Badge>
           {a.late.map((l) => <Badge key={l} tone="red">{LATENESS_LABELS[l]}</Badge>)}
           {st?.awaitingValidation && isValidator && <Link href={`/marketing/activations/validation?id=${a.id}`} className="btn-primary btn-sm">Ouvrir dans la file</Link>}
-          {canTemplate && <form action={saveFromActivationAction}><input type="hidden" name="activationId" value={a.id} /><button className="btn-secondary btn-sm" title="Ajoute cette activation (budget par poste, checklist datée) à la bibliothèque d'actions">Enregistrer comme modèle</button></form>}
+          {canTemplate && <form action={saveFromActivationAction}><input type="hidden" name="activationId" value={a.id} /><button className="btn-secondary btn-sm" title="Ajoute cette opération (budget par poste, checklist datée) à la bibliothèque d'actions">Enregistrer comme modèle</button></form>}
         </>} />
       {erreur && <div className="mb-3 rounded-xl border border-red/30 bg-red-soft text-red px-3 py-2 text-[13px]">{erreur}</div>}
 
       {photo && canEdit && (
         <Card className="mb-4 border-accent/40">
           <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div><div className="font-medium">Activation créée. Ajoutez la photo maintenant.</div><div className="text-[12.5px] text-muted">Elle sert de preuve d&apos;installation et alimente le compte rendu.</div></div>
+            <div><div className="font-medium">Opération créée. Ajoutez la photo maintenant.</div><div className="text-[12.5px] text-muted">Elle sert de preuve d&apos;installation et alimente le compte rendu.</div></div>
             <AssetUpload ownerId={a.id} kind="PHOTO" label="Prendre une photo" camera actions={uploadActions} />
           </div>
         </Card>
@@ -145,7 +145,7 @@ export default async function ActivationPage(props: { params: Promise<{ id: stri
               ))}
             </div>
             {t.planned > 0 && <Progress value={Math.min(100, ((t.committed + t.materials) / t.planned) * 100)} tone={t.overrunPct > 0 ? "red" : "accent"} className="mb-3" />}
-            {!st?.isValidated && <p className="text-[12px] text-muted mb-2">Le prévu ne pèse dans le Command Center qu&apos;après validation. Une facture saisie (dépensé) compte toujours.</p>}
+            {!st?.isValidated && <p className="text-[12px] text-muted mb-2">Le prévu ne pèse dans le budget marketing qu&apos;après validation. Une facture saisie (dépensé) compte toujours.</p>}
             <div className="space-y-2">
               {budget.lines.map((l) => (
                 <form key={l.id} action={saveBudgetLine} className="grid grid-cols-2 sm:grid-cols-12 gap-1.5 items-end rounded-xl border border-line p-2 text-[12.5px]">
@@ -205,7 +205,7 @@ export default async function ActivationPage(props: { params: Promise<{ id: stri
                     <span className="tabular-nums ml-auto">{o.kind === "PRODUIT" ? (o.charged ? fmtMAD(o.charged) : "non valorisé") : o.value !== null ? <span className="text-muted">{fmtMAD(o.value)}</span> : "—"}</span>
                   </li>
                 ))}</ul>
-                <p className="mt-1 text-[11.5px] text-faint">Les échantillons sortis par un BL rattaché à cette activation sont des dépenses réelles (budget, P&L) ; le matériel est tracé pour information.</p>
+                <p className="mt-1 text-[11.5px] text-faint">Les échantillons sortis par un BL rattaché à cette opération sont des dépenses réelles (budget, P&L) ; le matériel est tracé pour information.</p>
               </div>
             )}
           </Card>

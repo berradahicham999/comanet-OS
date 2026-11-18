@@ -9,8 +9,9 @@ import { PageHeader, Card, Badge, BrandDot, Empty, Kpi } from "@/components/ui";
 import { fmtMAD, fmtDateShort, iso, today } from "@/lib/format";
 import { saveInventoryItem } from "./actions";
 
+import { MarketingSectionTabs } from "@/components/marketing-sections";
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Matériel" };
+export const metadata = { title: "Goodies & matériel" };
 
 type SP = { brand?: string; category?: string; q?: string; statut?: string; inactifs?: string };
 
@@ -30,7 +31,8 @@ export default async function MaterielPage(props: { searchParams: Promise<SP> })
 
   return (
     <>
-      <PageHeader eyebrow="Marketing" title="Matériel" subtitle="PLV, échantillons, goodies, print : ce qu'il reste, ce que ça vaut, ce qui dort. Une sortie vers une activation alimente son coût."
+      <MarketingSectionTabs section="operations" current="/marketing/materiel" />
+      <PageHeader eyebrow="Marketing · Opérations" title="Goodies & matériel" subtitle="PLV, échantillons, goodies, print : ce qu'il reste, ce que ça vaut, ce qui dort. Une sortie vers une opération alimente son coût."
         actions={<><Link href="/imports/nouveau?type=INVENTORY" className="btn-ghost btn-sm">Importer l&apos;inventaire</Link>{canCreate && <a href="#nouvel-article" className="btn-primary btn-sm">Nouvel article</a>}</>} />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">

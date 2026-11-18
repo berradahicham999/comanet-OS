@@ -9,7 +9,7 @@ import { fmtMAD, fmtDate } from "@/lib/format";
 import { changeActivationStatus } from "../actions";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Activations à valider" };
+export const metadata = { title: "Opérations à valider" };
 
 /**
  * File de validation du DG : une activation à la fois, visuel (photo, visuel ou devis) et
@@ -52,10 +52,10 @@ export default async function ActivationValidationPage(props: { searchParams: Pr
 
   return (
     <>
-      <PageHeader eyebrow={<Link href="/marketing/activations" className="hover:underline">Activations</Link>} title="Activations à valider"
-        subtitle={shown.length ? `${shown.length} activation${shown.length > 1 ? "s" : ""} proposée${shown.length > 1 ? "s" : ""} · valider engage le budget prévu, refuser exige un commentaire.` : "Rien n'attend votre validation."} />
+      <PageHeader eyebrow={<Link href="/marketing/activations" className="hover:underline">Opérations</Link>} title="Opérations à valider"
+        subtitle={shown.length ? `${shown.length} opération${shown.length > 1 ? "s" : ""} proposée${shown.length > 1 ? "s" : ""} · valider engage le budget prévu, refuser exige un commentaire.` : "Rien n'attend votre validation."} />
       {shown.length === 0
-        ? <Empty title="File vide" hint={<>Les activations arrivent ici quand leur pilote clique « Proposer » sur la fiche. <Link href="/marketing/activations" className="text-accent">Retour aux activations</Link>.</>} />
+        ? <Empty title="File vide" hint={<>Les opérations arrivent ici quand leur pilote clique « Proposer » sur la fiche. <Link href="/marketing/activations" className="text-accent">Retour aux opérations</Link>.</>} />
         : <ValidationQueue items={queue} refs={{ platforms: [], formats: [] }} initialId={id} validateKey={validateKey} correctKey={correctKey} action={changeActivationStatus} canAct={!readOnly} nowIso={new Date().toISOString()}
             hrefBase="/marketing/activations" fileHrefBase="/marketing/activations/fichier"
             emptyVisualText={<>Aucun visuel, photo ni devis déposé.<br />La proposition seule est soumise.</>} actorLabel="proposée par" correctLabel="Refuser" correctSubmitLabel="Refuser avec ce commentaire" correctPlaceholder="Pourquoi (obligatoire, envoyé au pilote) : budget, dates, cible…" />}

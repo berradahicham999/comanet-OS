@@ -17,7 +17,7 @@ import type { Rule, Recommendation } from "./types";
 export const planActionsLateRule: Rule = {
   id: "plan-actions-late",
   label: "Actions marketing en retard",
-  description: "Actions du plan marketing (Priorités & actions) dont l'échéance est passée sans être terminées.",
+  description: "Actions du plan marketing (Pilotage → actions au plan) dont l'échéance est passée sans être terminées.",
   async run({ now }) {
     const todayIso = iso(now);
     const r = await db.execute<{ brand_id: string; brand: string; n: number; budget: number; oldest: string; titles: string[]; assignees: string[] }>(sql`
@@ -39,9 +39,9 @@ export const planActionsLateRule: Rule = {
         { label: "Exemples", value: x.titles.join(" · ") },
       ],
       why: "Des actions du plan sont passées d'échéance sans être terminées : le budget prévu reste immobilisé et l'objectif du mois n'est pas servi.",
-      action: "Ouvrir Priorités & actions : terminer, replanifier ou annuler chaque action en retard ; réassigner celles sans responsable.",
+      action: "Ouvrir Marketing → Pilotage, actions au plan : terminer, replanifier ou annuler chaque action en retard ; réassigner celles sans responsable.",
       task: { title: `Replanifier les actions marketing en retard — ${x.brand}`, dueInDays: 2, role: "MARKETING" },
-      entity: { type: "brand", id: x.brand_id, href: `/marketing/priorites?brand=${x.brand_id}` },
+      entity: { type: "brand", id: x.brand_id, href: `/marketing?brand=${x.brand_id}#actions-au-plan` },
       brandId: x.brand_id, score: x.budget,
     }));
   },
