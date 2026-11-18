@@ -26,6 +26,8 @@ type Data = {
   types: { key: string; label: string }[]; brands: { id: string; name: string }[];
   products: { id: string; name: string; brandId: string }[]; items: { id: string; name: string; unit: string; stock: number; brandId: string | null }[];
   upcoming: Op[]; toClose: Op[];
+  /** D'où viennent les goodies proposés : vos goodies en main, ou le stock central (direction sans goodies en main). */
+  stockSource: "MINE" | "CENTRAL";
 };
 
 const TONE: Record<string, string> = { yellow: "bg-orange-soft text-orange", blue: "bg-blue-soft text-blue", green: "bg-green-soft text-green", red: "bg-red-soft text-red", accent: "bg-accent-soft text-accent", purple: "bg-purple-soft text-purple" };
@@ -56,7 +58,7 @@ function Offline() {
   return <div className="card p-4 text-[14px] text-muted">Pas de réseau : les opérations se créent et se clôturent en ligne. Vos saisies de ventes, elles, marchent sans réseau.</div>;
 }
 
-function Qty({ value, onChange, label, max }: { value: number; onChange: (n: number) => void; label: string; max?: number }) {
+export function Qty({ value, onChange, label, max }: { value: number; onChange: (n: number) => void; label: string; max?: number }) {
   return (
     <div className="flex items-center gap-1 shrink-0">
       <button type="button" onClick={() => onChange(Math.max(0, value - 1))} className="h-11 w-11 rounded-xl border border-line bg-surface flex items-center justify-center" aria-label={`Un de moins — ${label}`}><Minus size={17} /></button>
@@ -247,11 +249,11 @@ export function OperationFormScreen() {
       </section>
 
       <section>
-        <span className="label block mb-1">Goodies prévus</span>
-        {items.length === 0 ? <p className="text-[13px] text-muted">Aucun goodie en stock pour ces marques.</p> : (
+        <span className="label block mb-1">Goodies prévus {data.stockSource === "MINE" ? "(vos goodies en main)" : "(stock central)"}</span>
+        {items.length === 0 ? <p className="text-[13px] text-muted">{data.stockSource === "MINE" ? <>Vous n&apos;avez aucun goodie en main pour ces marques. Demandez-en au responsable des goodies (<Link href="/m/goodies" prefetch={false} className="text-accent">Mes goodies</Link>).</> : "Aucun goodie au stock central pour ces marques."}</p> : (
           <ul className="space-y-2">{items.map((i) => (
             <li key={i.id} className="card px-3 py-2 flex items-center gap-2">
-              <div className="min-w-0 flex-1 text-[14px] leading-snug">{i.name}<div className="text-[12px] text-muted">{i.stock} en stock</div></div>
+              <div className="min-w-0 flex-1 text-[14px] leading-snug">{i.name}<div className="text-[12px] text-muted">{i.stock} {data.stockSource === "MINE" ? "en main" : "en stock"}</div></div>
               <Qty value={goodies[i.id] ?? 0} max={i.stock} onChange={(n) => setGoodies((g) => ({ ...g, [i.id]: n }))} label={i.name} />
             </li>
           ))}</ul>
@@ -410,7 +412,10 @@ export function HomeOperations() {
       </div>
       {data.toClose.length > 0 && <Link href="/m/operations" prefetch={false} className="block rounded-xl bg-orange-soft text-orange px-3 py-2 text-[13.5px] font-medium">{data.toClose.length} à clôturer : faites le compte rendu</Link>}
       {next ? <div className="text-[14px] text-ink">Prochaine : <b>{next.clientName ?? next.name}</b> · {fmtDay(next.date)}</div> : <div className="text-[13.5px] text-muted">Aucune opération à venir.</div>}
-      <Link href="/m/operation" prefetch={false} className="btn-secondary w-full h-12 text-[15px]">+ Opération</Link>
+      <div className="grid grid-cols-2 gap-2">
+        <Link href="/m/operation" prefetch={false} className="btn-secondary h-12 text-[15px]">+ Opération</Link>
+        <Link href="/m/goodies" prefetch={false} className="btn-secondary h-12 text-[15px]">Mes goodies</Link>
+      </div>
     </section>
   );
 }

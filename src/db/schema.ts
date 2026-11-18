@@ -2952,7 +2952,11 @@ export const inventoryItems = pgTable(
   ],
 );
 
-/** Mouvement signé : ENTREE (+), SORTIE (−, liée à une activation ou libre), AJUSTEMENT (±). */
+/**
+ * Mouvement signé : ENTREE (+), SORTIE (−, liée à une activation ou libre), AJUSTEMENT (±), TRANSFERT (− chez qui donne,
+ * + chez qui reçoit, deux lignes reliées par `transfer_id`). `holder_user_id` NULL = stock central (migration 0062) :
+ * `inventory_items.stock` est le stock central, le stock d'une personne est la somme de ses mouvements.
+ */
 export const inventoryMovements = pgTable(
   "inventory_movements",
   {
@@ -2969,12 +2973,18 @@ export const inventoryMovements = pgTable(
     documentLineId: uuid("document_line_id").references((): AnyPgColumn => salesDocumentLines.id, { onDelete: "restrict" }),
     /** Contre-mouvement : annulation du mouvement visé (BL annulé). */
     reversalOf: uuid("reversal_of").references((): AnyPgColumn => inventoryMovements.id, { onDelete: "restrict" }),
+    /** Détenteur du stock mouvementé : NULL = stock central, sinon la personne (animatrice) qui a les goodies en main. */
+    holderUserId: uuid("holder_user_id").references(() => users.id, { onDelete: "restrict" }),
+    /** Les deux lignes d'un même transfert partagent cet identifiant. */
+    transferId: uuid("transfer_id"),
     createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
     importId: uuid("import_id").references(() => imports.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("inventory_movements_item_idx").on(t.itemId, t.date),
+    index("inventory_movements_holder_idx").on(t.holderUserId, t.itemId).where(sql`${t.holderUserId} is not null`),
+    index("inventory_movements_transfer_idx").on(t.transferId).where(sql`${t.transferId} is not null`),
     index("inventory_movements_document_line_idx").on(t.documentLineId),
     index("inventory_movements_activation_idx").on(t.activationId),
     index("inventory_movements_client_idx").on(t.clientId),
@@ -3026,6 +3036,8 @@ export const marketingExpenses = pgTable(
     documentLineId: uuid("document_line_id").references((): AnyPgColumn => salesDocumentLines.id, { onDelete: "restrict" }),
     clientId: uuid("client_id").references((): AnyPgColumn => clients.id, { onDelete: "set null" }),
     outputNature: text("output_nature"),
+    /** Charge du matériel marketing née d'une facture fournisseur (migration 0062) — seul écrivain : `recordMaterialPurchaseCharges()`. */
+    purchaseLineId: uuid("purchase_line_id").references((): AnyPgColumn => purchaseDocumentLines.id, { onDelete: "restrict" }),
     category: budgetCategoryEnum("category").notNull(),
     label: text("label").notNull(),
     amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
@@ -3045,6 +3057,7 @@ export const marketingExpenses = pgTable(
     index("marketing_expenses_product_idx").on(t.productId),
     index("marketing_expenses_action_idx").on(t.actionId),
     uniqueIndex("marketing_expenses_document_line_uq").on(t.documentLineId).where(sql`${t.documentLineId} is not null`),
+    uniqueIndex("marketing_expenses_purchase_line_uq").on(t.purchaseLineId).where(sql`${t.purchaseLineId} is not null`),
     index("marketing_expenses_client_idx").on(t.clientId),
   ],
 );

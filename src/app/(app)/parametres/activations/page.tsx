@@ -19,8 +19,9 @@ const FLAGS = [["awaitingValidation", "Attend validation"], ["isValidated", "Val
 
 export default async function ActivationsSettingsPage() {
   await requireAccess("administration");
-  const [refs, templates, brands, settings, usage] = await Promise.all([
+  const [refs, templates, brands, settings, users, usage] = await Promise.all([
     activationRefs(), listActivationTemplates(), listBrands(), getSettings(),
+    db.execute<{ id: string; name: string }>(sql`select id::text, name from users where active order by name`),
     db.execute<{ kind: string; key: string; n: number }>(sql`
       select 'type' as kind, type as key, count(*)::int as n from activations group by type
       union all select 'status', status, count(*)::int from activations group by status
@@ -77,6 +78,17 @@ export default async function ActivationsSettingsPage() {
             <label className="block col-span-2 sm:col-span-4"><span className="label block mb-1">Validation par la direction au-delà de (MAD de budget prévu)</span>
               <input name="autoApproveMax" defaultValue={a.autoApproveMax} inputMode="decimal" className="input h-9 max-w-40" />
               <span className="block text-[11.5px] text-muted mt-1">Jusqu&apos;à ce montant (postes « Offre / UG » compris), une opération créée sur le terrain part directement « Planifiée » ; au-delà, elle attend la direction.</span>
+            </label>
+            <label className="block col-span-2"><span className="label block mb-1">Responsable des goodies</span>
+              <select name="goodiesManagerId" defaultValue={a.goodiesManagerId ?? ""} className="select h-9">
+                <option value="">— Direction seulement —</option>
+                {users.rows.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+              <span className="block text-[11.5px] text-muted mt-1">Distribue les goodies du stock central aux animatrices, comme la direction (Marketing → Opérations → Goodies & matériel, ou « Mes goodies » sur le téléphone).</span>
+            </label>
+            <label className="block col-span-2"><span className="label block mb-1">Charge du matériel à la facture fournisseur, à partir du</span>
+              <input type="date" name="materialChargeFrom" defaultValue={a.materialChargeFrom ?? ""} className="input h-9 max-w-44" />
+              <span className="block text-[11.5px] text-muted mt-1">Dès cette date, chaque facture fournisseur validée passe ses lignes de goodies, PLV et print en dépense marketing (HT en MAD, sur la marque de l&apos;article). Vide = désactivé : la charge reste saisie à la main. Choisissez une date après votre dernière saisie manuelle pour ne rien compter deux fois.</span>
             </label>
             <label className="block"><span className="label block mb-1">Jours de ventes AVANT</span><input name="windowBeforeDays" defaultValue={a.windowBeforeDays} inputMode="numeric" className="input h-9" /></label>
             <label className="block"><span className="label block mb-1">Jours de ventes APRÈS</span><input name="windowAfterDays" defaultValue={a.windowAfterDays} inputMode="numeric" className="input h-9" /></label>

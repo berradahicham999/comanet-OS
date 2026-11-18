@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { landedCosts, purchaseDocumentLines, purchaseDocuments } from "@/db/schema";
 import { audit, type AuditActor } from "@/lib/audit";
+import { recordMaterialPurchaseCharges } from "./material-charges";
 import { recordMovement } from "@/lib/activations/inventory";
 import { iso, today } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
@@ -417,6 +418,10 @@ export async function validatePurchase(id: string, actor: AuditActor): Promise<{
 
     const seriesKey = PURCHASE_TYPE_LABELS[type].series;
     const { number, year } = await allocateNumber(tx, seriesKey, doc.date);
+    // Matériel marketing (goodies, PLV) : charge à l'achat, une dépense par ligne de la facture fournisseur.
+    const charges = type === "FACTURE"
+      ? await recordMaterialPurchaseCharges(tx, { date: doc.date, invoiceLabel: `${number} (${doc.supplierRef ?? supplier.legal_name})`, lines: doc.lines }, (await getSettings()).activations.materialChargeFrom)
+      : null;
     await tx.update(purchaseDocuments).set({
       status: "VALIDE", number, seriesKey, fiscalYear: year, supplierSnapshot: supplier, dueDate, gaps,
       validatedById: actor.id, validatedAt: new Date(), updatedAt: new Date(),
@@ -431,7 +436,7 @@ export async function validatePurchase(id: string, actor: AuditActor): Promise<{
       const next = up.type === "COMMANDE" ? orderStatusAfterReceipt(stockedLines.length ? stockedLines : ls) : receptionStatusAfterInvoice(ls);
       if (next !== up.status && up.status !== "CLOTUREE") await tx.update(purchaseDocuments).set({ status: next, updatedAt: new Date() }).where(eq(purchaseDocuments.id, upId));
     }
-    await audit({ actor, action: "VALIDATE", module: MODULE, entity: "purchase_document", entityId: id, label: `${number} — ${supplier.legal_name}`, after: { number, netHtMad: doc.netHtMad, currency: doc.currency, rate: doc.exchangeRate, gaps: gaps.length ? gaps : undefined } }, tx);
+    await audit({ actor, action: "VALIDATE", module: MODULE, entity: "purchase_document", entityId: id, label: `${number} — ${supplier.legal_name}`, after: { number, netHtMad: doc.netHtMad, currency: doc.currency, rate: doc.exchangeRate, gaps: gaps.length ? gaps : undefined, materialCharges: charges?.written || undefined, materialChargesSkipped: charges?.skipped.length ? charges.skipped : undefined } }, tx);
     return { number, gaps };
   });
 }

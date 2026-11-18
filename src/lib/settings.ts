@@ -783,6 +783,16 @@ export type ActivationSettings = {
    * au-delà, elle attend la direction (décision d'Hicham, 18/11/2026). `operationLaunchTarget()` l'applique.
    */
   autoApproveMax: number;
+  /**
+   * Responsable des goodies (décision d'Hicham, 18/11/2026 : Sara) : elle distribue depuis le stock central, comme la direction.
+   * `null` = seule la direction (Marketing « Modifier » hors portée personnelle, ou administrateur) distribue.
+   */
+  goodiesManagerId: string | null;
+  /**
+   * Date (AAAA-MM-JJ) à partir de laquelle une facture fournisseur validée passe le matériel marketing en dépense, ligne par
+   * ligne (`recordMaterialPurchaseCharges()`). `null` = désactivé : la charge reste saisie à la main (pas de double compte).
+   */
+  materialChargeFrom: string | null;
 };
 
 export const DEFAULT_ACTIVATION_SETTINGS: ActivationSettings = {
@@ -795,6 +805,8 @@ export const DEFAULT_ACTIVATION_SETTINGS: ActivationSettings = {
   roiRepeatMin: 1,
   inventoryDormantDays: 180,
   autoApproveMax: 500,
+  goodiesManagerId: null,
+  materialChargeFrom: null,
 };
 
 /** Seuils du moteur publicitaire, tels que passés à `diagnose()`. */

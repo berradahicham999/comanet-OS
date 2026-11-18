@@ -5,9 +5,9 @@ import { redirect } from "next/navigation";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { inventoryItems } from "@/db/schema";
-import { requireActivationPermission } from "@/lib/activations/access";
+import { canManageGoodies, requireActivationPermission } from "@/lib/activations/access";
 import { activationRefs } from "@/lib/activations/refs";
-import { recordMovement, consumeMaterial, removeMaterial, type MovementType, MOVEMENT_TYPES } from "@/lib/activations/inventory";
+import { recordMovement, consumeMaterial, removeMaterial, transferMaterial, type MovementType, MOVEMENT_TYPES } from "@/lib/activations/inventory";
 import { beginAsset, appendChunk, deleteAsset, assetMeta } from "@/lib/content/assets";
 import { iso, today } from "@/lib/format";
 
@@ -60,13 +60,40 @@ export async function saveInventoryItem(formData: FormData) {
 export async function addMovement(formData: FormData) {
   const user = await requireActivationPermission("edit");
   const itemId = str(formData, "itemId"); const type = str(formData, "type") as MovementType | null;
-  if (!isUuid(itemId) || !type || !MOVEMENT_TYPES.includes(type)) throw new Error("Paramètres invalides.");
+  if (!isUuid(itemId) || !type || !MOVEMENT_TYPES.includes(type) || type === "TRANSFERT") throw new Error("Paramètres invalides.");
+  // Correction du stock d'une personne (goodies perdus, cassés) : réservée à qui gère les goodies.
+  const holder = str(formData, "holderUserId");
+  if (holder && (!isUuid(holder) || !(await canManageGoodies()))) throw new Error("Seuls la direction et le responsable des goodies corrigent le stock d'une personne.");
   const qtyRaw = int(formData, "quantity");
   if (qtyRaw === null || qtyRaw === 0) throw new Error("Indiquez une quantité.");
   // Le formulaire saisit une quantité positive ; le signe vient du type (l'ajustement porte le sien).
   const quantity = type === "SORTIE" ? -Math.abs(qtyRaw) : type === "ENTREE" ? Math.abs(qtyRaw) : qtyRaw;
   const date = str(formData, "date"); const clientId = str(formData, "clientId");
-  await recordMovement({ itemId, type, quantity, unitCost: num(formData, "unitCost"), date: isDate(date) ? date : iso(today()), reason: str(formData, "reason"), clientId: isUuid(clientId) ? clientId : null, createdById: user.id });
+  await recordMovement({ itemId, type, quantity, unitCost: num(formData, "unitCost"), date: isDate(date) ? date : iso(today()), reason: str(formData, "reason"), clientId: isUuid(clientId) ? clientId : null, createdById: user.id, holderUserId: holder });
+  revalidate(itemId);
+}
+
+/**
+ * Transfert de goodies (décision d'Hicham, 18/11/2026) : du stock central ou d'une personne vers une autre personne ou le
+ * stock central. Chacun donne ce qu'il a en main ; distribuer depuis le central ou reprendre chez quelqu'un demande de
+ * gérer les goodies (`canManageGoodies()`).
+ */
+export async function transferGoodies(formData: FormData) {
+  const user = await requireActivationPermission("create");
+  const itemId = str(formData, "itemId"); const fromRaw = str(formData, "from"); const toRaw = str(formData, "to");
+  const quantity = int(formData, "quantity");
+  if (!isUuid(itemId) || !quantity || quantity <= 0) throw new Error("Choisissez un article et une quantité.");
+  const from = !fromRaw || fromRaw === "central" ? null : fromRaw;
+  const to = !toRaw || toRaw === "central" ? null : toRaw;
+  if ((from && !isUuid(from)) || (to && !isUuid(to))) throw new Error("Paramètres invalides.");
+  if (from !== user.id && !(await canManageGoodies())) throw new Error("Vous ne pouvez donner que les goodies que vous avez en main.");
+  const back = str(formData, "back");
+  try {
+    await transferMaterial({ itemId, from, to, quantity, date: iso(today()), createdById: user.id, reason: str(formData, "reason") });
+  } catch (e) {
+    const msg = encodeURIComponent(e instanceof Error ? e.message : "Transfert refusé.");
+    redirect(`${back === "item" ? `${BASE}/${itemId}` : BASE}?erreur=${msg}#goodies-equipe`);
+  }
   revalidate(itemId);
 }
 
@@ -76,9 +103,10 @@ export async function consumeForActivation(formData: FormData) {
   const user = await requireActivationPermission("edit");
   const activationId = str(formData, "activationId"); const itemId = str(formData, "itemId"); const quantity = int(formData, "quantity");
   if (!isUuid(activationId) || !isUuid(itemId) || !quantity || quantity <= 0) throw new Error("Choisissez un article et une quantité.");
-  const date = str(formData, "date");
+  const date = str(formData, "date"); const holder = str(formData, "holderUserId");
+  if (isUuid(holder) && holder !== user.id && !(await canManageGoodies())) throw new Error("Seuls la direction et le responsable des goodies sortent les goodies d'une autre personne.");
   try {
-    await consumeMaterial({ activationId, itemId, quantity, date: isDate(date) ? date : iso(today()), userId: user.id });
+    await consumeMaterial({ activationId, itemId, quantity, date: isDate(date) ? date : iso(today()), userId: user.id, holderUserId: isUuid(holder) ? holder : null });
   } catch (e) {
     redirect(`/marketing/activations/${activationId}?erreur=${encodeURIComponent(e instanceof Error ? e.message : "Sortie refusée.")}`);
   }

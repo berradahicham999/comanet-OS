@@ -123,7 +123,8 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Statut d'un contenu éditorial, transitions, retards | `src/lib/content/workflow.ts` + `src/lib/content/shared.ts` | `transition()` (seule écriture du statut), `checkTransition()`, `nextTransitions()`, `lateness()`, `canValidateBrand()` |
 | Statut d'une activation, budget, retards, retour | `src/lib/activations/workflow.ts` + `shared.ts` + `budget.ts` + `roi.ts` | `transitionActivation()` (seule écriture du statut), `budgetTotals()`, `expenseRowsFor()`, `syncActivationExpenses()` (seul reflet dans `marketing_expenses`), `activationLateness()`, `compareSales()`, `roiVerdict()`, `canValidateActivation()` |
 | Opération de terrain (création en un geste, seuil de validation, requalification, compte rendu, « mes opérations ») | `src/lib/activations/operations.ts` + `shared.ts` | `insertActivation()` / `setActivationLinks()` (seules créations et liaisons, bureau et terrain), `createOperation()`, `exceedsAutoApprove()`, `operationLaunchTarget()`, `autoApproveRefusal()` (garde de `transitionActivation()`), `requalifyTarget()` / `requalifyAfterBudgetChange()`, `closeTarget()`, `reportOperation()`, `myOperations()` |
-| Stock d'un article d'inventaire | `src/lib/activations/inventory.ts` + `shared.ts` | `recordMovement()` (seule écriture du stock), `consumeMaterial()`, `inventoryStatus()` |
+| Stock d'un article d'inventaire, goodies par détenteur (stock central, stock en main d'une personne, transfert, refus au-delà du stock en main, reçu / utilisé / en main) | `src/lib/activations/inventory.ts` + `shared.ts` | `recordMovement()` (seule écriture du stock), `transferMaterial()` (seul transfert), `consumeMaterials()` / `consumeMaterial()`, `heldStockRefusal()`, `transferMovements()`, `holderLedger()`, `holdersOverview()`, `operationStockSource()`, `inventoryStatus()`, `canManageGoodies()` (`access.ts`) |
+| Charge du matériel marketing à l'achat (facture fournisseur → dépense, à partir d'une date réglée) | `src/lib/gestion/material-charges-shared.ts` + `material-charges.ts` | `materialChargeRows()`, `recordMaterialPurchaseCharges()` (seule écriture de `marketing_expenses.purchase_line_id`, appelée par `validatePurchase()`) |
 | Pièce de vente (montants, blocages, cycle, PDF, projection dans les ventes, commande client → BL) | `src/lib/gestion/calc.ts` + `documents-shared.ts` + `documents.ts` + `pdf.tsx` + `projection.ts` | `computeDocument()`, `amountInWords()`, `commercialIssues()`, `validateDocument()` (seule validation), `createBLFromOrder()`, `orderStatusAfterDelivery()`, `storedPdf()`, `projectedLines()` (lignes qui alimentent les ventes : bascule réelle, ou marques de « Ventes depuis les pièces »), `importSkippedForDocuments()`, `projectDocument()` / `resyncProjection()` (seules écritures des ventes COMANET_OS), `setSalesFromDocuments()` |
 | Bibliothèque d'actions (modèles livrés + équipe, import / export Excel, modèle tiré d'une action ou d'une activation réalisée) et « ce qui marche par marque » | `src/lib/action-generator/library-shared.ts` + `library.ts` | `validateTemplate()`, `templateToFields()` / `fieldsToTemplate()` / `sheetRowToFields()` (formulaire = Excel), `templateFromProposal()`, `templateFromActivation()`, `listLibrary()`, `loadLibrary()` (ce que lit le générateur), `saveTemplate()`, `setTemplateActive()`, `resetOrDeleteTemplate()`, `importTemplates()`, `playbookFor()`, `savePlaybook()` (seules écritures de `action_templates` et `brand_marketing_playbooks`) |
 | Lecture marketing d'une marque (statut de stock par SKU, profil / catégorie produit, objectifs et écart, contexte marketing, décisions) | `src/lib/marketing-intel/` | `buildBrandOverview()`, `buildInventory()`, `buildProductPerformance()`, `buildSalesTargets()`, `buildMarketingContext()`, `buildRecommendations()`, `stockStatusOf()`, `stockRiskOf()`, `salesProfileOf()`, `decide()` |
@@ -198,6 +199,23 @@ administrateur, interrupteur « Valider une dépense » ou `brand_validators`. U
 pour son prévu (devis puis facture remplacent) : le reflet vit dans `marketing_expenses` (`activation_ref`), jamais
 ailleurs, sauf les postes `reflects_expense = false` (« Offre / UG » : chiffré au budget et au seuil, les UG du BL sont
 déjà au coût des ventes). Le matériel sorti est tracé et valorisé (`activation_materials`) sans nouvelle dépense : charge à l'achat.
+**Goodies par détenteur** (migration 0062, décision d'Hicham du 18/11/2026). Sara (`settings.activations.goodiesManagerId`)
+choisit et commande les goodies ; la chaîne d'achat existante (commande → réception au stock CENTRAL au coût de revient →
+facture fournisseur) est la seule entrée. `inventory_movements.holder_user_id` (NULL = central) : `inventory_items.stock`
+reste le stock central (inventaire physique, imports, BL, retours fournisseur inchangés), le stock d'une personne est la
+somme de ses mouvements. Type `TRANSFERT` : deux mouvements (− / +) reliés par `transfer_id`, une transaction,
+`transferMaterial()` seul. `recordMovement()` refuse toute sortie ou tout transfert au-delà du stock du détenteur
+(`heldStockRefusal()`). Distribuer depuis le central ou reprendre chez quelqu'un : `canManageGoodies()` (administrateur,
+Marketing « Modifier » hors portée OWN, responsable des goodies) ; chacun donne ce qu'il a en main. Charge : à la
+validation d'une facture fournisseur, une dépense SPENT par ligne de matériel (HT MAD, marque et catégorie de l'article,
+`marketing_expenses.purchase_line_id` unique) à partir de `settings.activations.materialChargeFrom` (NULL = désactivé,
+la charge reste manuelle) ; réception, transfert et usage en opération n'en créent jamais. Un article sans marque n'est
+pas chargé (signalé dans l'audit). Le matériel sorti compte dans le coût complet d'une opération, jamais dans son reste ni
+son dépassement (`budgetTotals()`). Écrans : `/m/goodies` (en main, donner, rendre, distribuer pour qui gère), bloc
+« Mes goodies » sur l'accueil ; bureau : Goodies & matériel → « Goodies chez l'équipe » (reçus, donnés, utilisés
+déclarés, corrections, en main, valeur ; transfert) et fiche article (stock central, chez l'équipe, « Stock de » pour une
+correction). Le formulaire d'opération propose les goodies en main de la personne (`operationStockSource()`).
+
 **Opérations de terrain** (`docs/guide-operations-terrain.md`, migration 0061, décision d'Hicham du 18/11/2026) : une
 animatrice crée, modifie et clôture SES opérations avec « Créer » sur Terrain seul (portée forcée à ses opérations,
 jamais de validation) ; écrans `/m/operations`, `/m/operation`, `/m/operation-cr` (en ligne, routes `/api/m/operations*`,
@@ -207,7 +225,8 @@ directement ; au-delà « Proposée » (direction). Toujours par `transitionActi
 statut validé au-dessus du seuil ; un budget porté au-dessus du seuil renvoie une opération « Planifiée » en validation.
 `activations.offer_label` (offre proposée), `planned_materials` (goodies prévus, aucune sortie avant le compte rendu).
 Compte rendu : photos (`content_assets`), pharmacies touchées, commandes et montant DÉCLARÉS (jamais des ventes
-mesurées), goodies réellement utilisés (obligatoires si prévus, sortis par `consumeMaterial()`), remarque. L'impact ventes (sell-in HT avant / pendant / après sur les
+mesurées), goodies réellement utilisés (obligatoires si prévus, sortis du stock EN MAIN de la personne par
+`consumeMaterials()`, tout ou rien), remarque. L'impact ventes (sell-in HT avant / pendant / après sur les
 clients et produits rattachés) est une corrélation observée ; une fenêtre « après » incomplète affiche « pas encore
 comparable ». Les fichiers réutilisent `content_assets` (polymorphe : contenu, activation, article d'inventaire).
 
