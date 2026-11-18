@@ -21,6 +21,7 @@ import { applyActivationTemplate, shiftIso } from "@/lib/activations/shared";
 import { notify } from "@/lib/content/notify";
 import { beginAsset, appendChunk, deleteAsset, assetMeta, ASSET_KINDS, type AssetKind } from "@/lib/content/assets";
 import { fmtDate } from "@/lib/format";
+import { refreshAfterWrite } from "@/lib/analytics-marketing/refresh";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim() || null;
 const int = (fd: FormData, k: string) => { const v = str(fd, k); if (v === null) return null; const n = Number(v.replace(/\s/g, "")); return Number.isFinite(n) ? Math.round(n) : null; };
@@ -242,6 +243,8 @@ export async function saveResults(formData: FormData) {
   };
   const any = Object.values(values).some((v) => v !== null);
   await db.update(activations).set({ ...values, resultsAt: any ? new Date() : null, updatedAt: new Date() }).where(eq(activations.id, id));
+  // Le CA réellement mesuré remonte dans la revue de marque (CA mesuré, ROI) via le reflet des dépenses.
+  await refreshAfterWrite(["EXPENSE"]);
   revalidate(id);
 }
 

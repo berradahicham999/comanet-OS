@@ -20,7 +20,7 @@ import { getSettings, animationDayCostOf, type AnalyticsSettings } from "@/lib/s
 import { AD_EXPENSE_CATEGORIES } from "@/lib/ad-spend";
 import { iso, today, addDays } from "@/lib/format";
 import { SOURCE_KINDS, type SourceKind, type ResultKey } from "./shared";
-import { splitShares, expenseAmounts, collaborationAmounts, contentAmounts, animationCost, sampleValue, applyShare, regieOverrides, type Amounts } from "./refresh-shared";
+import { splitShares, spreadRevenue, expenseAmounts, collaborationAmounts, contentAmounts, animationCost, sampleValue, applyShare, regieOverrides, type Amounts } from "./refresh-shared";
 
 type SpendRow = typeof factMarketingSpend.$inferInsert;
 type ResultRow = typeof factMarketingResult.$inferInsert;
@@ -141,21 +141,36 @@ const loadExpenses: Loader = async (ctx, out) => {
   const rows = await db.execute<{
     id: string; date: string; brand_id: string; campaign_id: string | null; activation_id: string | null; collaboration_id: string | null; product_id: string | null;
     category: string; label: string; amount: number; status: string; attributed_revenue: number | null; conversions: number | null;
-    activation_name: string | null; activation_city: string | null; activation_products: string[] | null; campaign_products: string[] | null;
+    activation_name: string | null; activation_city: string | null; activation_revenue: number | null; activation_products: string[] | null; campaign_products: string[] | null;
   }>(sql`
     select e.id, e.date::text, e.brand_id, e.campaign_id, e.activation_id, e.collaboration_id, e.product_id, e.category::text, e.label,
            e.amount::float8, e.status::text, e.attributed_revenue::float8, e.conversions,
            a.name as activation_name, a.city as activation_city,
+           case when st.is_cancelled then null else a.attributed_revenue::float8 end as activation_revenue,
            (select array_agg(ap.product_id::text) from activation_products ap where ap.activation_id = e.activation_id) as activation_products,
            (select array_agg(cp.product_id::text) from campaign_products cp where cp.campaign_id = e.campaign_id) as campaign_products
     from marketing_expenses e
-    left join activations a on a.id = e.activation_id`);
+    left join activations a on a.id = e.activation_id
+    left join activation_statuses st on st.key = a.status`);
+  // CA réellement mesuré d'une opération (fiche, « CA réellement mesuré ») : réparti sur ses lignes de dépense, pour que
+  // le CA mesuré et le ROI de la marque portent sur le même périmètre que le coût. Le montant de commandes DÉCLARÉ au
+  // compte rendu n'entre jamais ici. Une ligne qui porte déjà son propre CA mesuré le garde.
+  const byActivation = new Map<string, { id: string; amount: number }[]>();
+  const activationRevenue = new Map<string, number | null>();
+  for (const r of rows.rows) {
+    if (!r.activation_id) continue;
+    byActivation.set(r.activation_id, [...(byActivation.get(r.activation_id) ?? []), { id: r.id, amount: Number(r.amount) || 0 }]);
+    activationRevenue.set(r.activation_id, r.activation_revenue === null ? null : Number(r.activation_revenue));
+  }
+  const revenueShare = new Map<string, number>();
+  for (const [aid, lines] of byActivation) for (const [id, v] of spreadRevenue(lines, activationRevenue.get(aid) ?? null)) revenueShare.set(id, v);
+
   for (const r of rows.rows) {
     const brandId = brandOf(ctx, r.brand_id);
     const overridden = regieOverrides(r.category, ctx.regieMonths.has(`${brandId}|${r.date.slice(0, 7)}`), AD_EXPENSE_CATEGORIES);
     const amounts = overridden ? { planned: null, committed: null, spent: null } : expenseAmounts(r.status, Number(r.amount) || 0);
     const splits = splitFor(ctx, r.product_id ? [r.product_id] : r.activation_products?.length ? r.activation_products : (r.campaign_products ?? []));
-    const revenue = r.attributed_revenue === null ? null : Number(r.attributed_revenue);
+    const revenue = r.attributed_revenue !== null ? Number(r.attributed_revenue) : (revenueShare.get(r.id) ?? null);
     emit(out, {
       day: r.date, brandId, city: r.activation_city, campaignId: r.campaign_id,
       channelKey: channelOf(ctx, "BUDGET_CATEGORY", r.category), subChannel: r.activation_name,
@@ -164,6 +179,23 @@ const loadExpenses: Loader = async (ctx, out) => {
       sourceRef: overridden ? "REGIE_PRIORITAIRE" : r.activation_id ? `ACTIVATION:${r.activation_id}` : r.collaboration_id ? `COLLABORATION:${r.collaboration_id}` : null,
       isPartial: false, attributionMode: revenue !== null && revenue > 0 ? "MEASURED" : "NONE", attributedRevenue: revenue !== null && revenue > 0 ? revenue : null,
     }, amounts, splits, r.conversions ? [{ key: "PURCHASES", value: r.conversions, measurement: "DECLARED" }] : []);
+  }
+
+  // Opération avec un CA mesuré mais sans aucune ligne de dépense (budget nul, goodies seuls) : son CA compte quand même,
+  // sur une ligne à coût 0 — c'est le coût enregistré, rien n'est estimé.
+  const orphans = await db.execute<{ id: string; date: string; brand_id: string; city: string | null; name: string; type: string; revenue: number; products: string[] | null }>(sql`
+    select a.id, a.date::text, a.brand_id, a.city, a.name, a.type, a.attributed_revenue::float8 as revenue,
+           (select array_agg(ap.product_id::text) from activation_products ap where ap.activation_id = a.id) as products
+    from activations a join activation_statuses st on st.key = a.status
+    where a.attributed_revenue > 0 and a.brand_id is not null and not st.is_cancelled
+      and not exists (select 1 from marketing_expenses e where e.activation_id = a.id)`);
+  for (const a of orphans.rows) {
+    emit(out, {
+      day: a.date, brandId: brandOf(ctx, a.brand_id), city: a.city, campaignId: null,
+      channelKey: channelOf(ctx, "ACTIVATION_TYPE", a.type, "OTHER"), subChannel: a.name,
+      sourceKind: "EXPENSE", sourceId: a.id, sourceLabel: a.name, sourceRef: `ACTIVATION:${a.id}`,
+      isPartial: false, attributionMode: "MEASURED", attributedRevenue: Number(a.revenue),
+    }, { planned: null, committed: null, spent: 0 }, splitFor(ctx, a.products ?? []), []);
   }
 };
 
