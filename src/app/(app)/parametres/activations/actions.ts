@@ -125,6 +125,7 @@ export async function saveActivationSettings(fd: FormData) {
     resultsDelayDays: Math.max(0, int(fd, "resultsDelayDays", a.resultsDelayDays)), checklistAlertDays: Math.max(0, int(fd, "checklistAlertDays", a.checklistAlertDays)),
     overrunAlertPct: Math.max(0, num(fd, "overrunAlertPct", a.overrunAlertPct)), roiRepeatMinUpliftPct: num(fd, "roiRepeatMinUpliftPct", a.roiRepeatMinUpliftPct),
     roiRepeatMin: num(fd, "roiRepeatMin", a.roiRepeatMin), inventoryDormantDays: Math.max(1, int(fd, "inventoryDormantDays", a.inventoryDormantDays)),
+    autoApproveMax: Math.max(0, num(fd, "autoApproveMax", a.autoApproveMax)),
   } });
   revalidatePath("/", "layout");
 }

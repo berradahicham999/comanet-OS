@@ -10,7 +10,8 @@ import {
 } from "@/db/schema";
 import { brandInScope } from "@/lib/access";
 import { getSettings } from "@/lib/settings";
-import { requireActivationAccess, requireActivationPermission, activationScope } from "@/lib/activations/access";
+import { requireActivationAccess, requireActivationPermission, activationScope, canValidateActivation } from "@/lib/activations/access";
+import { insertActivation, setActivationLinks, requalifyAfterBudgetChange } from "@/lib/activations/operations";
 import { activationRefs, defaultActivationStatusKey } from "@/lib/activations/refs";
 import { getActivation } from "@/lib/activations/queries";
 import { transitionActivation } from "@/lib/activations/workflow";
@@ -46,21 +47,11 @@ async function assertBrands(ids: string[]) {
   for (const b of ids) if (!(await brandInScope(b))) throw new Error("Une des marques n'est pas dans votre périmètre.");
 }
 
-/** Liaisons N-N : la liste complète, et le premier élément comme « principal » sur la ligne. */
+/** Liaisons N-N du formulaire : `setActivationLinks()` (une seule écriture, bureau et terrain). */
 async function setLinks(id: string, fd: FormData) {
-  const brandIds = uuids(fd, "brandIds"), productIds = uuids(fd, "productIds"), clientIds = uuids(fd, "clientIds"), contributorIds = uuids(fd, "contributorIds");
-  await db.transaction(async (tx) => {
-    await tx.delete(activationBrands).where(eq(activationBrands.activationId, id));
-    if (brandIds.length) await tx.insert(activationBrands).values(brandIds.map((brandId) => ({ activationId: id, brandId })));
-    await tx.delete(activationProducts).where(eq(activationProducts.activationId, id));
-    if (productIds.length) await tx.insert(activationProducts).values(productIds.map((productId) => ({ activationId: id, productId })));
-    await tx.delete(activationClients).where(eq(activationClients.activationId, id));
-    if (clientIds.length) await tx.insert(activationClients).values(clientIds.map((clientId) => ({ activationId: id, clientId })));
-    await tx.delete(activationContributors).where(eq(activationContributors.activationId, id));
-    if (contributorIds.length) await tx.insert(activationContributors).values(contributorIds.map((userId) => ({ activationId: id, userId })));
-    await tx.update(activations).set({ brandId: brandIds[0] ?? null, productId: productIds[0] ?? null, clientId: clientIds[0] ?? null }).where(eq(activations.id, id));
-  });
-  return { brandIds, productIds, clientIds, contributorIds };
+  const links = { brandIds: uuids(fd, "brandIds"), productIds: uuids(fd, "productIds"), clientIds: uuids(fd, "clientIds"), contributorIds: uuids(fd, "contributorIds") };
+  await setActivationLinks(id, links);
+  return links;
 }
 
 /** Champs d'identité communs à la création et à la modification. */
@@ -78,6 +69,7 @@ async function identityFrom(fd: FormData) {
     endDate: isDate(endDate) && isDate(date) && endDate >= date ? endDate : null,
     prepDate: isDate(prepDate) ? prepDate : null,
     city: str(fd, "city"), place: str(fd, "place"), description: str(fd, "description"), notes: str(fd, "notes"),
+    offerLabel: str(fd, "offerLabel")?.slice(0, 200) ?? null,
     responsibleId: isUuid(responsibleId) ? responsibleId : null,
     validatorId: isUuid(validatorId) ? validatorId : null,
     campaignId: isUuid(campaignId) ? campaignId : null,
@@ -115,23 +107,19 @@ async function createFrom(formData: FormData, user: { id: string; name: string }
     { objectiveKey: ident.objectiveKey, targetKey: ident.targetKey, description: ident.description, date: ident.date, endDate: ident.endDate, prepDate: ident.prepDate },
     tpl?.defaults ?? null, typeRef,
   );
-  const status = await defaultActivationStatusKey();
-  const [row] = await db.insert(activations).values({
-    name: ident.name, type, status, date: ident.date, endDate: applied.endDate, prepDate: applied.prepDate,
-    objectiveKey: applied.objectiveKey, targetKey: applied.targetKey, description: applied.description,
-    city: ident.city, place: ident.place, notes: ident.notes, responsibleId: ident.responsibleId ?? user.id, validatorId: ident.validatorId,
-    campaignId: ident.campaignId, linkedAnimationId: ident.linkedAnimationId, templateId: tpl?.id ?? null, createdById: user.id,
-  }).returning({ id: activations.id });
-  const id = row.id;
-  await setLinks(id, formData);
-  if (applied.budgetLines.length) {
-    const validKeys = new Set(refs.costItems.map((c) => c.key));
-    const lines = applied.budgetLines.filter((l) => validKeys.has(l.costItemKey));
-    if (lines.length) await db.insert(activationBudgetLines).values(lines.map((l) => ({ activationId: id, costItemKey: l.costItemKey, label: refs.costItems.find((c) => c.key === l.costItemKey)?.label ?? l.label, planned: String(l.planned), sort: l.sort, brandId: brandIds[0] ?? null })));
-  }
-  if (applied.checklist.length) await db.insert(activationChecklistItems).values(applied.checklist.map((c) => ({ activationId: id, label: c.label, sort: c.sort })));
-  await db.insert(activationStatusHistory).values({ activationId: id, fromStatus: null, toStatus: status, userId: user.id, comment: tpl ? `Création depuis le modèle « ${tpl.name} »` : "Création" });
-  await syncActivationExpenses(id);
+  const validKeys = new Set(refs.costItems.map((c) => c.key));
+  const { id } = await insertActivation({
+    values: {
+      name: ident.name, type, date: ident.date, endDate: applied.endDate, prepDate: applied.prepDate,
+      objectiveKey: applied.objectiveKey, targetKey: applied.targetKey, description: applied.description,
+      city: ident.city, place: ident.place, notes: ident.notes, responsibleId: ident.responsibleId ?? user.id, validatorId: ident.validatorId,
+      campaignId: ident.campaignId, linkedAnimationId: ident.linkedAnimationId, templateId: tpl?.id ?? null, offerLabel: ident.offerLabel,
+    },
+    links: { brandIds, productIds: uuids(formData, "productIds"), clientIds: uuids(formData, "clientIds"), contributorIds: uuids(formData, "contributorIds") },
+    budgetLines: applied.budgetLines.filter((l) => validKeys.has(l.costItemKey)).map((l) => ({ costItemKey: l.costItemKey, label: refs.costItems.find((c) => c.key === l.costItemKey)?.label ?? l.label, planned: l.planned, sort: l.sort, brandId: brandIds[0] ?? null })),
+    checklist: applied.checklist,
+    historyComment: tpl ? `Création depuis le modèle « ${tpl.name} »` : "Création",
+  }, user);
   const resp = ident.responsibleId ?? user.id;
   if (resp !== user.id) await notify([resp], { type: "ACTIVATION_ASSIGNED", title: `Opération à piloter : ${ident.name}`, body: `Par ${user.name}, prévue le ${fmtDate(ident.date)}.`, href: `${BASE}/${id}`, entityType: "activation", entityId: id }, { except: user.id });
   return id;
@@ -260,7 +248,7 @@ export async function saveResults(formData: FormData) {
 /* --------------------------------- Budget --------------------------------- */
 
 export async function saveBudgetLine(formData: FormData) {
-  await requireActivationPermission("edit");
+  const user = await requireActivationPermission("edit");
   const activationId = str(formData, "activationId"); const lineId = str(formData, "lineId");
   if (!isUuid(activationId)) return;
   const a = await assertScope(activationId);
@@ -281,6 +269,8 @@ export async function saveBudgetLine(formData: FormData) {
     await db.insert(activationBudgetLines).values({ ...values, activationId, sort: n });
   }
   await syncActivationExpenses(activationId);
+  // Une opération partie seule (sous le seuil) qui le dépasse maintenant retourne à la direction.
+  await requalifyAfterBudgetChange(activationId, user, { isValidator: await canValidateActivation(a.brandId) });
   revalidate(activationId);
 }
 

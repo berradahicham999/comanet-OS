@@ -72,8 +72,12 @@ export default async function ActivationsSettingsPage() {
       )}
 
       <div className="grid xl:grid-cols-2 gap-4">
-        <Card title="Fenêtres de mesure et rappels" className="xl:col-span-2">
+        <Card title="Validation, fenêtres de mesure et rappels" className="xl:col-span-2">
           <form action={saveActivationSettings} className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[12.5px]">
+            <label className="block col-span-2 sm:col-span-4"><span className="label block mb-1">Validation par la direction au-delà de (MAD de budget prévu)</span>
+              <input name="autoApproveMax" defaultValue={a.autoApproveMax} inputMode="decimal" className="input h-9 max-w-40" />
+              <span className="block text-[11.5px] text-muted mt-1">Jusqu&apos;à ce montant (postes « Offre / UG » compris), une opération créée sur le terrain part directement « Planifiée » ; au-delà, elle attend la direction.</span>
+            </label>
             <label className="block"><span className="label block mb-1">Jours de ventes AVANT</span><input name="windowBeforeDays" defaultValue={a.windowBeforeDays} inputMode="numeric" className="input h-9" /></label>
             <label className="block"><span className="label block mb-1">Jours de ventes APRÈS</span><input name="windowAfterDays" defaultValue={a.windowAfterDays} inputMode="numeric" className="input h-9" /></label>
             <label className="block"><span className="label block mb-1">Rappel résultats (j après la fin)</span><input name="resultsDelayDays" defaultValue={a.resultsDelayDays} inputMode="numeric" className="input h-9" /></label>

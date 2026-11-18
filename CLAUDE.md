@@ -32,6 +32,8 @@ GESTION_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import
                                          # intégration gestion commerciale (journal, numérotation, ventes, achats, inventaires, règlements, bascule) — jamais sur la prod
 GESTION_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/sorties-marketing-integration.ts
                                          # intégration ventes en bloc depuis les pièces, sorties marketing par BL, P&L réel — jamais sur la prod
+OPERATIONS_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx --import ./scripts/agent-tool-hooks.mjs scripts/operations-integration.ts
+                                         # intégration opérations de terrain (seuil 500 MAD, offre / UG, requalification, compte rendu, goodies) — jamais sur la prod
 MEDICAL_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/medical-integration.ts
                                          # intégration Médical v2 (chrono, GPS, hors connexion, corrections, ordonnances) — jamais sur la prod
 CRM_IT=1 DATABASE_URL=<base jetable> node --conditions=react-server --import tsx scripts/crm-integration.ts
@@ -120,6 +122,7 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Qui est animatrice / délégué | `src/lib/users.ts` | `listAnimatrices()`, `listDelegates()`, `ANIMATRICE_SQL`, `DELEGATE_SQL` |
 | Statut d'un contenu éditorial, transitions, retards | `src/lib/content/workflow.ts` + `src/lib/content/shared.ts` | `transition()` (seule écriture du statut), `checkTransition()`, `nextTransitions()`, `lateness()`, `canValidateBrand()` |
 | Statut d'une activation, budget, retards, retour | `src/lib/activations/workflow.ts` + `shared.ts` + `budget.ts` + `roi.ts` | `transitionActivation()` (seule écriture du statut), `budgetTotals()`, `expenseRowsFor()`, `syncActivationExpenses()` (seul reflet dans `marketing_expenses`), `activationLateness()`, `compareSales()`, `roiVerdict()`, `canValidateActivation()` |
+| Opération de terrain (création en un geste, seuil de validation, requalification, compte rendu, « mes opérations ») | `src/lib/activations/operations.ts` + `shared.ts` | `insertActivation()` / `setActivationLinks()` (seules créations et liaisons, bureau et terrain), `createOperation()`, `exceedsAutoApprove()`, `operationLaunchTarget()`, `autoApproveRefusal()` (garde de `transitionActivation()`), `requalifyTarget()` / `requalifyAfterBudgetChange()`, `closeTarget()`, `reportOperation()`, `myOperations()` |
 | Stock d'un article d'inventaire | `src/lib/activations/inventory.ts` + `shared.ts` | `recordMovement()` (seule écriture du stock), `consumeMaterial()`, `inventoryStatus()` |
 | Pièce de vente (montants, blocages, cycle, PDF, projection dans les ventes, commande client → BL) | `src/lib/gestion/calc.ts` + `documents-shared.ts` + `documents.ts` + `pdf.tsx` + `projection.ts` | `computeDocument()`, `amountInWords()`, `commercialIssues()`, `validateDocument()` (seule validation), `createBLFromOrder()`, `orderStatusAfterDelivery()`, `storedPdf()`, `projectedLines()` (lignes qui alimentent les ventes : bascule réelle, ou marques de « Ventes depuis les pièces »), `importSkippedForDocuments()`, `projectDocument()` / `resyncProjection()` (seules écritures des ventes COMANET_OS), `setSalesFromDocuments()` |
 | Bibliothèque d'actions (modèles livrés + équipe, import / export Excel, modèle tiré d'une action ou d'une activation réalisée) et « ce qui marche par marque » | `src/lib/action-generator/library-shared.ts` + `library.ts` | `validateTemplate()`, `templateToFields()` / `fieldsToTemplate()` / `sheetRowToFields()` (formulaire = Excel), `templateFromProposal()`, `templateFromActivation()`, `listLibrary()`, `loadLibrary()` (ce que lit le générateur), `saveTemplate()`, `setTemplateActive()`, `resetOrDeleteTemplate()`, `importTemplates()`, `playbookFor()`, `savePlaybook()` (seules écritures de `action_templates` et `brand_marketing_playbooks`) |
@@ -193,7 +196,18 @@ postes budgétaires, catégories d'inventaire et modèles sont des tables de ré
 permission dédié : Voir / Créer / Modifier via « marketing » OU « clients » (`requireActivationAccess()`), validation via
 administrateur, interrupteur « Valider une dépense » ou `brand_validators`. Une activation VALIDÉE engage chaque poste
 pour son prévu (devis puis facture remplacent) : le reflet vit dans `marketing_expenses` (`activation_ref`), jamais
-ailleurs. Le matériel sorti est une dépense au coût du moment. L'impact ventes (sell-in HT avant / pendant / après sur les
+ailleurs, sauf les postes `reflects_expense = false` (« Offre / UG » : chiffré au budget et au seuil, les UG du BL sont
+déjà au coût des ventes). Le matériel sorti est tracé et valorisé (`activation_materials`) sans nouvelle dépense : charge à l'achat.
+**Opérations de terrain** (`docs/guide-operations-terrain.md`, migration 0061, décision d'Hicham du 18/11/2026) : une
+animatrice crée, modifie et clôture SES opérations avec « Créer » sur Terrain seul (portée forcée à ses opérations,
+jamais de validation) ; écrans `/m/operations`, `/m/operation`, `/m/operation-cr` (en ligne, routes `/api/m/operations*`,
+recherche client grossistes compris) ouverts depuis l'accueil « Aujourd'hui » (la barre garde 4 onglets). Budget prévu
+(offre comprise) ≤ `settings.activations.autoApproveMax` (500 MAD, Paramètres → Opérations) : statut « Planifiée »
+directement ; au-delà « Proposée » (direction). Toujours par `transitionActivation()`, qui refuse au non-validateur un
+statut validé au-dessus du seuil ; un budget porté au-dessus du seuil renvoie une opération « Planifiée » en validation.
+`activations.offer_label` (offre proposée), `planned_materials` (goodies prévus, aucune sortie avant le compte rendu).
+Compte rendu : photos (`content_assets`), pharmacies touchées, commandes et montant DÉCLARÉS (jamais des ventes
+mesurées), goodies réellement utilisés (obligatoires si prévus, sortis par `consumeMaterial()`), remarque. L'impact ventes (sell-in HT avant / pendant / après sur les
 clients et produits rattachés) est une corrélation observée ; une fenêtre « après » incomplète affiche « pas encore
 comparable ». Les fichiers réutilisent `content_assets` (polymorphe : contenu, activation, article d'inventaire).
 

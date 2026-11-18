@@ -24,7 +24,7 @@ export type ActivationTypeRef = {
   defaultModule: string; defaultBudgetCategory: string; defaultChecklist: string[];
 };
 export type SimpleRef = { key: string; label: string; sort: number; active: boolean };
-export type CostItemRef = SimpleRef & { budgetCategory: string };
+export type CostItemRef = SimpleRef & { budgetCategory: string; /** Faux : chiffré au budget, jamais reflété en dépense (« Offre / UG »). */ reflectsExpense?: boolean };
 export type InventoryCategoryRef = SimpleRef & { budgetCategory: string };
 
 export type ActivationRefs = {
@@ -79,9 +79,9 @@ export type BudgetTotals = {
   materials: number;
   /** Coût complet = dépensé + matériel. */
   fullCost: number;
-  /** Reste = prévu − max(engagé, dépensé) − matériel. Négatif en cas de dépassement. */
+  /** Reste = prévu − engagé. Négatif en cas de dépassement. Le matériel sorti n'y entre pas (décision du 18/11/2026). */
   remaining: number;
-  /** Engagé (ou dépensé si supérieur) au-delà du prévu, en %. 0 si dans le budget. */
+  /** Engagé (ou dépensé si supérieur) au-delà du prévu, en %. 0 si dans le budget. Matériel exclu. */
   overrunPct: number;
 };
 
@@ -90,6 +90,8 @@ export type BudgetTotals = {
  * L'engagé d'une ligne est le plus grand de « engagé » (devis) et « dépensé » (facture) : une
  * facture supérieure au devis engage davantage. Sur une activation VALIDÉE, une ligne sans devis
  * ni facture est engagée pour son prévu : c'est le sens de la validation (décision d'Hicham).
+ * Le matériel sorti (goodies, PLV) est payé à l'achat et n'est pas chiffré dans le prévu : il compte dans le coût
+ * complet, jamais dans le reste ni dans le dépassement (décision d'Hicham, 18/11/2026).
  */
 export function budgetTotals(lines: BudgetLineLike[], materials: MaterialLike[] = [], opts: { validated?: boolean } = {}): BudgetTotals {
   const engagedOf = (l: BudgetLineLike) => {
@@ -100,12 +102,11 @@ export function budgetTotals(lines: BudgetLineLike[], materials: MaterialLike[] 
   const committed = lines.reduce((a, l) => a + engagedOf(l), 0);
   const spent = lines.reduce((a, l) => a + num(l.spent), 0);
   const mat = materials.reduce((a, m) => a + m.quantity * num(m.unitCost), 0);
-  const engaged = committed + mat;
   return {
     planned, committed, spent, materials: mat,
     fullCost: spent + mat,
-    remaining: planned - engaged,
-    overrunPct: planned > 0 && engaged > planned ? ((engaged - planned) / planned) * 100 : 0,
+    remaining: planned - committed,
+    overrunPct: planned > 0 && committed > planned ? ((committed - planned) / planned) * 100 : 0,
   };
 }
 
@@ -138,6 +139,8 @@ export function expenseRowsFor(input: {
   const out: ExpenseRow[] = [];
   const catOf = (k: string) => input.costItems.find((c) => c.key === k)?.budgetCategory ?? "AUTRES";
   for (const l of input.lines) {
+    // « Offre / UG » : le coût des UG est dans le coût des ventes du BL (P&L) ; le refléter ici le compterait deux fois.
+    if (input.costItems.find((c) => c.key === l.costItemKey)?.reflectsExpense === false) continue;
     const brandId = l.brandId ?? input.brandId;
     if (!brandId) continue;
     const spent = num(l.spent), committed = num(l.committed), planned = num(l.planned);
@@ -152,6 +155,71 @@ export function expenseRowsFor(input: {
   // Matériel sorti : la charge est née à l'ACHAT du matériel (décision du 12/10/2026). Sa sortie reste tracée et
   // valorisée dans `activation_materials` (coût complet de l'activation), sans nouvelle dépense : sinon elle compterait deux fois.
   return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Seuil de validation des opérations (décision d'Hicham, 18/11/2026)  */
+/* ------------------------------------------------------------------ */
+
+type FlowRefs = { statuses: Pick<ActivationStatusRef, "key" | "awaitingValidation" | "isValidated" | "isRunning" | "isDone" | "isCancelled">[]; transitions: Pick<TransitionRef, "fromKey" | "toKey" | "requiresValidator">[] };
+
+/** Le budget prévu dépasse-t-il le seuil ? Au centime : 500,00 MAD part seul, 500,01 attend la direction. */
+export function exceedsAutoApprove(planned: number, autoApproveMax: number): boolean {
+  return Math.round(planned * 100) > Math.round(autoApproveMax * 100);
+}
+
+/**
+ * Où part une opération qu'on lance depuis `fromKey` : sous le seuil, vers le statut validé atteignable sans validateur
+ * (« Planifiée ») ; au-dessus, vers le statut d'attente (« Proposée »). Lu dans le référentiel, aucun nom de statut en dur.
+ * `null` si le référentiel n'offre aucun des deux chemins.
+ */
+export function operationLaunchTarget(refs: FlowRefs, fromKey: string, planned: number, autoApproveMax: number): { to: string; needsValidation: boolean } | null {
+  const st = (k: string) => refs.statuses.find((s) => s.key === k);
+  const outs = refs.transitions.filter((t) => t.fromKey === fromKey && !t.requiresValidator);
+  const auto = outs.find((t) => { const x = st(t.toKey); return !!x && x.isValidated && !x.isCancelled && !x.isRunning && !x.isDone; });
+  const wait = outs.find((t) => st(t.toKey)?.awaitingValidation);
+  if (!exceedsAutoApprove(planned, autoApproveMax) && auto) return { to: auto.toKey, needsValidation: false };
+  return wait ? { to: wait.toKey, needsValidation: true } : null;
+}
+
+/**
+ * Garde de `transitionActivation()` : sans droit de validation, on ne fait jamais passer à un statut validé une opération
+ * qui ne l'était pas et dont le budget prévu dépasse le seuil. Renvoie le motif du refus, ou `null`.
+ */
+export function autoApproveRefusal(i: { fromValidated: boolean; toValidated: boolean; isValidator: boolean; planned: number; autoApproveMax: number }): string | null {
+  if (i.isValidator || i.fromValidated || !i.toValidated || !exceedsAutoApprove(i.planned, i.autoApproveMax)) return null;
+  return `Budget prévu de ${Math.round(i.planned)} MAD, au-dessus du seuil de ${Math.round(i.autoApproveMax)} MAD : l'opération doit être validée par la direction.`;
+}
+
+/**
+ * Après une hausse du budget : une opération partie seule (validée, pas encore en cours ni terminée) qui passe au-dessus
+ * du seuil retourne en attente de validation, si le référentiel offre ce chemin sans validateur. Une opération validée
+ * par la direction n'a pas ce chemin : elle reste validée.
+ */
+export function requalifyTarget(refs: FlowRefs, currentKey: string, planned: number, autoApproveMax: number): string | null {
+  const cur = refs.statuses.find((s) => s.key === currentKey);
+  if (!cur || !cur.isValidated || cur.isRunning || cur.isDone || cur.isCancelled || !exceedsAutoApprove(planned, autoApproveMax)) return null;
+  const t = refs.transitions.find((x) => x.fromKey === currentKey && !x.requiresValidator && refs.statuses.find((s) => s.key === x.toKey)?.awaitingValidation);
+  return t?.toKey ?? null;
+}
+
+/** Statut de clôture atteignable depuis `currentKey` (terminée), pour le compte rendu de terrain. */
+export function closeTarget(refs: FlowRefs, currentKey: string): string | null {
+  const t = refs.transitions.find((x) => x.fromKey === currentKey && !x.requiresValidator && refs.statuses.find((s) => s.key === x.toKey)?.isDone);
+  return t?.toKey ?? null;
+}
+
+/** Goodies prévus, nettoyés : un article une fois, quantité entière positive, 30 lignes au plus. */
+export function cleanPlannedMaterials(raw: unknown): { itemId: string; quantity: number }[] {
+  if (!Array.isArray(raw)) return [];
+  const out = new Map<string, number>();
+  for (const r of raw.slice(0, 30)) {
+    const x = (r ?? {}) as { itemId?: unknown; quantity?: unknown };
+    const id = typeof x.itemId === "string" && /^[0-9a-f-]{36}$/i.test(x.itemId) ? x.itemId : null;
+    const q = Math.round(Number(x.quantity));
+    if (id && Number.isFinite(q) && q > 0) out.set(id, (out.get(id) ?? 0) + q);
+  }
+  return [...out].map(([itemId, quantity]) => ({ itemId, quantity }));
 }
 
 /* ------------------------------------------------------------------ */

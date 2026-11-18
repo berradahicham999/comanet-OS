@@ -125,6 +125,7 @@ export default async function ActivationPage(props: { params: Promise<{ id: stri
                 <div className="block sm:col-span-2"><span className="label block mb-1">Points de vente / clients</span><EntityPicker name="clientIds" options={visibleClients.map((c) => ({ id: c.id, label: c.name, hint: c.city }))} initial={a.clientIds} placeholder="Rechercher une pharmacie, une ville…" /></div>
                 <label className="block"><span className="label block mb-1">Ville</span><input name="city" defaultValue={a.city ?? ""} list="villes" className="input h-9" /><datalist id="villes">{cities.map((c) => <option key={c} value={c} />)}</datalist></label>
                 <label className="block"><span className="label block mb-1">Lieu libre</span><input name="place" defaultValue={a.place ?? ""} className="input h-9" placeholder="Hôtel, salle, stand…" /></label>
+                <label className="block sm:col-span-2"><span className="label block mb-1">Offre proposée</span><input name="offerLabel" defaultValue={a.offerLabel ?? ""} className="input h-9" placeholder="10 + 2, -15 % sur Gamarde SPF50…" maxLength={200} /></label>
                 <label className="block"><span className="label block mb-1">Pilote</span><select name="responsibleId" defaultValue={a.responsibleId ?? ""} className="select h-9"><option value="">—</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
                 <label className="block"><span className="label block mb-1">Validateur</span><select name="validatorId" defaultValue={a.validatorId ?? ""} className="select h-9"><option value="">Validateurs de la marque / Direction</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
                 <div className="block sm:col-span-2"><span className="label block mb-1">Contributeurs</span><EntityPicker name="contributorIds" options={users.map((u) => ({ id: u.id, label: u.name }))} initial={a.contributorIds} placeholder="Ajouter une personne…" /></div>
@@ -138,13 +139,13 @@ export default async function ActivationPage(props: { params: Promise<{ id: stri
           </Card>
 
           {/* ------------------------------ Budget ------------------------------ */}
-          <Card title="Budget" action={<span className="text-[12px] text-muted">{t.planned > 0 ? `${Math.round(((t.committed + t.materials) / t.planned) * 100)} % engagé` : "Aucun prévu"}</span>}>
+          <Card title="Budget" action={<span className="text-[12px] text-muted">{t.planned > 0 ? `${Math.round((t.committed / t.planned) * 100)} % engagé` : "Aucun prévu"}</span>}>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-3">
               {[["Prévu", t.planned], ["Engagé", t.committed], ["Dépensé", t.spent], ["Matériel", t.materials], ["Reste", t.remaining]].map(([l, v]) => (
                 <div key={String(l)} className="rounded-xl bg-surface-2 px-3 py-2"><div className="label">{l}</div><div className={`text-[15px] font-semibold tabular-nums ${l === "Reste" && Number(v) < 0 ? "text-red" : ""}`}>{fmtMAD(v, { compact: true })}</div></div>
               ))}
             </div>
-            {t.planned > 0 && <Progress value={Math.min(100, ((t.committed + t.materials) / t.planned) * 100)} tone={t.overrunPct > 0 ? "red" : "accent"} className="mb-3" />}
+            {t.planned > 0 && <Progress value={Math.min(100, (t.committed / t.planned) * 100)} tone={t.overrunPct > 0 ? "red" : "accent"} className="mb-3" />}
             {!st?.isValidated && <p className="text-[12px] text-muted mb-2">Le prévu ne pèse dans le budget marketing qu&apos;après validation. Une facture saisie (dépensé) compte toujours.</p>}
             <div className="space-y-2">
               {budget.lines.map((l) => (
@@ -160,7 +161,7 @@ export default async function ActivationPage(props: { params: Promise<{ id: stri
                   <input type="hidden" name="brandId" value={l.brandId ?? ""} /><input type="hidden" name="quoteRef" value={l.quoteRef ?? ""} /><input type="hidden" name="invoiceRef" value={l.invoiceRef ?? ""} /><input type="hidden" name="date" value={l.date ?? ""} />
                   </fieldset>
                   {canEdit && <div className="flex gap-1 sm:col-span-1"><button className="btn-secondary btn-sm h-8 text-[12px]" type="submit">OK</button><button className="btn-ghost btn-sm h-8 text-[12px] text-faint hover:text-red" formAction={deleteBudgetLine} title="Supprimer" type="submit">×</button></div>}
-                  <div className="col-span-2 sm:col-span-12 text-[11px] text-muted">{l.costItem} → catégorie budget {l.budgetCategory}{l.brand ? ` · ${l.brand}` : ""}</div>
+                  <div className="col-span-2 sm:col-span-12 text-[11px] text-muted">{l.costItem} → {l.reflectsExpense ? `catégorie budget ${l.budgetCategory}` : "compté dans le budget et le seuil de validation, sans dépense marketing (les UG du BL sont déjà au coût des ventes)"}{l.brand ? ` · ${l.brand}` : ""}</div>
                 </form>
               ))}
               {budget.lines.length === 0 && <p className="text-[13px] text-muted">Aucun poste. Ajoutez le prévu poste par poste : c&apos;est ce que le validateur engage.</p>}
@@ -243,10 +244,10 @@ export default async function ActivationPage(props: { params: Promise<{ id: stri
               <input type="hidden" name="id" value={a.id} />
               <fieldset disabled={ro} className="contents">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {([["participants", "Participants / contacts", a.participants], ["samples", "Échantillons distribués", a.samples], ["pharmaciesReached", "Pharmacies touchées", a.pharmaciesReached], ["leads", "Leads", a.leads], ["ordersOnSite", "Commandes sur place", a.ordersOnSite], ["newClients", "Nouveaux clients", a.newClients], ["pressMentions", "Retombées presse", a.pressMentions]] as const).map(([k, l, v]) => (
+                {([["participants", "Participants / contacts", a.participants], ["samples", "Échantillons distribués", a.samples], ["pharmaciesReached", "Pharmacies touchées", a.pharmaciesReached], ["leads", "Leads", a.leads], ["ordersOnSite", "Commandes prises (déclarées)", a.ordersOnSite], ["newClients", "Nouveaux clients", a.newClients], ["pressMentions", "Retombées presse", a.pressMentions]] as const).map(([k, l, v]) => (
                   <label key={k} className="block"><span className="label block mb-1">{l}</span><input name={k} defaultValue={v ?? ""} inputMode="numeric" className="input h-9" /></label>
                 ))}
-                <label className="block"><span className="label block mb-1">Montant commandes (MAD)</span><input name="ordersAmount" defaultValue={a.ordersAmount ?? ""} inputMode="decimal" className="input h-9" /></label>
+                <label className="block"><span className="label block mb-1">Montant des commandes déclaré (MAD)</span><input name="ordersAmount" defaultValue={a.ordersAmount ?? ""} inputMode="decimal" className="input h-9" /></label>
                 <label className="block sm:col-span-2"><span className="label block mb-1">CA réellement mesuré (MAD)</span><input name="attributedRevenue" defaultValue={a.attributedRevenue ?? ""} inputMode="decimal" className="input h-9" placeholder="code promo, commandes nominatives…" /></label>
                 <label className="block sm:col-span-2"><span className="label block mb-1">Lien (post, article, album)</span><input name="publishedLink" defaultValue={a.publishedLink ?? ""} className="input h-9" placeholder="https://" /></label>
               </div>
@@ -296,6 +297,8 @@ export default async function ActivationPage(props: { params: Promise<{ id: stri
             <div className="mt-3"><Facts cols={2} items={[
               { label: "Pilote", value: a.responsible ?? "—" }, { label: "Validateur", value: a.validator ?? "Marque / Direction" },
               { label: "Préparation", value: a.prepDate ? fmtDate(a.prepDate) : "—" }, { label: "Validée le", value: a.validatedAt ? fmtDate(a.validatedAt) : "—" },
+              { label: "Offre proposée", value: a.offerLabel ?? "—" },
+              { label: "Goodies prévus", value: a.plannedMaterials.length ? a.plannedMaterials.map((m) => `${m.quantity} ${m.name ?? "article retiré"}`).join(", ") : "—" },
             ]} /></div>
           </Card>
 

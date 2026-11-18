@@ -1,7 +1,26 @@
-# Activations — guide de l'équipe
+# Opérations (activations) — guide de l'équipe
 
-Pour l'équipe marketing et les commerciaux. Tout se fait dans COMANET OS, menu **Marketing → Activations**
-et **Marketing → Matériel**. Rien à installer, ça marche aussi sur le téléphone.
+Pour l'équipe marketing et les commerciaux. Tout se fait dans COMANET OS, menu **Marketing → Opérations**
+(onglets Opérations, Campagnes, Influence, Goodies & matériel). Rien à installer, ça marche aussi sur le téléphone.
+
+> **Depuis le 18/11/2026, une « activation » s'appelle une « opération »** dans l'application. C'est le même objet,
+> la même fiche, le même budget. Les animatrices créent elles-mêmes leurs opérations depuis leur téléphone : voir
+> `docs/guide-operations-terrain.md`.
+
+## Validation : le seuil de 500 MAD
+
+Une opération dont le **budget prévu** (tous les postes, « Offre / UG » compris) ne dépasse pas **500 MAD** part
+directement au statut **« Planifiée »** : pas besoin de la direction. Au-delà, elle passe **« Proposée »** et attend
+la validation, comme avant. Le seuil se règle dans **Paramètres → Opérations** (« Validation par la direction au-delà
+de »). Sur la fiche, le bouton **Planifier** n'est accepté que sous le seuil ; si quelqu'un qui ne valide pas augmente
+ensuite le budget au-dessus du seuil, l'opération repart en validation toute seule.
+
+## Offre proposée et poste « Offre / UG »
+
+Le champ **Offre proposée** (sur la fiche et à la création) décrit l'offre faite au client : « 10 + 2 »,
+« -15 % sur Gamarde SPF50 ». Pour chiffrer son coût, ajoutez une ligne de budget sur le poste **« Offre / UG »** :
+elle compte dans le budget de l'opération et dans le seuil de 500 MAD, mais **ne devient pas une dépense
+marketing** — les UG passent par le BL du client et sont déjà dans le coût des ventes du P&L.
 
 ## Le principe en une phrase
 
@@ -83,7 +102,9 @@ Sur chaque poste du budget : **Engagé** quand vous avez le devis, **Dépensé**
 avec le fournisseur. Déposez le devis et la facture dans « Devis, factures, visuels » (le téléphone peut
 prendre la facture en photo). Rien n'est ressaisi côté Budgets : tout remonte automatiquement.
 
-Si l'engagé dépasse le prévu, la fiche l'affiche en rouge et l'Action Center le signale.
+Si l'engagé (devis et factures) dépasse le prévu, la fiche l'affiche en rouge et l'Action Center le signale. Le
+matériel sorti (goodies, PLV), déjà payé à l'achat, n'entre ni dans le reste ni dans le dépassement : il compte
+seulement dans le coût complet.
 
 ## 6. Saisir les résultats
 
@@ -121,6 +142,8 @@ a marché.
 
 - **Marketing et commerciaux (Trade)** : créer, modifier, proposer, sortir du matériel, saisir dépenses et
   résultats. Un commercial en portée « ses données » ne voit que ses activations et celles de ses clients.
+- **Animatrices** (droit « Créer » sur Terrain, sans droit Marketing) : créer, modifier et clôturer **leurs**
+  opérations, depuis le téléphone. Elles ne voient que les leurs et ne valident jamais.
 - **DG, validateurs de marque, personnes avec « Valider une dépense »** : valider, refuser, annuler une
   activation validée, supprimer définitivement.
 - **Administration** : les listes (types et checklists, statuts, postes budgétaires, catégories, modèles) et

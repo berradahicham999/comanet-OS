@@ -6,6 +6,7 @@ import { MapPin, Share, ShieldCheck, Smartphone } from "lucide-react";
 import { fmtInt } from "@/lib/mobile/format";
 import { useMobile } from "./mobile-app";
 import { NoData, Skeleton } from "./mobile-shell";
+import { HomeOperations } from "./operations-screen";
 
 /** Écart à l'objectif : un chiffre signé, jamais estimé ; sans objectif, « — ». */
 export function Gap({ value }: { value: number | null }) {
@@ -76,6 +77,8 @@ export function TodayScreen() {
         <div className="card p-3"><div className="text-[11.5px] text-muted">Écart</div><div className="text-[20px] font-semibold"><Gap value={dayGap} /></div></div>
       </section>
       <p className="text-[12px] text-muted -mt-2">Unités vendues. Objectif du jour = objectif du mois réparti sur ses jours (une moyenne).</p>
+
+      <HomeOperations />
 
       <section className="card p-4">
         <div className="flex items-baseline justify-between">

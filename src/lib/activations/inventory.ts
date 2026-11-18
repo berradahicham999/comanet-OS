@@ -67,7 +67,7 @@ export async function consumeMaterial(input: { activationId: string; itemId: str
   const id = await db.transaction(async (tx) => {
     const [item] = await tx.select({ unitCost: inventoryItems.unitCost }).from(inventoryItems).where(eq(inventoryItems.id, input.itemId));
     if (!item) throw new Error("Article introuvable.");
-    const mv = await recordMovement({ itemId: input.itemId, type: "SORTIE", quantity: -qty, activationId: input.activationId, date: input.date, createdById: input.userId, reason: "Sortie pour activation" }, tx);
+    const mv = await recordMovement({ itemId: input.itemId, type: "SORTIE", quantity: -qty, activationId: input.activationId, date: input.date, createdById: input.userId, reason: "Sortie pour opération" }, tx);
     const [row] = await tx.insert(activationMaterials).values({ activationId: input.activationId, itemId: input.itemId, quantity: qty, unitCost: item.unitCost, movementId: mv.id, createdById: input.userId }).returning({ id: activationMaterials.id });
     return row.id;
   });
@@ -80,7 +80,7 @@ export async function removeMaterial(input: { activationId: string; materialId: 
   await db.transaction(async (tx) => {
     const [m] = await tx.select().from(activationMaterials).where(and(eq(activationMaterials.id, input.materialId), eq(activationMaterials.activationId, input.activationId)));
     if (!m) return;
-    await recordMovement({ itemId: m.itemId, type: "ENTREE", quantity: m.quantity, activationId: input.activationId, date: input.date, createdById: input.userId, reason: "Retour d'activation" }, tx);
+    await recordMovement({ itemId: m.itemId, type: "ENTREE", quantity: m.quantity, activationId: input.activationId, date: input.date, createdById: input.userId, reason: "Retour d'opération" }, tx);
     await tx.delete(activationMaterials).where(eq(activationMaterials.id, m.id));
   });
   await syncActivationExpenses(input.activationId);

@@ -88,6 +88,8 @@ export type ActivationDetail = ActivationCard & {
   createdById: string | null; createdBy: string | null; validator: string | null; validatedAt: string | null; measuredAt: string | null; resultsAt: string | null; createdAt: string;
   newClients: number | null; ordersOnSite: number | null; ordersAmount: number | null; pressMentions: number | null;
   brandIds: string[]; productIds: string[]; clientIds: string[]; contributorIds: string[];
+  /** Offre proposée et goodies prévus (opérations de terrain, migration 0061). */
+  offerLabel: string | null; plannedMaterials: { itemId: string; quantity: number; name: string | null; unit: string | null }[];
 };
 
 /** Fiche complète d'une activation, dans la portée donnée (sinon `null`). */
@@ -113,7 +115,10 @@ export async function getActivation(id: string, scope: ActivationScope, refs: Ac
       coalesce((select array_agg(x.brand_id) from activation_brands x where x.activation_id = a.id), '{}') as "brandIds",
       coalesce((select array_agg(x.product_id) from activation_products x where x.activation_id = a.id), '{}') as "productIds",
       coalesce((select array_agg(x.client_id) from activation_clients x where x.activation_id = a.id), '{}') as "clientIds",
-      coalesce((select array_agg(x.user_id) from activation_contributors x where x.activation_id = a.id), '{}') as "contributorIds"
+      coalesce((select array_agg(x.user_id) from activation_contributors x where x.activation_id = a.id), '{}') as "contributorIds",
+      a.offer_label as "offerLabel",
+      coalesce((select json_agg(json_build_object('itemId', pm->>'itemId', 'quantity', (pm->>'quantity')::int, 'name', i.name, 'unit', i.unit))
+        from jsonb_array_elements(a.planned_materials) pm left join inventory_items i on i.id::text = pm->>'itemId'), '[]'::json) as "plannedMaterials"
     from activations a join activation_statuses s on s.key = a.status
     left join brands b on b.id = a.brand_id left join users u on u.id = a.responsible_id left join users vu on vu.id = a.validator_id left join users cu on cu.id = a.created_by_id
     left join campaigns k on k.id = a.campaign_id left join clients c on c.id = a.client_id left join products p on p.id = a.product_id
