@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireAnyModule, getUserPermissions, can, clientFilter, ownerFilter } from "@/lib/access";
+import { requireAnyModule, getUserPermissions, can, clientFilter, ownerFilter, hasFlag } from "@/lib/access";
 import { searchEntities } from "@/lib/search";
 import { type ModuleKey } from "@/lib/access-shared";
 import { PageHeader, Card, Badge, BrandDot } from "@/components/ui";
@@ -31,6 +31,8 @@ export default async function RecherchePage(props: { searchParams: Promise<{ q?:
   const scope = await clientFilter();
   const ownOnly = await ownerFilter();
   const found = await searchEntities(q, 10);
+  // Factures fournisseurs : confidentielles, même règle que `canPurchase()`.
+  if (!(await hasFlag("seeSupplierInvoices"))) found.purchases = (found.purchases ?? []).filter((h) => h.type !== "FACTURE");
   const inScope = (hits: typeof found.invoices) => (hits ?? []).filter((h) => !scope || (!!h.clientId && scope.includes(h.clientId)));
   const pieceRows = (hits: typeof found.invoices) => inScope(hits).map((h) => ({ id: h.id, label: h.label, sub: h.sub }));
   type R = Record<string, string | number | null>;

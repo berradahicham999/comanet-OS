@@ -17,6 +17,7 @@ import { animationPerformanceRule } from "./animation-rules";
 import { medicalRules } from "./medical-rules";
 import { medicalFieldRules } from "./medical-field-rules";
 import { fieldScope, inFieldScope } from "@/lib/medical/field-access";
+import { getAccess, can } from "@/lib/access";
 import { contentLateRule } from "./content-rules";
 import { activationRules } from "./activation-rules";
 import { analyticsRules } from "./analytics-rules";
@@ -83,7 +84,10 @@ export const allRecommendations = cache(async (): Promise<RecommendationWithStat
   const scope = await fieldScope().catch(() => ({ all: false, delegateIds: [] as string[] }));
   // Contrôle de présence des visites commerciales : direction et manager de la commerciale seulement.
   const crm = await crmViewer().catch(() => null);
+  // Alertes qui demandent un module de plus que leur catégorie (achats : confidentiels).
+  const access = await getAccess().catch(() => null);
   const recs = results.flat()
+    .filter((r) => !r.requiredModule || (!!access && can(access.perms, r.requiredModule, "view")))
     .filter((r) => !r.fieldDelegateId || inFieldScope(scope, r.fieldDelegateId))
     .filter((r) => !r.crmUserId || (!!crm && canSeePositions(crm, r.crmUserId)));
   const keys = recs.map((r) => r.key);

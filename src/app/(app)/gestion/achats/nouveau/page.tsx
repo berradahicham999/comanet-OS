@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { can, requireAccessContext } from "@/lib/access";
+import { requireAccessContext } from "@/lib/access";
 import { purchaseEditorData } from "@/lib/gestion/purchase-editor";
-import { type PurchaseType } from "@/lib/gestion/purchases-shared";
+import { canPurchase, type PurchaseType } from "@/lib/gestion/purchases-shared";
 import { fmtDate, iso, today } from "@/lib/format";
 import { parseOrderPrefill } from "@/lib/forecast-shared";
 import type { PurchaseEditorLine } from "@/components/gestion/purchase-editor";
@@ -23,8 +23,7 @@ export default async function NewPurchasePage(props: { searchParams: Promise<{ t
   const a = await requireAccessContext();
   const sp = await props.searchParams;
   const type: PurchaseType = sp.type === "RECEPTION" ? "RECEPTION" : sp.type === "FACTURE" ? "FACTURE" : "COMMANDE";
-  const modules = type === "RECEPTION" ? (["achats", "stock"] as const) : (["achats"] as const);
-  if (!modules.some((m) => can(a.perms, m, "create"))) redirect(a.home);
+  if (!canPurchase(a, type, "create")) redirect(a.home);
   const data = await purchaseEditorData();
   const supplier = data.suppliers.find((s) => s.id === sp.supplier) ?? null;
   // Lien « Commander » de la prévision saisonnière : lignes pré-remplies (quantité conseillée, dernier prix payé à ce
@@ -61,7 +60,7 @@ export default async function NewPurchasePage(props: { searchParams: Promise<{ t
           type={type}
           data={data}
           action={savePurchaseAction}
-          canValidate={modules.some((m) => can(a.perms, m, "validate"))}
+          canValidate={canPurchase(a, type, "validate")}
           initial={{
             id: null, supplierId: supplier?.id ?? "", date: iso(today()), expectedDate: "", supplierRef: "", currency: supplier?.currency ?? "MAD",
             exchangeRate: supplier?.currency && supplier.currency !== "MAD" ? "" : "1", warehouseKey: "PRINCIPAL", originDocumentId: null,

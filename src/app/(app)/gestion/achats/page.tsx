@@ -2,12 +2,12 @@ import Link from "next/link";
 import { can } from "@/lib/access";
 import { getSettings } from "@/lib/settings";
 import { listPurchases } from "@/lib/gestion/purchases";
-import { PURCHASE_STATUS_META, PURCHASE_TYPE_LABELS, isLateOrder, purchaseStatusLabel, type PurchaseType } from "@/lib/gestion/purchases-shared";
+import { PURCHASE_STATUS_META, PURCHASE_TYPE_LABELS, canPurchase, isLateOrder, purchaseStatusLabel, visiblePurchaseTypes, type PurchaseType } from "@/lib/gestion/purchases-shared";
 import { fmtMoney } from "@/lib/gestion/money";
 import { fmtDate, iso, today } from "@/lib/format";
 import { PageHeader, Badge, Empty, Tabs } from "@/components/ui";
 import { DataTable } from "@/components/data-table";
-import { GestionTabs, requireGestionView, visiblePurchaseTypes } from "@/components/gestion/gestion-nav";
+import { GestionTabs, requireGestionView } from "@/components/gestion/gestion-nav";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Achats" };
@@ -22,17 +22,16 @@ const EMPTY_HINT: Record<PurchaseType, string> = {
 export default async function PurchasesPage(props: { searchParams: Promise<{ type?: string; error?: string }> }) {
   const access = await requireGestionView();
   const sp = await props.searchParams;
-  const types = visiblePurchaseTypes(access.perms);
+  const types = visiblePurchaseTypes(access);
   const type = (types.includes(sp.type as PurchaseType) ? sp.type : types[0]) as PurchaseType | undefined;
-  if (!type) return <Empty title="Accès restreint" hint="Les achats demandent le droit « Voir » sur Achats (ou sur Stock pour les réceptions)." />;
+  if (!type) return <Empty title="Accès restreint" hint="Les achats sont confidentiels : ils demandent le droit « Voir » sur Achats." />;
   const [rows, settings] = await Promise.all([listPurchases({ type }), getSettings()]);
   const g = settings.gestion.purchases;
   const todayIso = iso(today());
-  const canAchats = can(access.perms, "achats", "create");
-  const canStock = can(access.perms, "stock", "create");
-  const createHref = type === "COMMANDE" && canAchats ? { href: "/gestion/achats/nouveau?type=COMMANDE", label: "+ Commande" }
-    : type === "RECEPTION" && (canAchats || canStock) ? { href: "/gestion/achats/nouveau?type=RECEPTION", label: "+ Réception sans commande" }
-      : type === "FACTURE" && canAchats ? { href: "/gestion/achats/nouveau?type=FACTURE", label: "+ Facture de services" } : null;
+  const canCreate = canPurchase(access, type, "create");
+  const createHref = type === "COMMANDE" && canCreate ? { href: "/gestion/achats/nouveau?type=COMMANDE", label: "+ Commande" }
+    : type === "RECEPTION" && canCreate ? { href: "/gestion/achats/nouveau?type=RECEPTION", label: "+ Réception sans commande" }
+      : type === "FACTURE" && canCreate ? { href: "/gestion/achats/nouveau?type=FACTURE", label: "+ Facture de services" } : null;
 
   return (
     <>
@@ -50,7 +49,7 @@ export default async function PurchasesPage(props: { searchParams: Promise<{ typ
       {sp.error && <div className="mb-4 rounded-2xl bg-red-soft border border-red/30 px-4 py-3 text-[13px] text-red">{sp.error}</div>}
       <div className="mb-4 flex items-center gap-3 flex-wrap">
         <Tabs current={`/gestion/achats?type=${type}`} tabs={types.map((t) => ({ href: `/gestion/achats?type=${t}`, label: PURCHASE_TYPE_LABELS[t].many }))} />
-        {type === "FACTURE" && canAchats && <Link href="/gestion/achats/facturer" className="btn-secondary btn-sm">Facturer des réceptions</Link>}
+        {type === "FACTURE" && canCreate && <Link href="/gestion/achats/facturer" className="btn-secondary btn-sm">Facturer des réceptions</Link>}
       </div>
 
       {rows.length === 0 ? (

@@ -147,6 +147,7 @@ async function resolveFromTables(userId: string): Promise<ResolvedAccess> {
         exportData: !!f.export_data,
         readActivityLog: !!f.read_activity_log,
         overrideCommercial: !!f.override_commercial,
+        seeSupplierInvoices: !!f.see_supplier_invoices,
       }
     : noFlags();
   const explicit = { brandIds: brandRows.rows.map((r) => r.brand_id), clientIds: [...new Set([...clientRows.rows, ...managedRows.rows].map((r) => r.client_id))], allBrands, cities };

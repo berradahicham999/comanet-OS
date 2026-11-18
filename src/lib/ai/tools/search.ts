@@ -46,6 +46,8 @@ export const searchEntities: AiTool<typeof schema> = {
       if (s.key === "clients" && ctx.access.clientIds) hits = hits.filter((h) => ctx.access.clientIds!.includes(h.id));
       if ((s.key === "orders" || s.key === "deliveries" || s.key === "invoices") && ctx.access.clientIds) hits = hits.filter((h) => !!h.clientId && ctx.access.clientIds!.includes(h.clientId));
       if (s.key === "orders" && ctx.access.scope === "OWN") hits = hits.filter((h) => h.ownerIds?.includes(ctx.access.userId));
+      // Factures fournisseurs : confidentielles, même règle que `canPurchase()`.
+      if (s.key === "purchases" && !ctx.access.seeSupplierInvoices) hits = hits.filter((h) => h.type !== "FACTURE");
       if (!hits.length) continue;
       data[s.label] = hits.slice(0, limit).map((h) => ({ label: h.label, sub: h.sub, href: h.href }));
       count += Math.min(hits.length, limit);

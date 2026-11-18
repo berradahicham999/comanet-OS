@@ -7,6 +7,7 @@
  * Échelles : quantités 3, prix d'achat 4 (en devise), montants 2, taux de change 6, coût de revient 4.
  */
 import { SCALE, formatScaled, parseDecimal, rescale, roundDiv } from "./money";
+import { can, type FlagSet, type PermissionAction, type PermissionSet } from "../permissions-shared";
 
 export const PURCHASE_TYPES = ["COMMANDE", "RECEPTION", "FACTURE", "RETOUR"] as const;
 export type PurchaseType = (typeof PURCHASE_TYPES)[number];
@@ -16,6 +17,20 @@ export const PURCHASE_TYPE_LABELS: Record<PurchaseType, { one: string; many: str
   FACTURE: { one: "Facture fournisseur", many: "Factures fournisseurs", series: "FF" },
   RETOUR: { one: "Retour fournisseur", many: "Retours", series: "RF" },
 };
+
+/**
+ * Droit sur une pièce d'achat — seule règle, utilisée par les pages, routes, actions, la recherche et l'export comptable.
+ * Le module Achats ouvre commandes, réceptions et retours (le module Stock ne suffit pas : les achats sont confidentiels) ;
+ * la facture fournisseur demande en plus l'interrupteur « Voir les factures fournisseurs ».
+ */
+export function canPurchase(access: { perms: PermissionSet; flags: FlagSet }, type: PurchaseType, action: PermissionAction = "view") {
+  return can(access.perms, "achats", action) && (type !== "FACTURE" || access.flags.seeSupplierInvoices);
+}
+
+/** Types de pièces d'achat visibles par ce compte, dans l'ordre des onglets. */
+export function visiblePurchaseTypes(access: { perms: PermissionSet; flags: FlagSet }): PurchaseType[] {
+  return PURCHASE_TYPES.filter((t) => canPurchase(access, t));
+}
 
 export const PURCHASE_STATUSES = ["BROUILLON", "VALIDE", "PARTIELLE", "RECUE", "CLOTUREE", "FACTUREE_PARTIEL", "FACTUREE", "ANNULE"] as const;
 export type PurchaseStatus = (typeof PURCHASE_STATUSES)[number];

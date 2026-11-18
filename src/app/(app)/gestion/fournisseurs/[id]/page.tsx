@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireAccess, canDo } from "@/lib/access";
+import { requireAccess, requireAccessContext, canDo } from "@/lib/access";
 import { listBrands } from "@/lib/users";
 import { auditTrail } from "@/lib/audit";
 import { listPaymentModes } from "@/lib/gestion/refs";
@@ -9,7 +9,7 @@ import { PageHeader, Card, Badge } from "@/components/ui";
 import { SupplierForm } from "@/components/gestion/supplier-form";
 import { AuditTrail } from "@/components/gestion/audit-trail";
 import { listPurchases } from "@/lib/gestion/purchases";
-import { PURCHASE_STATUS_META, PURCHASE_TYPE_LABELS, purchaseStatusLabel } from "@/lib/gestion/purchases-shared";
+import { PURCHASE_STATUS_META, PURCHASE_TYPE_LABELS, canPurchase, purchaseStatusLabel } from "@/lib/gestion/purchases-shared";
 import { fmtMoney } from "@/lib/gestion/money";
 import { fmtDate } from "@/lib/format";
 import { updateSupplierAction, archiveSupplierAction, deleteSupplierAction } from "../actions";
@@ -21,10 +21,12 @@ export default async function SupplierPage(props: { params: Promise<{ id: string
   const { id } = await props.params;
   const sp = await props.searchParams;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
-  const [s, brands, modes, history, canEdit, canValidate, canCreate, purchases] = await Promise.all([
+  const [s, brands, modes, history, canEdit, canValidate, canCreate, allPurchases, a] = await Promise.all([
     getSupplier(id), listBrands(), listPaymentModes(), auditTrail("supplier", id), canDo("achats", "edit"), canDo("achats", "validate"), canDo("achats", "create"),
-    listPurchases({ supplierId: id, limit: 50 }),
+    listPurchases({ supplierId: id, limit: 50 }), requireAccessContext(),
   ]);
+  // Factures fournisseurs : seulement avec l'interrupteur « Voir les factures fournisseurs ».
+  const purchases = allPurchases.filter((p) => canPurchase(a, p.type));
   if (!s) notFound();
 
   return (

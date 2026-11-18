@@ -39,6 +39,8 @@ export type ToolAccess = {
   ownOnly: boolean;
   /** Interrupteur « voir les coûts internes » (coût animatrice, prix d'achat). */
   seeInternalCosts: boolean;
+  /** Interrupteur « Voir les factures fournisseurs » (absent = non). */
+  seeSupplierInvoices?: boolean;
 };
 
 export type Ref = { id: string; name: string };

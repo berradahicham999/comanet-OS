@@ -125,7 +125,7 @@ export async function getUserConfig(id: string): Promise<UserConfig | null> {
     perms: matrixFromRows(perms),
     scope: scope[0]?.scope ?? "ALL",
     flags: f
-      ? { seeMargins: f.seeMargins, seeGlobalBudgets: f.seeGlobalBudgets, seeInternalCosts: f.seeInternalCosts, approveSpend: f.approveSpend, exportData: f.exportData, readActivityLog: f.readActivityLog, overrideCommercial: f.overrideCommercial }
+      ? { seeMargins: f.seeMargins, seeGlobalBudgets: f.seeGlobalBudgets, seeInternalCosts: f.seeInternalCosts, approveSpend: f.approveSpend, exportData: f.exportData, readActivityLog: f.readActivityLog, overrideCommercial: f.overrideCommercial, seeSupplierInvoices: f.seeSupplierInvoices }
       : noFlags(),
     brandIds: brandIds.map((b) => b.id),
     clientIds: clientIds.map((c) => c.id),

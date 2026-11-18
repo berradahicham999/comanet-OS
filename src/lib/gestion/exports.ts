@@ -49,7 +49,8 @@ export async function selectablePieces(opts: { from: string; to: string; types: 
 }
 
 /** Récapitulatif du mois pour le comptable, en Excel. */
-export async function recapWorkbook(month: string, simulation: boolean): Promise<Buffer> {
+/** `withPurchaseInvoices` : l'onglet « Journal des achats » (factures fournisseurs, confidentielles) n'est joint qu'avec l'interrupteur. */
+export async function recapWorkbook(month: string, simulation: boolean, withPurchaseInvoices = false): Promise<Buffer> {
   const { from, to } = monthRange(month);
   const pieces = await exportPieces(month, simulation);
   const rates = [...new Set(pieces.flatMap((p) => (p.vatBreakdown ?? []).map((v) => v.rate)))].sort((a, b) => Number(b) - Number(a));
@@ -101,7 +102,7 @@ export async function recapWorkbook(month: string, simulation: boolean): Promise
   const add = (name: string, rows: Record<string, unknown>[], empty: string) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.length ? rows : [{ Info: empty }]), name);
   add("Journal des ventes", journal, "Aucune facture ni avoir sur le mois.");
   add("TVA par taux", vat, "Aucune TVA collectée sur le mois.");
-  add("Journal des achats", purchases.rows.map((r) => ({ ...r, "HT devise": n(r["HT devise"]), "HT MAD": n(r["HT MAD"]), "TVA MAD": n(r["TVA MAD"]), "TTC MAD": n(r["TTC MAD"]) })), "Aucune facture fournisseur sur le mois.");
+  if (withPurchaseInvoices) add("Journal des achats", purchases.rows.map((r) => ({ ...r, "HT devise": n(r["HT devise"]), "HT MAD": n(r["HT MAD"]), "TVA MAD": n(r["TVA MAD"]), "TTC MAD": n(r["TTC MAD"]) })), "Aucune facture fournisseur sur le mois.");
   add("Règlements", payments.rows.map((r) => ({ ...r, Montant: n(r.Montant) })), "Aucun règlement sur le mois.");
   add("Balance âgée", agedRows, "Aucune facture ouverte.");
   return XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
