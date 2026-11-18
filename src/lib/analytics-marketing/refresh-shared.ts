@@ -34,6 +34,27 @@ export function splitShares(candidates: { productId: string; weight: number }[],
 
 export type Amounts = { planned: number | null; committed: number | null; spent: number | null };
 
+/**
+ * CA réellement mesuré d'une opération (`activations.attributed_revenue`) réparti sur ses lignes de dépense
+ * (reflet `marketing_expenses.activation_id`), au prorata de leur montant, à parts égales si tous les montants
+ * sont nuls. Calcul en centimes ; la dernière ligne absorbe l'arrondi : la somme vaut exactement le CA saisi.
+ * Sans CA (> 0) ou sans ligne : rien.
+ */
+export function spreadRevenue(lines: { id: string; amount: number }[], revenue: number | null): Map<string, number> {
+  const out = new Map<string, number>();
+  if (!lines.length || revenue === null || !(revenue > 0)) return out;
+  const cents = Math.round(revenue * 100);
+  const weights = lines.map((l) => Math.max(0, Number(l.amount) || 0));
+  const total = weights.reduce((s, w) => s + w, 0);
+  let given = 0;
+  lines.forEach((l, i) => {
+    const part = i === lines.length - 1 ? cents - given : Math.round(cents * (total > 0 ? weights[i] / total : 1 / lines.length));
+    given += part;
+    out.set(l.id, part / 100);
+  });
+  return out;
+}
+
 /** Statut d'une `marketing_expenses` → prévu / engagé / dépensé. SPENT est inclus dans COMMITTED, jamais compté deux fois. */
 export function expenseAmounts(status: string, amount: number): Amounts {
   if (status === "SPENT") return { planned: amount, committed: amount, spent: amount };

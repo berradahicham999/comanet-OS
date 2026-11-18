@@ -132,6 +132,15 @@ pharmacies touchées, leads, commandes prises sur place, retombées presse, et u
 Rien n'est obligatoire, mais sans ces chiffres on ne peut pas comparer les activations entre elles.
 Quinze jours après la fin, un rappel part si rien n'est saisi.
 
+Deux montants, à ne pas confondre :
+
+- **Montant des commandes déclaré** : ce que l'animatrice annonce au compte rendu. Il reste sur la fiche, il ne
+  compte nulle part comme CA.
+- **CA réellement mesuré** : seulement un montant vérifié (commandes nominatives retrouvées sur les pièces, code
+  promo). Il entre dans le verdict de l'opération **et remonte dans la revue de la marque** (Résultats : « CA mesuré »
+  et « Retour »), réparti sur les dépenses de l'opération pour que coût et CA portent sur le même périmètre. Une
+  opération sans dépense y compte avec un coût de 0 ; une opération annulée n'y compte plus.
+
 Ajoutez les **photos** et le **compte rendu** (fichier) sur la fiche.
 
 ## 7. Lire le retour

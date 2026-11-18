@@ -162,6 +162,31 @@ async function main() {
   assert.deepEqual([h.ledger.received, h.ledger.usedOnOperations, h.ledger.given, h.held], [50, 30, 0, 20], "vue direction : reçus 50, utilisés 30, en main 20");
   console.log("✓ compte rendu : 30 goodies sortis du stock de Hanane (20 chez elle, 50 au central), aucune nouvelle dépense, résultats déclarés, clôturée ; 800 MAD toujours à valider");
 
+  // 7. CA réellement mesuré → revue de marque : réparti sur la dépense de l'opération ; le montant déclaré (3 200) n'y entre pas.
+  const { refreshMarketingFacts } = await import("@/lib/analytics-marketing/refresh");
+  const facts = async (where: ReturnType<typeof sql>) => one<{ rev: number | null; spent: number | null; modes: string[] }>(sql`
+    select sum(attributed_revenue)::float8 as rev, sum(spent)::float8 as spent, array_agg(distinct attribution_mode) as modes from fact_marketing_spend where source_kind = 'EXPENSE' and ${where}`);
+  const opExpense = sql`source_id in (select id from marketing_expenses where activation_id = ${op.id}::uuid)`;
+  await refreshMarketingFacts(["EXPENSE"], "MANUAL");
+  assert.equal((await facts(opExpense)).rev, null, "sans CA mesuré : aucun CA, même avec 3 200 MAD de commandes déclarées");
+  await db.execute(sql`update activations set attributed_revenue = 1500 where id = ${op.id}::uuid`);
+  await refreshMarketingFacts(["EXPENSE"], "MANUAL");
+  const f = await facts(opExpense);
+  assert.deepEqual([f.rev, f.modes], [1500, ["MEASURED"]], "CA mesuré de 1 500 MAD porté par la dépense de l'opération");
+  // Opération sans aucune dépense (budget nul) : son CA compte, sur une ligne à coût 0.
+  const free = await createOperation({ typeKey: "GROSSISTE", clientId: grossiste.id, brandIds: [brand.id], productIds: [], date: day, budget: 0 }, actor, field);
+  assert.deepEqual(await expenses(free.id), []);
+  await db.execute(sql`update activations set attributed_revenue = 400, brand_id = ${brand.id}::uuid where id = ${free.id}::uuid`);
+  await refreshMarketingFacts(["EXPENSE"], "MANUAL");
+  const g = await facts(sql`source_id = ${free.id}::uuid`);
+  assert.deepEqual([g.rev, g.spent, g.modes], [400, 0, ["MEASURED"]], "opération sans dépense : 400 MAD mesurés, coût 0");
+  // Annulée : son CA sort de la revue.
+  const cancelKey = (await one<{ key: string }>(sql`select key from activation_statuses where is_cancelled limit 1`)).key;
+  await db.execute(sql`update activations set status = ${cancelKey} where id = ${free.id}::uuid`);
+  await refreshMarketingFacts(["EXPENSE"], "MANUAL");
+  assert.equal((await facts(sql`source_id = ${free.id}::uuid`)).rev, null, "opération annulée : plus de CA");
+  console.log("✓ CA mesuré : 1 500 MAD sur la dépense de l'opération, 400 MAD sur une opération sans dépense, rien pour le déclaré ni l'annulée");
+
   // Rejouer la validation de facture ne recrée rien (idempotence par ligne d'achat) ; remise des réglages.
   const dup = await one<{ n: number }>(sql`select count(*)::int as n from marketing_expenses where purchase_line_id is not null and label ilike ${"%" + tag + "%"}`);
   assert.equal(dup.n, 1);
