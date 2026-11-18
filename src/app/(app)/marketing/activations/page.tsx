@@ -34,7 +34,7 @@ export default async function ActivationsPage(props: { searchParams: Promise<SP>
   const rows = await listActivations({ ...range, brand: sp.brand, type: sp.type, status: sp.status, city: sp.city, responsible: sp.responsible, q: sp.q, includeClosed }, scope, refs, settings.activations, todayIso);
   const st = new Map(refs.statuses.map((s) => [s.key, s]));
   const tp = new Map(refs.types.map((t) => [t.key, t]));
-  const totals = rows.reduce((a, r) => ({ planned: a.planned + r.planned, committed: a.committed + r.committed + r.materials, spent: a.spent + r.fullCost }), { planned: 0, committed: 0, spent: 0 });
+  const totals = rows.reduce((a, r) => ({ planned: a.planned + r.planned, committed: a.committed + r.committed, spent: a.spent + r.fullCost }), { planned: 0, committed: 0, spent: 0 });
   const late = rows.filter((r) => r.late.length).length;
   const awaiting = rows.filter((r) => st.get(r.status)?.awaitingValidation).length;
   const visibleBrands = brands.filter((b) => b.active && (!scope.brandIds || scope.brandIds.includes(b.id)));
@@ -132,7 +132,7 @@ export default async function ActivationsPage(props: { searchParams: Promise<SP>
                         <td className="px-3 py-2">{r.city ?? "—"}{r.client ? <div className="text-[11.5px] text-muted truncate max-w-[160px]">{r.client}{r.clientCount > 1 ? ` +${r.clientCount - 1}` : ""}</div> : null}</td>
                         <td className="px-3 py-2">{r.responsible ?? "—"}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{r.planned ? fmtMAD(r.planned, { suffix: false }) : "—"}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{r.committed + r.materials ? fmtMAD(r.committed + r.materials, { suffix: false }) : "—"}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{r.committed ? fmtMAD(r.committed, { suffix: false }) : "—"}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{r.fullCost ? fmtMAD(r.fullCost, { suffix: false }) : "—"}</td>
                         <td className="px-3 py-2"><Badge tone={safeTone(s?.tone)}>{s?.label ?? r.status}</Badge></td>
                         <td className="px-3 py-2"><div className="flex flex-wrap gap-1">{r.late.map((l) => <Badge key={l} tone="red">{LATENESS_LABELS[l]}</Badge>)}</div></td>

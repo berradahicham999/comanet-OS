@@ -139,13 +139,13 @@ export default async function ActivationPage(props: { params: Promise<{ id: stri
           </Card>
 
           {/* ------------------------------ Budget ------------------------------ */}
-          <Card title="Budget" action={<span className="text-[12px] text-muted">{t.planned > 0 ? `${Math.round(((t.committed + t.materials) / t.planned) * 100)} % engagé` : "Aucun prévu"}</span>}>
+          <Card title="Budget" action={<span className="text-[12px] text-muted">{t.planned > 0 ? `${Math.round((t.committed / t.planned) * 100)} % engagé` : "Aucun prévu"}</span>}>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-3">
               {[["Prévu", t.planned], ["Engagé", t.committed], ["Dépensé", t.spent], ["Matériel", t.materials], ["Reste", t.remaining]].map(([l, v]) => (
                 <div key={String(l)} className="rounded-xl bg-surface-2 px-3 py-2"><div className="label">{l}</div><div className={`text-[15px] font-semibold tabular-nums ${l === "Reste" && Number(v) < 0 ? "text-red" : ""}`}>{fmtMAD(v, { compact: true })}</div></div>
               ))}
             </div>
-            {t.planned > 0 && <Progress value={Math.min(100, ((t.committed + t.materials) / t.planned) * 100)} tone={t.overrunPct > 0 ? "red" : "accent"} className="mb-3" />}
+            {t.planned > 0 && <Progress value={Math.min(100, (t.committed / t.planned) * 100)} tone={t.overrunPct > 0 ? "red" : "accent"} className="mb-3" />}
             {!st?.isValidated && <p className="text-[12px] text-muted mb-2">Le prévu ne pèse dans le budget marketing qu&apos;après validation. Une facture saisie (dépensé) compte toujours.</p>}
             <div className="space-y-2">
               {budget.lines.map((l) => (

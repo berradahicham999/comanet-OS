@@ -34,7 +34,7 @@ export default async function ActivationsBoardPage(props: { searchParams: Promis
   const awaiting = open.filter((a) => st.get(a.status)?.awaitingValidation);
   const running = open.filter((a) => st.get(a.status)?.isRunning);
   const monthPlanned = ofMonth.reduce((s, a) => s + a.planned, 0);
-  const monthEngaged = ofMonth.reduce((s, a) => s + a.committed + a.materials, 0);
+  const monthEngaged = ofMonth.reduce((s, a) => s + a.committed, 0);
   const monthCost = ofMonth.reduce((s, a) => s + a.fullCost, 0);
 
   // Budget par marque sur l'année : prévu / engagé / coût complet, sur toutes les activations validées.
@@ -44,7 +44,7 @@ export default async function ActivationsBoardPage(props: { searchParams: Promis
     if (st.get(a.status)?.isCancelled) continue;
     const k = a.brandId ?? "—";
     const e = byBrand.get(k) ?? { brandId: a.brandId, brand: a.brand ?? "Sans marque", color: a.color, n: 0, planned: 0, engaged: 0, cost: 0 };
-    e.n++; e.planned += a.planned; e.engaged += a.committed + a.materials; e.cost += a.fullCost; byBrand.set(k, e);
+    e.n++; e.planned += a.planned; e.engaged += a.committed; e.cost += a.fullCost; byBrand.set(k, e);
   }
   const brandRows = [...byBrand.values()].sort((x, y) => y.planned - x.planned);
   const silent = brands.filter((b) => b.active && (!scope.brandIds || scope.brandIds.includes(b.id)) && !ofMonth.some((a) => a.brandId === b.id));

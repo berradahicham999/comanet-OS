@@ -79,9 +79,9 @@ export type BudgetTotals = {
   materials: number;
   /** Coût complet = dépensé + matériel. */
   fullCost: number;
-  /** Reste = prévu − max(engagé, dépensé) − matériel. Négatif en cas de dépassement. */
+  /** Reste = prévu − engagé. Négatif en cas de dépassement. Le matériel sorti n'y entre pas (décision du 18/11/2026). */
   remaining: number;
-  /** Engagé (ou dépensé si supérieur) au-delà du prévu, en %. 0 si dans le budget. */
+  /** Engagé (ou dépensé si supérieur) au-delà du prévu, en %. 0 si dans le budget. Matériel exclu. */
   overrunPct: number;
 };
 
@@ -90,6 +90,8 @@ export type BudgetTotals = {
  * L'engagé d'une ligne est le plus grand de « engagé » (devis) et « dépensé » (facture) : une
  * facture supérieure au devis engage davantage. Sur une activation VALIDÉE, une ligne sans devis
  * ni facture est engagée pour son prévu : c'est le sens de la validation (décision d'Hicham).
+ * Le matériel sorti (goodies, PLV) est payé à l'achat et n'est pas chiffré dans le prévu : il compte dans le coût
+ * complet, jamais dans le reste ni dans le dépassement (décision d'Hicham, 18/11/2026).
  */
 export function budgetTotals(lines: BudgetLineLike[], materials: MaterialLike[] = [], opts: { validated?: boolean } = {}): BudgetTotals {
   const engagedOf = (l: BudgetLineLike) => {
@@ -100,12 +102,11 @@ export function budgetTotals(lines: BudgetLineLike[], materials: MaterialLike[] 
   const committed = lines.reduce((a, l) => a + engagedOf(l), 0);
   const spent = lines.reduce((a, l) => a + num(l.spent), 0);
   const mat = materials.reduce((a, m) => a + m.quantity * num(m.unitCost), 0);
-  const engaged = committed + mat;
   return {
     planned, committed, spent, materials: mat,
     fullCost: spent + mat,
-    remaining: planned - engaged,
-    overrunPct: planned > 0 && engaged > planned ? ((engaged - planned) / planned) * 100 : 0,
+    remaining: planned - committed,
+    overrunPct: planned > 0 && committed > planned ? ((committed - planned) / planned) * 100 : 0,
   };
 }
 

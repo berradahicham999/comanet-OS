@@ -12,14 +12,14 @@ import type { Rule, Recommendation } from "./types";
  * sur toutes les activations ouvertes, sans portée (l'Action Center filtre ensuite par module).
  *  - CHECKLIST : étapes non cochées à J−7 (réglage `checklistAlertDays`) → action prioritaire ;
  *  - RESULTATS : terminée depuis plus de `resultsDelayDays` sans résultats → rappel ;
- *  - BUDGET    : engagé + matériel au-delà du prévu → alerte ;
+ *  - BUDGET    : engagé au-delà du prévu → alerte (le matériel sorti, payé à l'achat, n'y entre pas) ;
  *  - STATUT    : date passée sans passage au statut suivant.
  * Chaque retard notifie une fois le pilote (une notification par activation et par type).
  */
 const NOTIF: Record<LatenessKind, { type: string; body: (a: ActivationCard) => string }> = {
   CHECKLIST: { type: "ACTIVATION_CHECKLIST_LATE", body: (a) => `Checklist ${a.checklistDone}/${a.checklistTotal} à ${fmtDate(a.date)}.` },
   RESULTATS: { type: "ACTIVATION_RESULTS_DUE", body: () => "Terminée : saisissez participants, échantillons, pharmacies touchées pour mesurer le retour." },
-  BUDGET: { type: "ACTIVATION_BUDGET_OVERRUN", body: (a) => `Engagé ${fmtMAD(a.committed + a.materials)} pour ${fmtMAD(a.planned)} prévus.` },
+  BUDGET: { type: "ACTIVATION_BUDGET_OVERRUN", body: (a) => `Engagé ${fmtMAD(a.committed)} pour ${fmtMAD(a.planned)} prévus.` },
   STATUT: { type: "ACTIVATION_CHECKLIST_LATE", body: (a) => `Date ${fmtDate(a.date)} passée : mettez le statut à jour.` },
 };
 
@@ -54,11 +54,11 @@ export const activationLateRule: Rule = {
         { label: "Statut", value: refs.statuses.find((s) => s.key === a.status)?.label ?? a.status },
         { label: "Pilote", value: a.responsible ?? "Non assigné" },
         ...(k === "CHECKLIST" ? [{ label: "Checklist", value: `${a.checklistDone}/${a.checklistTotal}` }] : []),
-        ...(k === "BUDGET" ? [{ label: "Prévu", value: fmtMAD(a.planned) }, { label: "Engagé + matériel", value: fmtMAD(a.committed + a.materials) }] : []),
+        ...(k === "BUDGET" ? [{ label: "Prévu", value: fmtMAD(a.planned) }, { label: "Engagé", value: fmtMAD(a.committed) }] : []),
       ],
       why: k === "CHECKLIST" ? `L'opération démarre dans moins de ${settings.activations.checklistAlertDays} jours et des étapes de préparation ne sont pas cochées : risque de PLV absente, d'échantillons manquants ou de lieu non confirmé.`
         : k === "RESULTATS" ? `Terminée depuis plus de ${settings.activations.resultsDelayDays} jours sans résultats saisis : impossible de calculer le coût par contact ni de comparer cette opération aux autres.`
-        : k === "BUDGET" ? `L'engagé (devis, factures, matériel sorti) dépasse le prévu validé de ${Math.round(a.overrunPct)} % : le budget marketing de la marque affiche un dépassement.`
+        : k === "BUDGET" ? `L'engagé (devis et factures) dépasse le prévu validé de ${Math.round(a.overrunPct)} % : le budget marketing de la marque affiche un dépassement.`
         : "La date est passée et le statut n'a pas bougé : soit l'opération n'a pas eu lieu, soit la fiche n'est pas à jour, et les rappels de résultats ne partiront pas.",
       action: k === "CHECKLIST" ? "Ouvrir la fiche, cocher ce qui est fait, et traiter ou réassigner les étapes restantes." : k === "RESULTATS" ? "Saisir les résultats sur la fiche (bloc « Résultats »), puis passer à « Mesurée »." : k === "BUDGET" ? "Vérifier les lignes budgétaires ; si le dépassement est réel, le faire valider ou réduire un poste." : "Mettre le statut à jour (Démarrer / Terminer) ou décaler les dates.",
       task: { title: `${LATENESS_LABELS[k]} : ${a.name}`, dueInDays: k === "CHECKLIST" ? 1 : 3, role: "MARKETING", priority: k === "CHECKLIST" || k === "BUDGET" ? "HIGH" : "MEDIUM" },

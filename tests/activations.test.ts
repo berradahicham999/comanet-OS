@@ -61,7 +61,13 @@ describe("Budget d'une activation", () => {
     assert.equal(t.spent, 9500);
     assert.equal(t.materials, 600);
     assert.equal(t.fullCost, 10100);
-    assert.equal(t.remaining, 12000 - 9500 - 600);
+    assert.equal(t.remaining, 12000 - 9500);
+    assert.equal(t.overrunPct, 0);
+  });
+  test("le matériel sorti (payé à l'achat) compte dans le coût complet, jamais dans le reste ni le dépassement", () => {
+    const t = budgetTotals([line("1", "GOODIES", 300, 300)], [{ quantity: 15, unitCost: 12 }], { validated: true });
+    assert.equal(t.fullCost, 180);
+    assert.equal(t.remaining, 0);
     assert.equal(t.overrunPct, 0);
   });
   test("sur une activation validée, une ligne sans devis ni facture est engagée pour son prévu", () => {
@@ -69,7 +75,7 @@ describe("Budget d'une activation", () => {
     assert.equal(t.committed, 11500);
     assert.equal(budgetTotals([line("1", "LIEU", 10000)], [], { validated: false }).committed, 0);
   });
-  test("dépassement : engagé + matériel au-delà du prévu", () => {
+  test("dépassement : engagé au-delà du prévu", () => {
     const t = budgetTotals([line("1", "LIEU", 1000, 1200)], []);
     assert.equal(Math.round(t.overrunPct), 20);
     assert.ok(t.remaining < 0);

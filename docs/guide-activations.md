@@ -102,7 +102,9 @@ Sur chaque poste du budget : **Engagé** quand vous avez le devis, **Dépensé**
 avec le fournisseur. Déposez le devis et la facture dans « Devis, factures, visuels » (le téléphone peut
 prendre la facture en photo). Rien n'est ressaisi côté Budgets : tout remonte automatiquement.
 
-Si l'engagé dépasse le prévu, la fiche l'affiche en rouge et l'Action Center le signale.
+Si l'engagé (devis et factures) dépasse le prévu, la fiche l'affiche en rouge et l'Action Center le signale. Le
+matériel sorti (goodies, PLV), déjà payé à l'achat, n'entre ni dans le reste ni dans le dépassement : il compte
+seulement dans le coût complet.
 
 ## 6. Saisir les résultats
 
