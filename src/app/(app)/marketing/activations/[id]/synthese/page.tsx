@@ -71,7 +71,7 @@ export default async function SynthesePage(props: { params: Promise<{ id: string
           <Card title="Résultats saisis">
             <Facts cols={2} items={[
               { label: "Participants / contacts", value: a.participants ?? "—" }, { label: "Échantillons distribués", value: a.samples ?? "—" },
-              { label: "Pharmacies touchées", value: a.pharmaciesReached ?? "—" }, { label: "Commandes sur place", value: a.ordersOnSite != null ? `${a.ordersOnSite}${a.ordersAmount ? ` · ${fmtMAD(a.ordersAmount)}` : ""}` : "—" },
+              { label: "Pharmacies touchées", value: a.pharmaciesReached ?? "—" }, { label: "Commandes déclarées", value: a.ordersOnSite != null ? `${a.ordersOnSite}${a.ordersAmount ? ` · ${fmtMAD(a.ordersAmount)}` : ""}` : "—" },
               { label: "Leads", value: a.leads ?? "—" }, { label: "Retombées presse", value: a.pressMentions ?? "—" },
               { label: "Coût / contact", value: val(unit.contact) }, { label: "Coût / échantillon", value: val(unit.sample) },
               { label: "Coût / pharmacie", value: val(unit.pharmacy) }, { label: "CA réellement mesuré", value: val(a.attributedRevenue) },

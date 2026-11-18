@@ -20,6 +20,8 @@ export type BudgetLineRow = {
   id: string; activationId: string; costItemKey: string; costItem: string; budgetCategory: string; brandId: string | null; brand: string | null;
   label: string; planned: number; committed: number; spent: number; supplier: string | null; quoteRef: string | null; invoiceRef: string | null;
   date: string | null; notes: string | null; sort: number;
+  /** Faux pour « Offre / UG » : chiffré au budget, jamais reflété en dépense marketing. */
+  reflectsExpense: boolean;
 };
 export type MaterialRow = {
   id: string; itemId: string; item: string; categoryKey: string; category: string; brandId: string | null; unit: string;
@@ -30,7 +32,8 @@ export async function activationBudgetLinesOf(activationId: string): Promise<Bud
   const r = await db.execute<BudgetLineRow>(sql`
     select l.id, l.activation_id as "activationId", l.cost_item_key as "costItemKey", ci.label as "costItem", ci.budget_category as "budgetCategory",
       l.brand_id as "brandId", b.name as brand, l.label, l.planned::float8 as planned, l.committed::float8 as committed, l.spent::float8 as spent,
-      l.supplier, l.quote_ref as "quoteRef", l.invoice_ref as "invoiceRef", l.date::text as date, l.notes, l.sort
+      l.supplier, l.quote_ref as "quoteRef", l.invoice_ref as "invoiceRef", l.date::text as date, l.notes, l.sort,
+      ci.reflects_expense as "reflectsExpense"
     from activation_budget_lines l join activation_cost_items ci on ci.key = l.cost_item_key left join brands b on b.id = l.brand_id
     where l.activation_id = ${activationId}::uuid order by l.sort, l.created_at`);
   return r.rows;
