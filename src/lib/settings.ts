@@ -852,6 +852,8 @@ export type AdThresholds = {
   roasVsBrandFactor: number;
   /** ROAS plancher en dessous duquel on ne scale jamais. */
   roasMin: number;
+  /** Alerte Action Center quand un jeton Meta expire dans moins de N jours. */
+  tokenWarnDays: number;
   /** Palier d'augmentation de budget recommandé (%) et sa fréquence (jours). */
   scaleStepPct: number;
   scaleStepDays: number;
@@ -873,6 +875,7 @@ export const DEFAULT_AD_THRESHOLDS: AdThresholds = {
   roasMin: 1,
   scaleStepPct: 20,
   scaleStepDays: 3,
+  tokenWarnDays: 14,
 };
 
 export const DEFAULT_SETTINGS: ComanetSettings = {

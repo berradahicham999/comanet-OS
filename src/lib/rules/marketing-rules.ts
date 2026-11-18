@@ -5,6 +5,7 @@ import { adsByDim, kpis, diagnose, brandAverages, type AdRow } from "@/lib/ads";
 import { isUnderTension } from "@/lib/stock-math";
 import { listCollaborations, collabKpis, scoreCollaborations } from "@/lib/influence";
 import { budgetConsumptionByBrand, AD_SPEND_SOURCE_LABEL } from "@/lib/budget";
+import { metaTokens, hasMetaToken, debugToken, type TokenDebug } from "@/lib/meta/client";
 import type { Rule, Recommendation } from "./types";
 
 /**
@@ -343,6 +344,96 @@ export const campaignStockRule: Rule = {
         task: { title: `Réassort avant campagne ${row.name}`, dueInDays: 2, role: "ADMIN" },
         entity: { type: "campaign", id: row.id, href: `/marketing/campagnes/${row.id}` },
         brandId: row.brand_id,
+      });
+    }
+    return out;
+  },
+};
+
+/* ------------------------------------------------------------------ */
+/* Connexion Meta                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Lecture de `debug_token` gardée en mémoire quelques heures : la règle tourne à chaque
+ * ouverture du Cockpit ou de l'Action Center, Meta n'a pas à être interrogé à chaque fois.
+ */
+const TOKEN_CACHE_MS = 6 * 3600_000;
+let tokenCache: { at: number; infos: TokenDebug[] } | null = null;
+async function tokenInfos(): Promise<TokenDebug[]> {
+  if (tokenCache && Date.now() - tokenCache.at < TOKEN_CACHE_MS) return tokenCache.infos;
+  const infos = await Promise.all(metaTokens().map((t) => debugToken(t).catch(() => null)));
+  tokenCache = { at: Date.now(), infos: infos.filter((i): i is TokenDebug => i !== null) };
+  return tokenCache.infos;
+}
+
+/**
+ * Connexion Meta coupée ou sur le point de l'être. Avant cette règle, un jeton expiré arrêtait
+ * la synchronisation en silence : la page Ads affichait des chiffres figés sans alerte.
+ */
+export const metaConnectionRule: Rule = {
+  id: "meta-connection",
+  label: "Connexion Meta",
+  description: "Synchronisation Meta en erreur (jeton expiré ou refusé) ou jeton qui expire bientôt.",
+  async run({ settings, now }) {
+    const accounts = (await db.execute(sql`
+      select id, name, sync_status, last_error, last_sync_at from ad_accounts
+      where platform = 'META' and sync_enabled and external_id is not null`)).rows as
+      { id: string; name: string; sync_status: string | null; last_error: string | null; last_sync_at: string | Date | null }[];
+    if (!accounts.length) return [];
+    const out: Recommendation[] = [];
+    const href = "/marketing/ads/diagnostic";
+    const fix = "Générer un nouveau jeton d'utilisateur système dans le Business Manager (Paramètres de l'entreprise → Utilisateurs système → Générer un jeton, permission ads_read, expiration « Jamais »), le coller dans la variable META_ACCESS_TOKEN sur Vercel, redéployer, puis lancer « Synchroniser » sur la page Ads.";
+
+    if (!hasMetaToken()) {
+      out.push({
+        key: "meta-connection:no-token", rule: "meta-connection", category: "MARKETING", priority: "CRITICAL",
+        title: "Meta Ads — aucun jeton configuré",
+        facts: [{ label: "Comptes suivis", value: String(accounts.length) }],
+        why: "La variable META_ACCESS_TOKEN est vide : aucune synchronisation des publicités n'est possible.",
+        action: fix,
+        task: { title: "Configurer le jeton Meta", dueInDays: 1, role: "ADMIN" },
+        entity: { type: "campaign", id: "meta-connection", href },
+      });
+      return out;
+    }
+
+    for (const a of accounts.filter((x) => x.sync_status === "ERROR")) {
+      const last = a.last_sync_at ? new Date(a.last_sync_at) : null;
+      out.push({
+        key: `meta-connection:error:${a.id}`, rule: "meta-connection", category: "MARKETING", priority: "CRITICAL",
+        title: `Meta Ads — ${a.name} n'est plus synchronisé`,
+        subtitle: "Les chiffres publicitaires ne bougent plus",
+        facts: [
+          { label: "Dernière tentative", value: last ? fmtDateShort(last) : "—" },
+          { label: "Erreur", value: (a.last_error ?? "—").slice(0, 160) },
+        ],
+        why: a.last_error ?? "La dernière synchronisation a échoué.",
+        action: /expir|jeton|token/i.test(a.last_error ?? "") ? fix : "Ouvrir le diagnostic Meta pour voir la cause exacte, la corriger puis relancer « Synchroniser ».",
+        task: { title: `Rétablir la connexion Meta — ${a.name}`, dueInDays: 1, role: "ADMIN" },
+        entity: { type: "campaign", id: `meta-account:${a.id}`, href },
+      });
+    }
+
+    // Jeton encore valide mais proche de l'expiration : prévenir avant la coupure.
+    if (!out.length) {
+      const limit = now.getTime() + settings.ads.tokenWarnDays * 86_400_000;
+      const infos = await tokenInfos();
+      infos.forEach((t, i) => {
+        if (!t.isValid || !t.expiresAt) return;
+        const exp = new Date(t.expiresAt);
+        if (exp.getTime() > limit) return;
+        const days = Math.max(0, Math.ceil((exp.getTime() - now.getTime()) / 86_400_000));
+        out.push({
+          key: `meta-connection:expiring:${i + 1}`, rule: "meta-connection", category: "MARKETING", priority: days <= 3 ? "CRITICAL" : "HIGH",
+          title: `Meta Ads — le jeton ${i + 1} expire dans ${fmtNum(days)} jour${days > 1 ? "s" : ""}`,
+          subtitle: `Expiration le ${fmtDateShort(exp)}`,
+          facts: [{ label: "Type", value: t.type ?? "—" }, { label: "Application", value: t.appName ?? "—" }],
+          why: "Un jeton d'utilisateur expire au bout d'environ 60 jours ; à l'expiration, la synchronisation des publicités s'arrête.",
+          action: fix,
+          task: { title: "Remplacer le jeton Meta avant expiration", dueInDays: Math.max(1, days - 1), role: "ADMIN" },
+          entity: { type: "campaign", id: "meta-connection", href },
+        });
       });
     }
     return out;
