@@ -133,6 +133,7 @@ recalculer une de ces notions à la main dans une page ou une requête :
 | Règlement, solde d'une facture, balance âgée, relance, bascule (réel ou simulation) | `src/lib/gestion/receivables-shared.ts` + `payments.ts` + `documents-shared.ts` + `cutover.ts` | `invoiceBalance()`, `agingBucket()`, `agedBalance()`, `reminderLevel()`, `planAllocation()`, `createPayment()` (seule écriture des règlements), `emitsReal()`, `importBlockedByCutover()`, `setCutoverMode()` |
 | P&L de gestion (nature des sites, CA direct / en bloc depuis les factures − avoirs / commissions, coût des ventes, marketing réel ventilé, contribution marketing, EBITDA, charges récurrentes, contribution par marque, point mort, détail jusqu'aux pièces) | `src/lib/pnl-shared.ts` + `src/lib/pnl.ts` (+ `budgetConsumptionByMonth()` dans `budget.ts`) | `classifySite()`, `chargeMonths()`, `buildPnl()` (seule définition du compte de résultat), `pnlStatement()`, `pnlLineSources()`, `createCharge()`, `reviseCharge()` |
 | Clients non commerciaux (clients internes « sorties marketing » + client « vente en bloc » du réglage) : exclus des ventes, segments, classements, CRM, copilote | `src/lib/analytics.ts` | `isCommercialClientSql()`, `nonCommercialClientIds()`, `BULK_CLIENT_SQL` |
+| Flux de ventes automatique (fichier du prestataire relu chaque heure : lecture, clé stable, fenêtre d'années, garde-fou de baisse, saut de l'import manuel) | `src/lib/import/sales-feed-shared.ts` + `sales-feed.ts` | `parseFeedWorkbook()`, `feedLineKeys()`, `feedWindow()`, `feedDropMessage()`, `importSkippedForFeed()`, `syncSalesFeed()` (seule écriture des ventes `FEED:`), `setSalesFeedSettings()` |
 | Sorties marketing par BL (charge d'échantillons au coût figé par nature, matériel tracé sans charge, alertes de coût, annulation) | `src/lib/gestion/marketing-outputs-shared.ts` + `marketing-outputs.ts` | `outputCharges()`, `costIssues()`, `recordOutputCharges()` / `removeOutputCharges()` (seules écritures de `marketing_expenses.document_line_id`), `recordMaterialOutputs()` / `reverseMaterialOutputs()`, `activationOutputs()`, `setClientInternal()` (fiche) |
 | Rapport (cycle : valider, archiver, annuler la validation, désarchiver ; annonce de chaque nouveau rapport, agents compris, aux administrateurs et à « Valider » sur Rapports) | `src/lib/ai/report-decisions-shared.ts` + `src/lib/ai/reports.ts` | `reportMove()` (seule règle du cycle), `moveReport()` / `setReportStatus()` (seules écritures du statut), `notifyNewReports()` (seule annonce, réservation par `ai_reports.notified_at`, migration 0057) |
 | Ventilation du marketing réel (publicité, échantillons par nature, goodies, PLV, influence, activations, autres) | `src/lib/budget-categories.ts` | `marketingBucketOf()`, `MARKETING_BUCKET_LABELS` ; somme = consommé (`budgetConsumptionByMonth().breakdown`) |
@@ -544,6 +545,18 @@ Pour les publicités, `src/lib/meta/` fait la même chose par API et suit les m�
 glissante** de 28 jours : Meta révise ses conversions plusieurs jours après coup. Sur une
 période synchronisée, les lignes du même compte issues d'un import fichier sont supprimées —
 elles décriraient les mêmes journées sous une autre clé.
+
+**Flux de ventes automatique** (`src/lib/import/sales-feed.ts`, cron horaire `/api/cron/sales-feed` à la demie). Le
+fichier que Pharmafirst réécrit chaque heure (`AURACOS.xlsx`, onglet `Detail` : Date, Piece, Type, Client, Commercial,
+Ville, Unites, CA HT, Remarque ; produit et année dans le titre) est téléchargé par son lien de partage
+(`SALES_FEED_URL`, variable d'environnement). Réglage `settings.salesFeed` (Imports → Flux automatique, administration) :
+site, marque, date de départ, échantillons exclus, garde-fou `maxDropPct`. À partir de la date de départ et sur les
+années couvertes par le fichier, les ventes du site × marque deviennent **exactement** celles du fichier : seules les
+différences s'écrivent (clé `FEED:` = contenu + rang parmi les lignes identiques, car le fichier est trié du plus récent
+au plus ancien et un BL peut porter des lignes identiques), les lignes de l'import manuel sur la fenêtre sont retirées,
+et `importSales()` ignore ensuite ces lignes (`importSkippedForFeed()`). Un fichier inchangé n'écrit rien ; un fichier qui
+ferait baisser le CA au-delà du seuil est refusé. Les ventes arrivent dans `sales` (module Ventes, commission
+Pharmafirst du P&L), jamais dans la gestion commerciale. État de la dernière relecture : ligne `sales-feed.state` de `settings`.
 
 Conventions à respecter pour tout nouvel import :
 

@@ -190,7 +190,8 @@ Sans clé, rien ne casse : le bouton Copilote explique quoi renseigner, le brief
 | `BUSINESS_TZ` | non | fuseau métier (défaut : `Africa/Casablanca`) |
 | `META_ACCESS_TOKEN` | pour la synchro Meta | jeton(s) d'utilisateur système, permission `ads_read` seule ; plusieurs jetons séparés par des virgules si les comptes sont répartis sur plusieurs Business Managers. Jamais stocké en base. Vérifier avec `/marketing/ads/diagnostic`. |
 | `GOOGLE_MAPS_API_KEY` | pour le contrôle Internet des positions | clé Google Cloud restreinte à l'API « Places API (New) ». Absente : le contrôle est désactivé (l'alerte « visite hors zone » marche sans). Jamais stockée en base. Voir `docs/guide-positions-internet.md`. |
-| `CRON_SECRET` | pour la synchro Meta | protège `/api/cron/meta`, route publique sur Internet |
+| `CRON_SECRET` | pour la synchro Meta | protège `/api/cron/meta` et `/api/cron/sales-feed`, routes publiques sur Internet |
+| `SALES_FEED_URL` | pour le flux de ventes automatique | lien de partage du fichier Pharmafirst (Drive, « Tous les utilisateurs disposant du lien — Lecteur »), relu chaque heure ; activation dans Imports → Flux automatique |
 | `META_API_VERSION` | non | version d'API épinglée (défaut : `v23.0`) |
 | `ANTHROPIC_API_KEY` | pour le copilote IA | clé d'accès à l'API Anthropic. Absente : l'application fonctionne normalement, le copilote affiche « non configuré ». Jamais stockée en base. |
 | `AI_MODEL_FAST` | non | modèle rapide (explications de cartes, brief du matin ; défaut : `claude-sonnet-5`) |

@@ -5,12 +5,13 @@ import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { importFiles, imports } from "@/db/schema";
-import { requireAnyModule, requirePermission, getAccess } from "@/lib/access";
+import { requireAdmin, requireAnyModule, requirePermission, getAccess } from "@/lib/access";
 import { parseSheet } from "@/lib/import/parse";
 import { runImport } from "@/lib/import/run";
 import { FIELDS, IMPORT_MODULE, missingRequired, type ImportType } from "@/lib/import/fields";
 import { appendUploadChunk, createUploadFile, MAX_UPLOAD_BYTES, UPLOAD_CHUNK_BYTES, purgeStaleUploads } from "@/lib/import/upload";
 import { isReversible, rollbackRows, rollbackOrphans } from "@/lib/import/rollback";
+import { setSalesFeedSettings, syncSalesFeed } from "@/lib/import/sales-feed";
 
 /**
  * Étape 1 : téléversement par morceaux (voir src/lib/chunked-upload.ts) → stockage temporaire en base
@@ -139,4 +140,46 @@ export async function cleanupImportOrphans(formData: FormData) {
   }).where(eq(imports.id, id));
   for (const p of ["/imports", `/imports/${id}`, "/stock", "/produits", "/clients", "/"]) revalidatePath(p);
   redirect(`/imports/${id}`);
+}
+
+/* ------------------------- Flux automatique ------------------------- */
+
+const feedMsg = (m: string) => encodeURIComponent(m.slice(0, 400));
+
+/** Réglage du flux : administration (il change la source des ventes d'un site × marque). */
+export async function saveSalesFeedAction(fd: FormData) {
+  let msg: string;
+  try {
+    const user = await requireAdmin();
+    await setSalesFeedSettings({
+      enabled: fd.get("enabled") === "on",
+      site: String(fd.get("site") ?? ""),
+      brandId: String(fd.get("brandId") ?? "") || null,
+      from: String(fd.get("from") ?? "") || null,
+      excludeSamples: fd.get("excludeSamples") === "on",
+      maxDropPct: Number(fd.get("maxDropPct") ?? 20),
+    }, { id: user.id, name: user.name });
+    msg = "Réglage du flux enregistré.";
+  } catch (e) {
+    redirect(`/imports?error=${feedMsg(String((e as Error).message ?? e))}`);
+  }
+  revalidatePath("/imports");
+  redirect(`/imports?flux=${feedMsg(msg)}`);
+}
+
+/** « Synchroniser maintenant » / « Essai à blanc » : Créer sur Ventes ; « Forcer » (garde-fou levé) : administration. */
+export async function syncSalesFeedAction(fd: FormData) {
+  const mode = String(fd.get("mode") ?? "sync");
+  let msg: string;
+  try {
+    const user = await requirePermission("ventes", "create");
+    if (mode === "force") await requireAdmin();
+    const r = await syncSalesFeed({ trigger: "MANUEL", userId: user.id, dryRun: mode === "dry", force: mode === "force" });
+    if (!r.ok) throw new Error(r.message);
+    msg = r.message + (r.createdClients?.length ? ` Clients ${mode === "dry" ? "à créer" : "créés"} (à vérifier) : ${r.createdClients.join(", ")}.` : "");
+  } catch (e) {
+    redirect(`/imports?error=${feedMsg(String((e as Error).message ?? e))}`);
+  }
+  revalidatePath("/", "layout");
+  redirect(`/imports?flux=${feedMsg(msg)}`);
 }
