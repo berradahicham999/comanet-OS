@@ -29,7 +29,7 @@ export const getMarketingBudget: AiTool<typeof schema> = {
     const label = (k: string) => BUDGET_CATEGORY_LABELS[k as BudgetCategory] ?? k;
     return {
       available: true,
-      source: "Marketing Command Center — enveloppes et dépenses (MAD), régie Meta en MAD converti",
+      source: "Budget marketing — enveloppes et dépenses (MAD), régie Meta en MAD converti",
       period: { start: `${year}-01-01`, end: `${year + 1}-01-01`, label: `Année ${year}` },
       scope: scopeLabel(access, [brand ? `marque ${brand.name}` : "toutes marques"]),
       data: {

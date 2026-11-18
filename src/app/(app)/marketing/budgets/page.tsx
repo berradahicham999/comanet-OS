@@ -12,6 +12,7 @@ import { fmtMAD, fmtPct, fmtDate, fmtDateShort, iso } from "@/lib/format";
 import { CAMPAIGN_STATUS } from "@/lib/marketing-shared";
 import { saveBudget, saveBudgetLine, deleteBudgetLine, saveExpense, deleteExpense } from "../actions";
 
+import { MarketingSectionTabs } from "@/components/marketing-sections";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Budget & dépenses" };
 
@@ -64,8 +65,9 @@ export default async function MarketingBudgetsPage(props: { searchParams: Promis
 
   return (
     <>
+      <MarketingSectionTabs section="plan" current="/marketing/budgets" />
       <PageHeader eyebrow="Marketing" title="Budget & dépenses" subtitle={`Année ${year} · planifié → alloué par canal → engagé → dépensé → reste, par marque. Le budget et l'allocation sont ceux du plan marketing ; une dépense se rattache à une action du plan.`}
-        actions={<><Link href="/marketing" className="btn-secondary btn-sm">Command Center</Link><Link href="/marketing/plan" className="btn-secondary btn-sm">Plan marketing</Link><Link href="/imports?type=BUDGETS" className="btn-ghost btn-sm">Importer budgets</Link></>}>
+        actions={<><Link href="/marketing" className="btn-secondary btn-sm">Pilotage</Link><Link href="/marketing/plan" className="btn-secondary btn-sm">Plan marketing</Link><Link href="/imports?type=BUDGETS" className="btn-ghost btn-sm">Importer budgets</Link></>}>
         {(seeGlobal || brandId) && <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-3">
           <Card><div className="label">Budget annuel</div><div className="kpi mt-2">{fmtMAD(totals.budget, { compact: true })}</div></Card>
           <Card><div className="label">Alloué par canal</div><div className="kpi mt-2">{fmtMAD(totals.allocated, { compact: true })}</div><div className="text-[12px] text-muted mt-1">{fmtPct(totals.budget ? (totals.allocated / totals.budget) * 100 : 0)} du budget · prévu non engagé {fmtMAD(totals.planned, { compact: true })}</div></Card>

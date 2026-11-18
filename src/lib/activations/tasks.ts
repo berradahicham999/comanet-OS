@@ -36,7 +36,7 @@ export async function syncValidationTask(a: ActivationTaskInput, assigneeId: str
   if (!assigneeId) { await closeTasks(key); return; }
   const values = { title: `Valider : ${a.name}`, dueDate: a.prepDate ?? a.date, assigneeId, brandId: a.brandId };
   if (open.length) await db.update(tasks).set(values).where(eq(tasks.id, open[0].id));
-  else await db.insert(tasks).values({ ...values, source: "MARKETING", sourceKey: key, entityType: "activation", entityId: a.id, createdById: a.createdById, priority: "HIGH", description: "Activation proposée : vérifier le budget prévu, puis valider ou refuser avec un commentaire depuis la fiche ou la file de validation." });
+  else await db.insert(tasks).values({ ...values, source: "MARKETING", sourceKey: key, entityType: "activation", entityId: a.id, createdById: a.createdById, priority: "HIGH", description: "Opération proposée : vérifier le budget prévu, puis valider ou refuser avec un commentaire depuis la fiche ou la file de validation." });
 }
 
 /** Tâche du pilote, ouverte quand l'activation est validée et non terminée. */
@@ -47,7 +47,7 @@ export async function syncPilotTask(a: ActivationTaskInput, active: boolean) {
   if (!a.responsibleId) { await cancelTasks(open); return; }
   const values = { title: `Piloter : ${a.name}`, dueDate: a.date, assigneeId: a.responsibleId, brandId: a.brandId };
   if (open.length) await db.update(tasks).set(values).where(eq(tasks.id, open[0].id));
-  else await db.insert(tasks).values({ ...values, source: "MARKETING", sourceKey: key, entityType: "activation", entityId: a.id, createdById: a.createdById, priority: "MEDIUM", description: "Préparer l'activation : cocher la checklist, sortir le matériel, saisir les dépenses puis les résultats sur la fiche." });
+  else await db.insert(tasks).values({ ...values, source: "MARKETING", sourceKey: key, entityType: "activation", entityId: a.id, createdById: a.createdById, priority: "MEDIUM", description: "Préparer l'opération : cocher la checklist, sortir le matériel, saisir les dépenses puis les résultats sur la fiche." });
 }
 
 /** Tout clore (annulation, archivage). */

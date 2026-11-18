@@ -26,7 +26,7 @@ export function Insufficient({ m, compact }: { m: Extract<Measured, { ok: false 
     <span className={clsx("inline-flex flex-col", compact ? "text-[11px]" : "text-xs")}>
       <span className="font-medium text-ink-2">données insuffisantes</span>
       <span className="text-muted">{m.reason}{m.owner ? ` · ${m.owner}` : ""}</span>
-      {m.href && <Link href={m.href} className="text-accent underline-offset-2 hover:underline">{m.href.startsWith("/marketing/analytics/qualite") ? "voir la qualité des données" : "corriger"}</Link>}
+      {m.href && <Link href={m.href} className="text-accent underline-offset-2 hover:underline">corriger</Link>}
     </span>
   );
 }

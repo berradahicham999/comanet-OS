@@ -6,7 +6,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
 import { LogOut, ChevronDown } from "lucide-react";
-import type { NavGroup } from "@/components/nav-config";
+import type { NavGroup, NavItem } from "@/components/nav-config";
 import { NavIcon } from "./nav-icons";
 import { initials } from "@/lib/format";
 import type { SessionUser } from "@/lib/auth";
@@ -16,10 +16,15 @@ export function isActive(pathname: string, href: string, exact?: boolean) {
   return pathname === href || pathname.startsWith(href + "/");
 }
 
+/** Un item s'allume sur sa page ou sur l'une des pages qu'il regroupe (`match`). */
+function itemIsActive(pathname: string, it: NavItem) {
+  return isActive(pathname, it.href, it.exact) || (it.match ?? []).some((m) => isActive(pathname, m));
+}
+
 const COLLAPSE_KEY = "comanet-nav-collapsed";
 
 function groupIsActive(g: NavGroup, pathname: string) {
-  return g.items.some((it) => isActive(pathname, it.href, it.exact));
+  return g.items.some((it) => itemIsActive(pathname, it));
 }
 
 export function Sidebar({ groups, user, logout, onNavigate }: {
@@ -84,8 +89,8 @@ export function Sidebar({ groups, user, logout, onNavigate }: {
                 <div className="space-y-0.5 mt-1">
                   {g.items.map((it) => {
                     // Un item plus spécifique (ex: /marketing/planning) ne doit pas activer /marketing
-                    const moreSpecific = g.items.some((o) => o.href !== it.href && o.href.startsWith(it.href + "/") && isActive(pathname, o.href));
-                    const active = isActive(pathname, it.href, it.exact) && !moreSpecific;
+                    const moreSpecific = g.items.some((o) => o.href !== it.href && o.href.startsWith(it.href + "/") && itemIsActive(pathname, o));
+                    const active = itemIsActive(pathname, it) && !moreSpecific;
                     return (
                       <Link key={it.href} href={it.href} onClick={onNavigate} className={clsx("nav-item", active && "nav-item-active")}>
                         <NavIcon name={it.icon} size={17} strokeWidth={1.9} className={active ? "text-accent" : "text-muted"} />

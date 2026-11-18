@@ -9,11 +9,11 @@ import type { MarketingAction } from "@/lib/marketing-intel/types";
 import { AD_SPEND_SOURCE_LABEL } from "@/lib/budget";
 import { PLAN_STATUS } from "@/lib/marketing-plan/shared";
 import { PageHeader, Card, Tabs, Section, Badge, BrandDot, Kpi, Empty, type Tone } from "@/components/ui";
-import { ANALYTICS_TABS } from "@/components/analytics";
 import { fmtMAD, fmtPct, fmtDate } from "@/lib/format";
+import { MarketingSectionTabs } from "@/components/marketing-sections";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Analytics · Plan vs réel" };
+export const metadata = { title: "Résultats · Plan vs réel" };
 
 /** Lecture produit du moteur de décision, dans le vocabulaire du plan : pousser / maintenir / optimiser / réduire / arrêter / restocker / ne pas promouvoir. */
 const PRODUCT_CLASS: Record<MarketingAction, { label: string; tone: Tone }> = {
@@ -41,9 +41,12 @@ export default async function AnalyticsPlanPage(props: { searchParams: Promise<{
 
   return (
     <>
-      <div className="mb-4"><Tabs tabs={ANALYTICS_TABS} current="/marketing/analytics/plan" /></div>
-      <PageHeader eyebrow="Analytics marketing" title="Plan vs réel" subtitle={`Année ${year} · budget planifié, alloué, engagé et dépensé par plan et par canal ; objectifs du plan ; classement des produits selon le moteur de décision. Ventes au ${fmtDate(ref)}.`}
-        actions={<Link href="/marketing/plan" className="btn-secondary btn-sm">Plan marketing</Link>}>
+      <MarketingSectionTabs section="plan" current="/marketing/analytics/plan" />
+      <PageHeader eyebrow="Plan & budget · Résultats" title="Plan vs réel" subtitle={`Année ${year} · budget planifié, alloué, engagé et dépensé par plan et par canal ; objectifs du plan ; classement des produits selon le moteur de décision. Ventes au ${fmtDate(ref)}.`}
+        actions={<div className="flex gap-2">
+          {scope.selectedBrandId && <Link href={`/marketing/analytics/revue/${scope.selectedBrandId}`} className="btn-secondary btn-sm">Revue mensuelle de la marque</Link>}
+          <Link href="/marketing/plan" className="btn-ghost btn-sm">Plan marketing</Link>
+        </div>}>
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <Tabs current={q({ brand: sp.brand })} tabs={[{ href: q({ brand: "" }), label: "Toutes les marques" }, ...scope.allBrands.map((b) => ({ href: q({ brand: b.id }), label: b.name }))]} />
           <div className="flex gap-1 ml-auto">{[year - 1, year, year + 1].map((y) => <Link key={y} href={q({ year: String(y) })} className={`text-[12px] px-2 py-1 rounded-md border ${y === year ? "bg-black/5 border-line-2" : "border-line hover:border-line-2"}`}>{y}</Link>)}</div>

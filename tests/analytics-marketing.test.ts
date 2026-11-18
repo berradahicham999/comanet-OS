@@ -69,10 +69,12 @@ describe("valeurs mesurées", () => {
     assert.equal(ratio(null, 5), null);
     assert.equal(ratio(10, 4), 2.5);
   });
-  test("insufficient porte la raison, le responsable et le lien Qualité", () => {
+  test("insufficient porte la raison, le responsable et, s'il y en a un, le lien à corriger (l'écran Qualité est masqué)", () => {
     const v = insufficient("aucune dépense sur la période", "Responsable marketing");
     assert.equal(v.ok, false);
-    if (!v.ok) { assert.equal(v.owner, "Responsable marketing"); assert.equal(v.href, "/marketing/analytics/qualite"); }
+    if (!v.ok) { assert.equal(v.owner, "Responsable marketing"); assert.equal(v.href, undefined); }
+    const w = insufficient("pas d'enveloppe annuelle définie", "Administration", "/marketing/budgets");
+    if (!w.ok) assert.equal(w.href, "/marketing/budgets");
     const m = measured(12, 0.8);
     assert.ok(m.ok && m.value === 12 && m.completeness === 0.8);
   });

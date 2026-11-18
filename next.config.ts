@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { MARKETING_REDIRECTS } from "./src/lib/marketing-redirects";
 
 const nextConfig: NextConfig = {
   experimental: {
@@ -12,6 +13,11 @@ const nextConfig: NextConfig = {
   // Sans ce type, certains téléphones enregistrent l'APK comme un fichier ordinaire et refusent de l'installer.
   async headers() {
     return [{ source: "/downloads/:file*.apk", headers: [{ key: "Content-Type", value: "application/vnd.android.package-archive" }, { key: "Content-Disposition", value: "attachment" }] }];
+  },
+  // Pages Marketing masquées (studio, bibliothèque, priorités, agent, sous-pages analytics) : le code reste, l'adresse
+  // renvoie vers la page de remplacement la plus proche (src/lib/marketing-redirects.ts).
+  async redirects() {
+    return MARKETING_REDIRECTS;
   },
   // Les migrations SQL (drizzle/) doivent être embarquées dans les fonctions serverless pour /installation.
   outputFileTracingIncludes: {

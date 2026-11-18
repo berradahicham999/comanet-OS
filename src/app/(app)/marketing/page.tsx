@@ -12,10 +12,15 @@ import { PLAN_STATUS } from "@/lib/marketing-plan/shared";
 import { BUDGET_CATEGORY_LABELS } from "@/lib/budget-categories";
 import { PageHeader, Card, Kpi, Badge, BrandDot, Section, Empty, Tabs, Progress, StatusBadge, PriorityBadge } from "@/components/ui";
 import { DecisionCard } from "@/components/decision-card";
+import { activationScope, canDoActivation } from "@/lib/activations/access";
+import { activationValidationQueue } from "@/lib/activations/queries";
+import { isOpenStatus } from "@/lib/marketing-plan/shared";
+import type { ActionRow } from "@/lib/marketing-plan/actions";
+import { setActionStatusAction } from "./priorites/actions";
 import { fmtMAD, fmtPct, fmtNum, fmtDate, fmtDateShort, fmtTime } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Command Center marketing" };
+export const metadata = { title: "Pilotage marketing" };
 
 const PERIODS: { key: MarketingPeriodKey; label: string }[] = [{ key: "7d", label: "7 jours" }, { key: "30d", label: "30 jours" }, { key: "90d", label: "90 jours" }];
 const money = (v: number | null) => (v === null ? "—" : fmtMAD(v, { compact: true }));
@@ -38,8 +43,30 @@ function BrandTile({ c, href }: { c: BrandCockpit; href: string }) {
         </div>
       ) : <div className="rounded-xl bg-surface-2 p-3 text-[12.5px] text-muted">Rien à pousser en priorité : ventes stables et stock sain, ou données insuffisantes.</div>}
       {c.doNotPush.length > 0 && <div className="text-[11.5px] text-muted">Ne pas pousser : {c.doNotPush.slice(0, 3).map((d) => d.entity.name).join(", ")}</div>}
-      <Link href={href} className="btn-secondary btn-sm mt-auto">Ouvrir le cockpit {c.name}</Link>
+      <Link href={href} className="btn-secondary btn-sm mt-auto">Piloter {c.name}</Link>
     </div>
+  );
+}
+
+/** Une action au plan : sa tâche porte le statut ; on la fait avancer d'ici, la fiche reste ouverte. */
+function ActionItem({ a, todayIso, canEdit, back }: { a: ActionRow; todayIso: string; canEdit: boolean; back: string }) {
+  const late = !!a.dueDate && a.dueDate < todayIso;
+  const next = a.status === "TODO" ? "IN_PROGRESS" : a.status === "IN_PROGRESS" ? "DONE" : a.status === "BLOCKED" ? "IN_PROGRESS" : null;
+  return (
+    <li className="flex flex-wrap items-center gap-2 py-1.5 border-b border-line last:border-0 text-[12.5px]">
+      <StatusBadge status={a.status} />
+      <Link href={`/marketing/priorites/${a.id}`} className="font-medium hover:underline flex-1 min-w-40 truncate">{a.title}</Link>
+      <span className="text-muted inline-flex items-center gap-1"><BrandDot color={a.brandColor} />{a.brandName}</span>
+      <span className="text-muted">{a.budgetPlanned ? fmtMAD(a.budgetPlanned, { compact: true }) : "—"}</span>
+      <span className={clsx("whitespace-nowrap", late ? "text-red font-medium" : "text-muted")}>{a.dueDate ? fmtDateShort(a.dueDate) : "sans échéance"}</span>
+      <span className="text-muted">{a.assigneeName ?? "non assignée"}</span>
+      {canEdit && isOpenStatus(a.status) && next && (
+        <form action={setActionStatusAction}>
+          <input type="hidden" name="id" value={a.id} /><input type="hidden" name="back" value={back} />
+          <button className="btn-ghost btn-sm" type="submit" name="status" value={next}>{next === "DONE" ? "Terminer" : a.status === "BLOCKED" ? "Débloquer" : "Démarrer"}</button>
+        </form>
+      )}
+    </li>
   );
 }
 
@@ -47,8 +74,8 @@ export default async function MarketingCommandCenterPage(props: { searchParams: 
   await requireAccess("marketing");
   const sp = await props.searchParams;
   const period = (PERIODS.some((p) => p.key === sp.period) ? sp.period : "30d") as MarketingPeriodKey;
-  const [scope, users, canCreate, canEdit, refDate] = await Promise.all([decisionScopeFor(sp.brand ?? null, period), listUsers(), canDo("marketing", "create"), canDo("marketing", "edit"), getRefDate()]);
-  if (scope.allBrands.length === 0) return <><PageHeader eyebrow="Marketing" title="Command Center" /><Empty title="Aucune marque dans votre périmètre" hint="Demander l'assignation d'une marque à un administrateur (Paramètres → Utilisateurs)." /></>;
+  const [scope, users, canCreate, canEdit, refDate, canCreateOperation, opScope] = await Promise.all([decisionScopeFor(sp.brand ?? null, period), listUsers(), canDo("marketing", "create"), canDo("marketing", "edit"), getRefDate(), canDoActivation("create"), activationScope()]);
+  if (scope.allBrands.length === 0) return <><PageHeader eyebrow="Marketing" title="Pilotage" /><Empty title="Aucune marque dans votre périmètre" hint="Demander l'assignation d'une marque à un administrateur (Paramètres → Utilisateurs)." /></>;
   const data = await buildMarketingCommandCenter({ ctx: scope.ctx, perms: scope.perms, brands: scope.allBrands, selectedBrandId: scope.selectedBrandId, period });
   const sel = data.selected;
   const href = (b: string | null, p: string) => `/marketing?${new URLSearchParams({ ...(b ? { brand: b } : {}), period: p }).toString()}`;
@@ -60,11 +87,14 @@ export default async function MarketingCommandCenterPage(props: { searchParams: 
   const budgetAlerts = data.brands.filter((b) => b.budget.hasBudget && (b.budget.consumedPct ?? 0) >= scope.ctx.settings.budgetAlertPct);
   const stockAlerts = data.brands.flatMap((b) => b.stockAlerts.map((p) => ({ brand: b.name, p })));
   const maxDecisions = scope.ctx.settings.marketingPlan.maxDecisions;
+  // Ce qui attend une validation de la direction : les opérations au-dessus du seuil (file existante, même portée que la page Opérations).
+  const toValidate = (await activationValidationQueue(opScope)).filter((v) => !scope.selectedBrandId || v.brandId === scope.selectedBrandId);
+  const openActions = data.actions.open.filter((a) => isOpenStatus(a.status)).sort((x, y) => (x.dueDate ?? "9999").localeCompare(y.dueDate ?? "9999"));
 
   return (
     <>
-      <PageHeader eyebrow="Marketing" title="Command Center" subtitle={<>Quoi pousser maintenant, pourquoi, avec quel budget, par qui et pour quand. Ventes au {fmtDate(refDate.ref)}{refDate.staleDays > 3 ? ` (retard ${refDate.staleDays} j)` : ""} · calculé à {fmtTime(data.decisions.computedAt)} · période {data.period.label}.</>}
-        actions={<><Link href="/marketing/studio" className="btn-secondary btn-sm">Studio créatif</Link><Link href="/marketing/plan" className="btn-secondary btn-sm">Plan marketing</Link><Link href="/marketing/priorites" className="btn-primary btn-sm">Priorités & actions</Link></>}>
+      <PageHeader eyebrow="Marketing" title="Pilotage" subtitle={<>Quoi pousser maintenant, ce qui est en retard, ce qui attend une validation. Ventes au {fmtDate(refDate.ref)}{refDate.staleDays > 3 ? ` (retard ${refDate.staleDays} j)` : ""} · calculé à {fmtTime(data.decisions.computedAt)} · période {data.period.label}.</>}
+        actions={<><Link href="/marketing/plan" className="btn-secondary btn-sm">Plan & budget</Link><Link href="/marketing/activations" className="btn-secondary btn-sm">Opérations</Link>{canCreateOperation && <Link href="/marketing/activations/nouvelle" className="btn-primary btn-sm">+ Opération</Link>}</>}>
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <Tabs current={href(scope.selectedBrandId, period)} tabs={[{ href: href(null, period), label: "Toutes les marques" }, ...scope.allBrands.map((b) => ({ href: href(b.id, period), label: b.name }))]} />
           <div className="flex gap-1 ml-auto">{PERIODS.map((p) => <Link key={p.key} href={href(scope.selectedBrandId, p.key)} className={clsx("text-[12px] px-2 py-1 rounded-md border", p.key === period ? "bg-black/5 border-line-2" : "border-line hover:border-line-2")}>{p.label}</Link>)}</div>
@@ -76,8 +106,8 @@ export default async function MarketingCommandCenterPage(props: { searchParams: 
           <Kpi label={`CA objectif ${data.year}`} value={sel ? money(annualTarget?.objective ?? null) : "par marque"} sub={sel ? (annualTarget?.objective ? `réalisé ${fmtMAD(annualTarget.realized, { compact: true })} (${fmtPct(annualTarget.pct ?? 0, 0)})` : "non renseigné") : "choisir une marque"} />
           <Kpi label="Objectif du mois" value={sel ? (targets!.monthly.pct === null ? "—" : fmtPct(targets!.monthly.pct, 0)) : `${data.brands.filter((b) => b.overview.targets.monthly.forecastPct !== null && b.overview.targets.monthly.forecastPct < 100).length} en retard`} sub={sel ? (targets!.monthly.forecastPct === null ? "non renseigné" : `projection ${fmtPct(targets!.monthly.forecastPct, 0)} au rythme actuel`) : "marques sous leur objectif projeté"} tone={sel && targets!.monthly.forecastPct !== null ? (targets!.monthly.forecastPct >= 100 ? "green" : "orange") : undefined} />
           <Kpi label="Campagnes actives" value={fmtNum(data.totals.activeCampaigns)} sub={`${data.totals.plannedCampaigns} planifiée(s) · ${data.totals.pendingContent} contenu(s) à publier`} />
-          <Kpi label="Actions ouvertes" value={fmtNum(data.actions.counters.open)} sub={`${fmtMAD(data.actions.counters.budgetOpen, { compact: true })} prévus · ${data.actions.counters.blocked} bloquée(s)`} href="/marketing/priorites" />
-          <Kpi label="En retard" value={fmtNum(data.actions.counters.late)} tone={data.actions.counters.late > 0 ? "red" : "green"} sub="actions dont l'échéance est passée" href="/marketing/priorites" />
+          <Kpi label="Actions ouvertes" value={fmtNum(data.actions.counters.open)} sub={`${fmtMAD(data.actions.counters.budgetOpen, { compact: true })} prévus · ${data.actions.counters.blocked} bloquée(s)`} href="#actions-au-plan" />
+          <Kpi label="En retard" value={fmtNum(data.actions.counters.late)} tone={data.actions.counters.late > 0 ? "red" : "green"} sub="actions dont l'échéance est passée" href="#actions-au-plan" />
         </div>
       </PageHeader>
 
@@ -85,7 +115,7 @@ export default async function MarketingCommandCenterPage(props: { searchParams: 
         <>
           <Section title={`Quoi pousser maintenant — ${sel.name}`} description="Moteur de décision : ventes × stock × marge × Ads, règles de l'Action Center et intelligence Ads, structure commune. Approuver crée l'action et sa tâche ; rien n'est exécuté sans ce clic.">
             {data.decisions.notes.length > 0 && <ul className="text-[12px] text-amber-800 mb-2 space-y-0.5">{data.decisions.notes.map((n, i) => <li key={i}>{n}</li>)}</ul>}
-            {sel.proposed.length === 0 ? <Card><p className="text-[13px] text-ink-2">Aucune action à recommander sur {data.period.label} : ventes stables et stock sain, ou données insuffisantes. Les actions planifiées restent dans Priorités & actions.</p></Card> : (
+            {sel.proposed.length === 0 ? <Card><p className="text-[13px] text-ink-2">Aucune action à recommander sur {data.period.label} : ventes stables et stock sain, ou données insuffisantes. Les actions déjà au plan sont listées plus bas.</p></Card> : (
               <div className="space-y-3">{sel.proposed.slice(0, maxDecisions).map((d, i) => <DecisionCard key={d.id} d={d} rank={i + 1} users={users} canDecide={canCreate} back={back} />)}</div>
             )}
             {sel.doNotPush.length > 0 && (
@@ -96,14 +126,14 @@ export default async function MarketingCommandCenterPage(props: { searchParams: 
             <Card title="Plan et budget" action={sel.plan ? <Link href={`/marketing/plan/${sel.plan.id}`} className="text-[12px] text-accent">Ouvrir le plan</Link> : <Link href="/marketing/plan" className="text-[12px] text-accent">Créer un plan</Link>}>
               {sel.plan ? <p className="text-[13px]"><b>{sel.plan.name}</b> · <Badge tone={PLAN_STATUS[sel.plan.status as keyof typeof PLAN_STATUS]?.tone ?? "gray"}>{PLAN_STATUS[sel.plan.status as keyof typeof PLAN_STATUS]?.label ?? sel.plan.status}</Badge> · {fmtDateShort(sel.plan.periodStart)} → {fmtDateShort(sel.plan.periodEnd)}</p> : <p className="text-[13px] text-muted">Aucun plan pour {data.year}. Le budget et l&apos;objectif existants seront repris par le plan.</p>}
               {sel.budget.hasBudget && <><Progress value={Math.min(100, sel.budget.consumedPct ?? 0)} tone={(sel.budget.consumedPct ?? 0) > 90 ? "orange" : "accent"} className="mt-3" /><div className="text-[12px] text-muted mt-1">Engagé {fmtMAD(sel.budget.consumed, { compact: true })} sur {fmtMAD(sel.budget.annual, { compact: true })} · prévu non engagé {fmtMAD(sel.budget.planned, { compact: true })}</div></>}
-              <div className="mt-3 text-[12px] text-muted">{sel.overview.marketing ? `${sel.overview.marketing.activeCampaigns} campagne(s) active(s) · ${sel.overview.marketing.upcomingContents} contenu(s) à venir · ${sel.overview.marketing.runningActivations} activation(s) en cours` : "activité marketing non accessible"}</div>
+              <div className="mt-3 text-[12px] text-muted">{sel.overview.marketing ? `${sel.overview.marketing.activeCampaigns} campagne(s) active(s) · ${sel.overview.marketing.upcomingContents} contenu(s) à venir · ${sel.overview.marketing.runningActivations} opération(s) en cours` : "activité marketing non accessible"}</div>
             </Card>
-            <Card title="Alertes stock" action={<Link href={`/marketing/agent?brand=${sel.id}`} className="text-[12px] text-accent">Agent marketing</Link>}>
+            <Card title="Alertes stock" action={<Link href={`/marques/${sel.id}`} className="text-[12px] text-accent">Fiche marque</Link>}>
               {sel.stockAlerts.length === 0 ? <p className="text-[13px] text-muted">Aucun produit en risque de rupture.</p> : (
                 <ul className="space-y-1 text-[12.5px]">{sel.stockAlerts.slice(0, 6).map((p) => <li key={p.productId} className="flex items-center gap-2"><Badge tone="red">{p.stock ? STOCK_RISK_LABELS[p.stock.risk] : "stock"}</Badge><Link href={`/produits/${p.productId}`} className="hover:underline flex-1 truncate">{p.name}</Link><span className="text-muted">{p.stock?.daysOfStock !== null && p.stock?.daysOfStock !== undefined ? `${p.stock.daysOfStock} j` : "—"}</span></li>)}</ul>
               )}
             </Card>
-            <Card title="Actions en retard" action={<Link href={`/marketing/priorites?brand=${sel.id}`} className="text-[12px] text-accent">Toutes les actions</Link>}>
+            <Card title="Actions en retard" action={<Link href="#actions-au-plan" className="text-[12px] text-accent">Toutes les actions</Link>}>
               {data.actions.late.length === 0 ? <p className="text-[13px] text-muted">Aucune action en retard.</p> : (
                 <ul className="space-y-1 text-[12.5px]">{data.actions.late.slice(0, 6).map((a) => <li key={a.id} className="flex items-center gap-2"><StatusBadge status={a.status} /><Link href={`/marketing/priorites/${a.id}`} className="hover:underline flex-1 truncate">{a.title}</Link><span className="text-red">{a.dueDate ? fmtDateShort(a.dueDate) : ""}</span><span className="text-muted">{a.assigneeName ?? "non assignée"}</span></li>)}</ul>
               )}
@@ -115,6 +145,33 @@ export default async function MarketingCommandCenterPage(props: { searchParams: 
           <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">{data.brands.map((c) => <BrandTile key={c.id} c={c} href={href(c.id, period)} />)}</div>
         </Section>
       )}
+
+      <Section title={`À valider (${toValidate.length})`} description="Opérations dont le budget prévu dépasse le seuil de validation : elles attendent la direction avant de partir." action={toValidate.length > 0 ? <Link href="/marketing/activations/validation" className="btn-secondary btn-sm">Ouvrir la file de validation</Link> : undefined}>
+        <Card>
+          {toValidate.length === 0 ? <p className="text-[13px] text-muted">Aucune opération n&apos;attend de validation.</p> : (
+            <ul className="text-[12.5px]">{toValidate.slice(0, 8).map((v) => (
+              <li key={v.id} className="flex flex-wrap items-center gap-2 py-1.5 border-b border-line last:border-0">
+                {v.brand && <BrandDot color={v.color ?? "#999"} />}
+                <Link href={`/marketing/activations/${v.id}`} className="font-medium hover:underline flex-1 min-w-40 truncate">{v.name}</Link>
+                <span className="text-muted">{fmtDateShort(v.date)}{v.city ? ` · ${v.city}` : ""}</span>
+                <span className="font-medium">{fmtMAD(v.planned, { compact: true })}</span>
+                <span className="text-muted">{v.createdBy ?? v.responsible ?? "—"}</span>
+              </li>
+            ))}</ul>
+          )}
+        </Card>
+      </Section>
+
+      <div id="actions-au-plan" className="scroll-mt-20">
+        <Section title={`Actions au plan (${openActions.length} ouverte${openActions.length > 1 ? "s" : ""})`} description="Chaque action est une tâche : responsable, échéance et statut vivent dans Tâches. Les plus urgentes d'abord.">
+          <Card>
+            {openActions.length === 0 ? <p className="text-[13px] text-muted">Aucune action ouverte{sel ? ` pour ${sel.name}` : ""}. Une action naît d&apos;une décision approuvée ci-dessus ou du plan marketing.</p> : (
+              <ul>{openActions.slice(0, 20).map((a) => <ActionItem key={a.id} a={a} todayIso={data.todayIso} canEdit={canEdit} back={`${back}#actions-au-plan`} />)}</ul>
+            )}
+            {openActions.length > 20 && <Link href="/taches" className="btn-ghost btn-sm mt-2">Les {openActions.length - 20} autres dans Tâches</Link>}
+          </Card>
+        </Section>
+      </div>
 
       <Section title="Alertes et opportunités" description="Budget, performance publicitaire, stock et exécution : ce qui demande un arbitrage cette semaine.">
         <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-3">
@@ -136,7 +193,7 @@ export default async function MarketingCommandCenterPage(props: { searchParams: 
         </div>
       </Section>
 
-      <div className="text-[11.5px] text-faint">Corrélation ≠ attribution : un CA n&apos;est « attribué » que s&apos;il est mesuré (conversion régie, code promo, montant saisi). Les décisions sont des recommandations calculées ; la validation humaine reste la règle. Analyses détaillées : <Link href="/marketing/analytics" className="underline">Analytics</Link>.</div>
+      <div className="text-[11.5px] text-faint">Corrélation ≠ attribution : un CA n&apos;est « attribué » que s&apos;il est mesuré (conversion régie, code promo, montant saisi). Les décisions sont des recommandations calculées ; la validation humaine reste la règle. Résultats détaillés : <Link href="/marketing/analytics/plan" className="underline">Plan & budget → Résultats</Link>.</div>
     </>
   );
 }

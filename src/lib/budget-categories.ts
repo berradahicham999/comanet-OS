@@ -73,7 +73,7 @@ export const MARKETING_BUCKET_LABELS: Record<string, string> = {
   GOODIES: "Goodies",
   PLV: "PLV & print",
   INFLUENCE: "Influence & UGC",
-  ACTIVATIONS: "Activations (autres postes)",
+  ACTIVATIONS: "Opérations (autres postes)",
   AUTRES: "Autres dépenses marketing",
 };
 /** Ordre d'affichage : publicité, échantillons (par nature), matériel, influence, activations, autres. */

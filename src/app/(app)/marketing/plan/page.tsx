@@ -8,6 +8,7 @@ import { PageHeader, Card, Badge, BrandDot, Empty, Progress, Section } from "@/c
 import { fmtMAD, fmtPct, fmtDateShort } from "@/lib/format";
 import { savePlanAction } from "./actions";
 
+import { MarketingSectionTabs } from "@/components/marketing-sections";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Plan marketing" };
 
@@ -20,6 +21,7 @@ export default async function MarketingPlansPage() {
 
   return (
     <>
+      <MarketingSectionTabs section="plan" current="/marketing/plan" />
       <PageHeader eyebrow="Marketing" title="Plan marketing" subtitle="Objectifs commerciaux → budget → allocation par canal → axes → plan mensuel → actions. Le budget du plan est l'enveloppe annuelle de la marque, son CA objectif l'objectif de vente : rien n'est saisi deux fois."
         actions={<Link href="/marketing/budgets" className="btn-secondary btn-sm">Budget & dépenses</Link>} />
 

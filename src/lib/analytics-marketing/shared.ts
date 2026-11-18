@@ -86,9 +86,10 @@ export const ATTRIBUTION_LABELS: Record<AttributionMode, string> = {
  */
 export type Measured<T = number> =
   | { ok: true; value: T; /** Complétude 0-1 de la donnée sous-jacente, si elle a un sens. */ completeness?: number | null; note?: string }
-  | { ok: false; reason: string; /** Qui doit alimenter (libellé de rôle). */ owner?: string; /** Lien vers l'écran Qualité ou la fiche à corriger. */ href?: string };
+  | { ok: false; reason: string; /** Qui doit alimenter (libellé de rôle). */ owner?: string; /** Lien vers la fiche à corriger, s'il y en a une. */ href?: string };
 
-export const insufficient = (reason: string, owner?: string, href = "/marketing/analytics/qualite"): Measured<never> => ({ ok: false, reason, owner, href });
+/** L'écran Qualité est masqué depuis la simplification du 18/11/2026 : sans lien précis, la raison et le responsable suffisent. */
+export const insufficient = (reason: string, owner?: string, href?: string): Measured<never> => ({ ok: false, reason, owner, ...(href ? { href } : {}) });
 export const measured = <T,>(value: T, completeness?: number | null, note?: string): Measured<T> => ({ ok: true, value, completeness, note });
 
 /** Division sûre : `null` si le dénominateur est nul ou absent (jamais 0 ni Infinity). */

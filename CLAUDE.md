@@ -74,7 +74,7 @@ drizzle/              migrations SQL + meta/_journal.json
 ```
 
 Modules : Cockpit, Action Center, Ventes, Clients (dont **CRM commercial** : Ma tournée, Suivi des visites, Portefeuilles, onglet Suivi commercial), Produits, Marques, Stock,
-**Marketing** (Command Center, plan marketing, priorités & actions, campagnes, Influence, Digital Ads, contenu, **Studio créatif**, activations, matériel & goodies, budget & dépenses, analytics, agent marketing),
+**Marketing** — cinq entrées depuis le 18/11/2026 : Pilotage (`/marketing`), Opérations (opérations = table `activations`, onglets Campagnes, Influence, Goodies & matériel), Contenu, Digital Ads, Plan & budget (plan, budget & dépenses, résultats : plan vs réel et revue par marque) ; Studio créatif, Bibliothèque, Générateur, Priorités, Agent et sous-pages analytics sont masqués (voir « Marketing simplifié »),
 Terrain (animations, animatrices, saisie), **Médical** (médecins, Ma journée avec chrono et GPS, suivi terrain, ordonnances, analyses et tournée), Réglementaire, Tâches, Imports, Paramètres,
 **Gestion commerciale** (préparation de la bascule, stock réel, fournisseurs, pièces de vente : BL, factures, avoirs, PDF ; achats : commandes, réceptions, factures fournisseurs, retours ; inventaires ; règlements, relances, envoi au comptable ; bascule).
 
@@ -421,6 +421,16 @@ irréversible ou externe ; tout ce qui touche l'argent (enveloppes annuelles, en
 passe par Administration ou l'interrupteur « Valider une dépense » ; personne ne modifie ses propres
 droits ; le dernier administrateur ne peut être ni rétrogradé ni suspendu. La prévisualisation
 « en tant que » pose un cookie signé et refuse toute server action.
+
+**Marketing simplifié** (décision d'Hicham, 18/11/2026). Menu Marketing à cinq entrées (`nav-config.ts`, `NavItem.match` pour les pages
+regroupées, onglets `src/components/marketing-sections.tsx`). Une seule unité de travail : l'**opération** (libellé visible ; la table, les
+routes `/marketing/activations` et les identifiants restent `activations`). Masqués sans rien supprimer (code, tables, données) : Studio créatif,
+Bibliothèque d'actions, liste Priorités et Générateur, page Agent, synthèse analytics, 360, canaux, marques, produits, qualité. Chaque adresse
+masquée est redirigée côté serveur (`redirects()` de `next.config.ts`, liste unique `src/lib/marketing-redirects.ts`) vers Pilotage, Opérations,
+Contenu ou Résultats ; la fiche d'une action au plan (`/marketing/priorites/<id>`) reste ouverte. Pilotage = quoi pousser, « À valider »
+(`activationValidationQueue()`), « Actions au plan » (`listActions()` via le Command Center, statut par `setActionStatusAction`). Outils copilote
+`generate_marketing_actions` et `get_creative_opportunities` retirés du registre (code gardé). `tests/marketing-simplifie.test.ts` interdit tout
+lien de `src/` vers une page masquée. Le copilote ⌘K reste.
 
 **Marketing Operating System** (`docs/guide-marketing-os.md`, audit et plan `docs/plan-marketing-os.md`, migration 0044). La
 boucle objectifs → plan → budget → allocation → actions → exécution → dépenses → résultats → analyse → réallocation, sans

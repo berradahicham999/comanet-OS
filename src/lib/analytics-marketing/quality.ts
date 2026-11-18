@@ -127,7 +127,7 @@ export async function qualityReport(): Promise<QualityReport> {
     SALES: { label: "Ventes Sage (sell-in)", href: "/ventes" }, ANIMATIONS: { label: "Animations terrain (sell-out)", href: "/terrain" },
     AD_METRICS: { label: "Régie publicitaire", href: "/marketing/ads" }, EXPENSES: { label: "Dépenses marketing", href: "/marketing/budgets" },
     COLLABORATIONS: { label: "Collaborations influence", href: "/marketing/influence" }, CONTENTS: { label: "Contenus éditoriaux", href: "/marketing/planning" },
-    ACTIVATIONS: { label: "Activations", href: "/marketing/activations" }, STOCK: { label: "Instantanés de stock", href: "/stock" }, SAMPLES: { label: "Échantillons médicaux remis", href: "/medical/echantillons" },
+    ACTIVATIONS: { label: "Opérations", href: "/marketing/activations" }, STOCK: { label: "Instantanés de stock", href: "/stock" }, SAMPLES: { label: "Échantillons médicaux remis", href: "/medical/echantillons" },
   };
   const coverage: Coverage[] = cov.rows.map((c) => ({ source: c.source, label: LABELS[c.source]?.label ?? c.source, rows: Number(c.rows), firstDay: c.first_day, lastDay: c.last_day, href: LABELS[c.source]?.href ?? "/" }));
 

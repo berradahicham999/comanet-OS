@@ -8,7 +8,7 @@ import { PageHeader, Card, BrandDot, Empty, Tabs } from "@/components/ui";
 import { fmtMAD, iso, today } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Comparatif des activations" };
+export const metadata = { title: "Comparatif des opérations" };
 
 type SP = { dim?: string; brand?: string; type?: string; annee?: string };
 
@@ -26,7 +26,7 @@ export default async function ComparatifPage(props: { searchParams: Promise<SP> 
 
   return (
     <>
-      <PageHeader eyebrow={<Link href="/marketing/activations" className="hover:underline">Activations</Link>} title="Comparatif" subtitle="Activations terminées : coût complet, résultats et écart de ventes observé, pour savoir où mettre le budget l'année prochaine." />
+      <PageHeader eyebrow={<Link href="/marketing/activations" className="hover:underline">Opérations</Link>} title="Comparatif" subtitle="Opérations terminées : coût complet, résultats et écart de ventes observé, pour savoir où mettre le budget l'année prochaine." />
       <form method="get" className="card card-pad mb-4 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[13px]">
         <input type="hidden" name="dim" value={dim} />
         <select name="annee" defaultValue={String(year)} className="select h-9">{[year - 1, year, year + 1].map((y) => <option key={y} value={y}>{y}</option>)}</select>
@@ -37,11 +37,11 @@ export default async function ComparatifPage(props: { searchParams: Promise<SP> 
       <div className="mb-3"><Tabs current={qs({ dim })} tabs={[{ href: qs({ dim: "type" }), label: "Par type" }, { href: qs({ dim: "brand" }), label: "Par marque" }, { href: qs({ dim: "city" }), label: "Par ville" }]} /></div>
 
       {rows.length === 0 ? (
-        <Empty title="Aucune activation terminée sur cette période" hint="Le comparatif se remplit dès qu'une activation passe « Terminée » : ses coûts, ses résultats et l'écart de ventes observé sont alors comparés." />
+        <Empty title="Aucune opération terminée sur cette période" hint="Le comparatif se remplit dès qu'une opération passe « Terminée » : ses coûts, ses résultats et l'écart de ventes observé sont alors comparés." />
       ) : (
         <Card pad={false}>
           <div className="table-wrap"><table className="w-full text-[13px]">
-            <thead><tr className="text-left text-muted"><th className="px-3 py-2">{dim === "type" ? "Type" : dim === "brand" ? "Marque" : "Ville"}</th><th className="px-3 py-2 text-right">Activations</th><th className="px-3 py-2 text-right">Coût complet</th><th className="px-3 py-2 text-right">Contacts</th><th className="px-3 py-2 text-right">Coût / contact</th><th className="px-3 py-2 text-right">Pharmacies</th><th className="px-3 py-2 text-right">CA mesuré</th><th className="px-3 py-2 text-right">Écart ventes (corrélation)</th><th className="px-3 py-2 text-right">Écart / coût</th></tr></thead>
+            <thead><tr className="text-left text-muted"><th className="px-3 py-2">{dim === "type" ? "Type" : dim === "brand" ? "Marque" : "Ville"}</th><th className="px-3 py-2 text-right">Opérations</th><th className="px-3 py-2 text-right">Coût complet</th><th className="px-3 py-2 text-right">Contacts</th><th className="px-3 py-2 text-right">Coût / contact</th><th className="px-3 py-2 text-right">Pharmacies</th><th className="px-3 py-2 text-right">CA mesuré</th><th className="px-3 py-2 text-right">Écart ventes (corrélation)</th><th className="px-3 py-2 text-right">Écart / coût</th></tr></thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.key} className="border-t border-line">
@@ -59,7 +59,7 @@ export default async function ComparatifPage(props: { searchParams: Promise<SP> 
               <tr className="border-t-2 border-line font-medium"><td className="px-3 py-2">Total</td><td className="px-3 py-2 text-right tabular-nums">{totals.count}</td><td className="px-3 py-2 text-right tabular-nums">{fmtMAD(totals.cost)}</td><td colSpan={4} /><td className="px-3 py-2 text-right tabular-nums">{totals.measured ? `${totals.inc >= 0 ? "+" : "−"}${fmtMAD(Math.abs(totals.inc))}` : "—"}</td><td className="px-3 py-2 text-right tabular-nums">{totals.measured && totals.cost > 0 ? `× ${(totals.inc / totals.cost).toFixed(2)}` : "—"}</td></tr>
             </tbody>
           </table></div>
-          <p className="px-3 py-2 text-[11px] text-muted">L&apos;écart de ventes est le sell-in HT observé pendant et après chaque activation, comparé au rythme d&apos;avant, sur les points de vente et produits rattachés. Corrélation observée, jamais causalité. Une activation dont la fenêtre « après » n&apos;est pas écoulée n&apos;entre pas dans l&apos;écart.</p>
+          <p className="px-3 py-2 text-[11px] text-muted">L&apos;écart de ventes est le sell-in HT observé pendant et après chaque opération, comparé au rythme d&apos;avant, sur les points de vente et produits rattachés. Corrélation observée, jamais causalité. Une opération dont la fenêtre « après » n&apos;est pas écoulée n&apos;entre pas dans l&apos;écart.</p>
         </Card>
       )}
     </>

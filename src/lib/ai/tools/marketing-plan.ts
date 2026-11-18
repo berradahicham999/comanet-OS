@@ -75,7 +75,7 @@ const actionsSchema = z.object({
 export const getMarketingActions: AiTool<typeof actionsSchema> = {
   name: "get_marketing_actions",
   description:
-    "Actions marketing (Priorités & actions) : titre, marque, produit, canal, budget prévu, engagé, responsable, échéance, retard, priorité, statut, source (plan, décision, manuelle), objectif, justification et résultat attendu. Répond à « qui doit faire quoi et pour quand ? » et « quelles actions sont prioritaires cette semaine ? ».",
+    "Actions marketing au plan (Marketing → Pilotage, et Tâches) : titre, marque, produit, canal, budget prévu, engagé, responsable, échéance, retard, priorité, statut, source (plan, décision, manuelle), objectif, justification et résultat attendu. Répond à « qui doit faire quoi et pour quand ? » et « quelles actions sont prioritaires cette semaine ? ».",
   module: "marketing",
   action: "view",
   schema: actionsSchema,
@@ -93,7 +93,7 @@ export const getMarketingActions: AiTool<typeof actionsSchema> = {
       actions: list.map((a) => ({ title: a.title, brand: a.brandName, product: a.productName, channel: a.category ? BUDGET_CATEGORY_LABELS[a.category] : null, budget_mad: round(a.budgetPlanned), committed_mad: round(a.committed), assignee: a.assigneeName ?? "non assignée", due: a.dueDate, late_days: actionLateDays(a, todayIso), priority: a.priority, status: a.status, source: ACTION_SOURCE_LABELS[a.source], plan: a.planName, axis: a.axisName, month: a.month?.slice(0, 7) ?? null, objective: a.objective, why: a.why, expected_result: a.expectedResult, href: `/marketing/priorites/${a.id}` })),
       tags: { budget_mad: "CONFIRMED (prévu saisi)", committed_mad: "CALCULATED (dépenses rattachées, COMMITTED + SPENT)" },
     };
-    return { available: true, source: "Priorités & actions COMANET OS (marketing_actions + tasks)", scope: scopeLabel(ctx.access, [brandName ? `marque ${brandName}` : null, input.month ? `mois ${input.month}` : null]), data, rowCount: list.length, links: [{ label: "Priorités & actions", href: `/marketing/priorites${brandId ? `?brand=${brandId}` : ""}` }] };
+    return { available: true, source: "Actions au plan COMANET OS (marketing_actions + tasks)", scope: scopeLabel(ctx.access, [brandName ? `marque ${brandName}` : null, input.month ? `mois ${input.month}` : null]), data, rowCount: list.length, links: [{ label: "Pilotage · actions au plan", href: `/marketing${brandId ? `?brand=${brandId}` : ""}#actions-au-plan` }] };
   },
 };
 
@@ -130,13 +130,13 @@ export const getUnifiedDecisions: AiTool<typeof decisionsSchema> = {
       do_not_push: set.doNotPush.slice(0, 5).map((d) => line(d, null)),
       decided: input.include_decided ? set.decided.slice(0, 20).map((d) => line(d, null)) : undefined,
       notes: set.notes, legend: DATA_TAGS_LEGEND,
-      rule: "Le moteur recommande ; la personne approuve (crée l'action et sa tâche) ou refuse dans Priorités & actions. Rien n'est exécuté automatiquement.",
+      rule: "Le moteur recommande ; la personne approuve (crée l'action et sa tâche) ou refuse dans Marketing → Pilotage. Rien n'est exécuté automatiquement.",
     };
     const n = set.proposed.length + set.doNotPush.length;
     if (n === 0 && !set.decided.length) return unavailable(`Aucune décision pour ${brand.name} sur la période : ventes stables et stock sain, ou données insuffisantes.`, "Vérifier les imports de ventes et de stock, la synchronisation Meta et les objectifs.", "Couche de décision unifiée COMANET OS");
     const notes = freshnessNotes(ctx);
     notes.push(...set.notes);
-    return { available: true, source: "Couche de décision unifiée (règles Action Center · intelligence Ads · intelligence marketing)", scope: scopeLabel(ctx.access, [`marque ${brand.name}`]), data, rowCount: n + set.decided.length, links: [{ label: "Command Center", href: `/marketing?brand=${brand.id}` }, { label: "Priorités & actions", href: `/marketing/priorites?brand=${brand.id}` }], notes };
+    return { available: true, source: "Couche de décision unifiée (règles Action Center · intelligence Ads · intelligence marketing)", scope: scopeLabel(ctx.access, [`marque ${brand.name}`]), data, rowCount: n + set.decided.length, links: [{ label: "Pilotage", href: `/marketing?brand=${brand.id}` }], notes };
   },
 };
 
@@ -187,6 +187,6 @@ export const generateMarketingActions: AiTool<typeof genSchema> = {
       excluded: r.excluded.slice(0, 10).map((e) => `${e.name} — ${e.reason}`), notes: r.notes,
       rule: "Les résultats attendus sont des hypothèses du modèle (INFERRED), jamais une mesure ; un CA n'est attribué que par code promo ou montant saisi. La personne choisit et ajoute au plan.",
     };
-    return { available: true, source: "Générateur d'actions COMANET (bibliothèque d'actions × données de la marque)", scope: scopeLabel(ctx.access, [`marque ${brand.name}`]), data, rowCount: r.options.length, links: [{ label: "Ouvrir le générateur", href: `/marketing/priorites/generer?${generatorQuery(gi)}` }], notes: freshnessNotes(ctx) };
+    return { available: true, source: "Générateur d'actions COMANET (bibliothèque d'actions × données de la marque)", scope: scopeLabel(ctx.access, [`marque ${brand.name}`]), data, rowCount: r.options.length, links: [{ label: "Pilotage", href: `/marketing?brand=${brand.id}` }], notes: freshnessNotes(ctx) };
   },
 };

@@ -187,7 +187,7 @@ export default async function DocumentPage(props: { params: Promise<{ id: string
         {doc.client.isInternal
           ? <p>Aucun CA. {draft ? "À la validation, les produits deviendront une charge marketing au coût de revient figé." : status === "ANNULE" ? "BL annulé : charges retirées, matériel remis en stock." : <>Charge marketing : <b>{fmtMoney(String(charged))} MAD</b>{outputs[0]?.label ? ` (${outputs[0].label})` : ""}, comptée dans le budget et le P&L.</>}</p>
           : <p>Le matériel offert ne fait pas de CA ; il est déjà passé en charge à l&apos;achat. La sortie est tracée sur ce client (nature « commercial / trade »).</p>}
-        {activation && <p>Activation : <Link href={`/marketing/activations/${doc.activationId}`} className="hover:underline">{activation.name}</Link></p>}
+        {activation && <p>Opération : <Link href={`/marketing/activations/${doc.activationId}`} className="hover:underline">{activation.name}</Link></p>}
         {alerts.map((x) => <p key={x.lineId} className="text-orange">{costIssueLabel(x)}</p>)}
       </div>
     </Card>

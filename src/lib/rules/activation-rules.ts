@@ -25,7 +25,7 @@ const NOTIF: Record<LatenessKind, { type: string; body: (a: ActivationCard) => s
 
 export const activationLateRule: Rule = {
   id: "activation-late",
-  label: "Activations en retard",
+  label: "Opérations en retard",
   description: "Checklist incomplète à J−7, résultats non saisis après la fin, budget engagé au-delà du prévu, statut non mis à jour.",
   async run({ settings, now }) {
     const t = iso(now);
@@ -56,10 +56,10 @@ export const activationLateRule: Rule = {
         ...(k === "CHECKLIST" ? [{ label: "Checklist", value: `${a.checklistDone}/${a.checklistTotal}` }] : []),
         ...(k === "BUDGET" ? [{ label: "Prévu", value: fmtMAD(a.planned) }, { label: "Engagé + matériel", value: fmtMAD(a.committed + a.materials) }] : []),
       ],
-      why: k === "CHECKLIST" ? `L'activation démarre dans moins de ${settings.activations.checklistAlertDays} jours et des étapes de préparation ne sont pas cochées : risque de PLV absente, d'échantillons manquants ou de lieu non confirmé.`
-        : k === "RESULTATS" ? `Terminée depuis plus de ${settings.activations.resultsDelayDays} jours sans résultats saisis : impossible de calculer le coût par contact ni de comparer cette activation aux autres.`
-        : k === "BUDGET" ? `L'engagé (devis, factures, matériel sorti) dépasse le prévu validé de ${Math.round(a.overrunPct)} % : le Command Center affiche un dépassement sur la marque.`
-        : "La date est passée et le statut n'a pas bougé : soit l'activation n'a pas eu lieu, soit la fiche n'est pas à jour, et les rappels de résultats ne partiront pas.",
+      why: k === "CHECKLIST" ? `L'opération démarre dans moins de ${settings.activations.checklistAlertDays} jours et des étapes de préparation ne sont pas cochées : risque de PLV absente, d'échantillons manquants ou de lieu non confirmé.`
+        : k === "RESULTATS" ? `Terminée depuis plus de ${settings.activations.resultsDelayDays} jours sans résultats saisis : impossible de calculer le coût par contact ni de comparer cette opération aux autres.`
+        : k === "BUDGET" ? `L'engagé (devis, factures, matériel sorti) dépasse le prévu validé de ${Math.round(a.overrunPct)} % : le budget marketing de la marque affiche un dépassement.`
+        : "La date est passée et le statut n'a pas bougé : soit l'opération n'a pas eu lieu, soit la fiche n'est pas à jour, et les rappels de résultats ne partiront pas.",
       action: k === "CHECKLIST" ? "Ouvrir la fiche, cocher ce qui est fait, et traiter ou réassigner les étapes restantes." : k === "RESULTATS" ? "Saisir les résultats sur la fiche (bloc « Résultats »), puis passer à « Mesurée »." : k === "BUDGET" ? "Vérifier les lignes budgétaires ; si le dépassement est réel, le faire valider ou réduire un poste." : "Mettre le statut à jour (Démarrer / Terminer) ou décaler les dates.",
       task: { title: `${LATENESS_LABELS[k]} : ${a.name}`, dueInDays: k === "CHECKLIST" ? 1 : 3, role: "MARKETING", priority: k === "CHECKLIST" || k === "BUDGET" ? "HIGH" : "MEDIUM" },
       entity: { type: "activation", id: a.id, href: `/marketing/activations/${a.id}` },
@@ -89,7 +89,7 @@ export const inventoryLowRule: Rule = {
         { label: "Sorties 90 j", value: String(i.outQty90) },
         { label: "Coût unitaire", value: fmtMAD(i.unitCost) },
       ],
-      why: i.status === "RUPTURE" ? "Plus aucune unité disponible : la prochaine activation qui en a besoin sera bloquée." : `Le stock est passé sous le seuil d'alerte (${i.alertThreshold}) avec ${i.outQty90} sorties sur 90 jours.`,
+      why: i.status === "RUPTURE" ? "Plus aucune unité disponible : la prochaine opération qui en a besoin sera bloquée." : `Le stock est passé sous le seuil d'alerte (${i.alertThreshold}) avec ${i.outQty90} sorties sur 90 jours.`,
       action: "Passer une commande fournisseur, puis enregistrer l'entrée sur la fiche article. Ou relever le seuil s'il est trop haut.",
       task: { title: `Réapprovisionner : ${i.name}`, dueInDays: 7, role: "MARKETING", priority: i.status === "RUPTURE" ? "HIGH" : "MEDIUM" },
       entity: { type: "inventory", id: i.id, href: `/marketing/materiel/${i.id}` },

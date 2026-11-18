@@ -15,7 +15,6 @@ import { BUDGET_CATEGORIES, BUDGET_CATEGORY_LABELS } from "@/lib/budget-categori
 import { PageHeader, Card, Badge, BrandDot, Section, Kpi, PriorityBadge, StatusBadge, Facts } from "@/components/ui";
 import { fmtMAD, fmtDateShort, fmtMonth, iso, today } from "@/lib/format";
 import { updateActionAction, setActionStatusAction, attachExpenseAction } from "../actions";
-import { saveFromActionAction } from "../../bibliotheque/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -57,9 +56,9 @@ export default async function MarketingActionPage(props: { params: Promise<{ id:
 
   return (
     <>
-      <PageHeader eyebrow={<Link href="/marketing/priorites" className="hover:underline">Priorités & actions</Link>} title={a.title}
+      <PageHeader eyebrow={<Link href={`/marketing?brand=${a.brandId}#actions-au-plan`} className="hover:underline">Pilotage · actions au plan</Link>} title={a.title}
         subtitle={<span className="inline-flex items-center gap-2"><BrandDot color={a.brandColor} />{a.brandName}{a.productName ? ` · ${a.productName}` : ""}{a.planName ? ` · plan ${a.planName}` : ""}{a.axisName ? ` · axe ${a.axisName}` : ""}{a.month ? ` · ${fmtMonth(a.month)}` : ""} · source {ACTION_SOURCE_LABELS[a.source]}</span>}
-        actions={<><StatusBadge status={a.status} /><PriorityBadge priority={a.priority} /><Link href={`/taches/${a.taskId}`} className="btn-secondary btn-sm">Ouvrir la tâche</Link>{spec && canEdit && <form action={saveFromActionAction}><input type="hidden" name="actionId" value={a.id} /><button className="btn-secondary btn-sm" title="Ajoute cette action, telle que réalisée, à la bibliothèque d'actions">Enregistrer comme modèle</button></form>}</>}>
+        actions={<><StatusBadge status={a.status} /><PriorityBadge priority={a.priority} /><Link href={`/taches/${a.taskId}`} className="btn-secondary btn-sm">Ouvrir la tâche</Link></>}>
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           <Kpi label="Budget prévu" value={fmtMAD(a.budgetPlanned, { compact: true })} sub={a.category ? BUDGET_CATEGORY_LABELS[a.category] : "canal non précisé"} />
           <Kpi label="Engagé + dépensé" value={fmtMAD(a.committed, { compact: true })} sub={`${a.expenses} dépense(s) rattachée(s)`} tone={a.budgetPlanned > 0 && a.committed > a.budgetPlanned ? "red" : undefined} />
@@ -149,7 +148,7 @@ export default async function MarketingActionPage(props: { params: Promise<{ id:
             <Card title="Décision d'origine">
               <p className="text-[12.5px] text-ink-2">{decision ? <>Décision <b>{DECISION_STATUS[decision.status].label.toLowerCase()}</b> issue de « {DOMAIN_LABELS[decision.domain as DecisionDomain] ?? decision.domain} ».</> : "Décision liée."}</p>
               <p className="text-[11.5px] text-faint mt-1 break-all">{a.decisionKey}</p>
-              <Link href="/marketing/priorites" className="btn-ghost btn-sm mt-2">Historique des décisions</Link>
+              <Link href={`/marketing?brand=${a.brandId}`} className="btn-ghost btn-sm mt-2">Décisions de la marque</Link>
             </Card>
           )}
           {!isOpenStatus(a.status) && <Section className="mb-0" title=""><p className="text-[12px] text-muted">Action close. La réouvrir : « À faire » ou « En cours » ci-contre.</p></Section>}

@@ -10,7 +10,7 @@ import { iso, today } from "@/lib/format";
 import { createActivation } from "../actions";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Nouvelle activation" };
+export const metadata = { title: "Nouvelle opération" };
 
 /**
  * Création d'une activation. `?rapide=1` : formulaire court pensé pour un téléphone en
@@ -33,7 +33,7 @@ export default async function NouvelleActivationPage(props: { searchParams: Prom
 
   return (
     <>
-      <PageHeader eyebrow={<Link href="/marketing/activations" className="hover:underline">Activations</Link>} title={rapide ? "Créer depuis la pharmacie" : "Nouvelle activation"}
+      <PageHeader eyebrow={<Link href="/marketing/activations" className="hover:underline">Opérations</Link>} title={rapide ? "Créer depuis la pharmacie" : "Nouvelle opération"}
         subtitle={rapide ? "Quatre champs, puis la photo sur la fiche. Le reste peut attendre le bureau." : "Un modèle pré-remplit objectif, budget prévu et checklist. Tout reste modifiable sur la fiche."}
         actions={rapide ? <Link href="/marketing/activations/nouvelle" className="btn-ghost btn-sm">Formulaire complet</Link> : <Link href="/marketing/activations/nouvelle?rapide=1" className="btn-ghost btn-sm sm:hidden">Version rapide</Link>} />
 

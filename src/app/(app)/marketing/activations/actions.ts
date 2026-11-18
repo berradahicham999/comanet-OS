@@ -38,7 +38,7 @@ function revalidate(id?: string | null) {
 async function assertScope(id: string) {
   const [refs, settings, scope] = await Promise.all([activationRefs(), getSettings(), activationScope()]);
   const a = await getActivation(id, scope, refs, settings.activations);
-  if (!a) throw new Error("Activation introuvable ou hors de votre périmètre.");
+  if (!a) throw new Error("Opération introuvable ou hors de votre périmètre.");
   return a;
 }
 
@@ -133,7 +133,7 @@ async function createFrom(formData: FormData, user: { id: string; name: string }
   await db.insert(activationStatusHistory).values({ activationId: id, fromStatus: null, toStatus: status, userId: user.id, comment: tpl ? `Création depuis le modèle « ${tpl.name} »` : "Création" });
   await syncActivationExpenses(id);
   const resp = ident.responsibleId ?? user.id;
-  if (resp !== user.id) await notify([resp], { type: "ACTIVATION_ASSIGNED", title: `Activation à piloter : ${ident.name}`, body: `Par ${user.name}, prévue le ${fmtDate(ident.date)}.`, href: `${BASE}/${id}`, entityType: "activation", entityId: id }, { except: user.id });
+  if (resp !== user.id) await notify([resp], { type: "ACTIVATION_ASSIGNED", title: `Opération à piloter : ${ident.name}`, body: `Par ${user.name}, prévue le ${fmtDate(ident.date)}.`, href: `${BASE}/${id}`, entityType: "activation", entityId: id }, { except: user.id });
   return id;
 }
 
@@ -157,7 +157,7 @@ export async function saveActivation(formData: FormData) {
   const st = refs.statuses.find((s) => s.key === cur.status);
   await syncPilotTask({ id, name: ident.name, brandId: brandIds[0] ?? null, responsibleId: ident.responsibleId, createdById: cur.createdById, date: ident.date, prepDate: ident.prepDate }, !!st?.isValidated && !st.isDone);
   if (ident.responsibleId && ident.responsibleId !== cur.responsibleId) {
-    await notify([ident.responsibleId], { type: "ACTIVATION_ASSIGNED", title: `Activation à piloter : ${ident.name}`, body: `Par ${user.name}, prévue le ${fmtDate(ident.date)}.`, href: `${BASE}/${id}`, entityType: "activation", entityId: id }, { except: user.id });
+    await notify([ident.responsibleId], { type: "ACTIVATION_ASSIGNED", title: `Opération à piloter : ${ident.name}`, body: `Par ${user.name}, prévue le ${fmtDate(ident.date)}.`, href: `${BASE}/${id}`, entityType: "activation", entityId: id }, { except: user.id });
   }
   revalidate(id);
 }
@@ -332,7 +332,7 @@ export async function deleteChecklistItem(formData: FormData) {
 
 export async function beginActivationAsset(input: { ownerId: string; kind: string; name: string; size: number; mime: string }) {
   const user = await requireActivationPermission("edit");
-  if (!isUuid(input.ownerId)) throw new Error("Activation introuvable.");
+  if (!isUuid(input.ownerId)) throw new Error("Opération introuvable.");
   await assertScope(input.ownerId);
   const kind = (ASSET_KINDS as readonly string[]).includes(input.kind) ? (input.kind as AssetKind) : "PHOTO";
   return beginAsset({ owner: { activationId: input.ownerId }, kind, name: input.name, mime: input.mime, size: input.size, uploadedById: user.id });

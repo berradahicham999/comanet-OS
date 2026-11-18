@@ -25,7 +25,7 @@ export async function transitionActivation(activationId: string, to: string, use
     date: activations.date, prepDate: activations.prepDate,
   }).from(activations).where(eq(activations.id, activationId));
   const a = rows[0];
-  if (!a) return { ok: false, reason: "Activation introuvable." };
+  if (!a) return { ok: false, reason: "Opération introuvable." };
 
   const refs = await activationRefs();
   const isValidator = await canValidateActivation(a.brandId);

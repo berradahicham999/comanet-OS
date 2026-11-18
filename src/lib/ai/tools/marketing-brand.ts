@@ -105,7 +105,7 @@ export const getBrandOverview: AiTool<typeof overviewSchema> = {
         legend: DATA_TAGS_LEGEND,
       },
       rowCount: 1 + o.topProducts.length + o.riskProducts.length + o.overstockProducts.length,
-      links: [{ label: "Ouvrir l'Agent marketing", href: `/marketing/agent?brand=${brand.id}&period=${o.period.key}` }, { label: "Fiche marque", href: `/marques/${brand.id}` }],
+      links: [{ label: "Pilotage marketing", href: `/marketing?brand=${brand.id}` }, { label: "Fiche marque", href: `/marques/${brand.id}` }],
       notes,
     };
   },
@@ -190,7 +190,7 @@ export const getMarketingRecommendations: AiTool<typeof recoSchema> = {
         legend: DATA_TAGS_LEGEND,
       },
       rowCount: decisions.length + doNotPush.length,
-      links: [{ label: "Ouvrir l'Agent marketing", href: `/marketing/agent?brand=${brand.id}&period=${r.period.key}` }],
+      links: [{ label: "Pilotage marketing", href: `/marketing?brand=${brand.id}` }],
       notes,
     };
   },

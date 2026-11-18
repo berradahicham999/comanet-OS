@@ -17,6 +17,7 @@ import { MeasuredValue, fmtCostPerResult } from "@/components/analytics";
 import { PrintButton } from "@/components/print-button";
 import { fmtMAD, fmtMonth, fmtNum, fmtPct, iso, startOfMonth, addMonths, today } from "@/lib/format";
 
+import { MarketingSectionTabs } from "@/components/marketing-sections";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Revue mensuelle de marque" };
 
@@ -70,7 +71,8 @@ export default async function BrandReviewPage(props: { params: Promise<{ brand: 
   return (
     <>
       <div className="print:hidden">
-        <PageHeader eyebrow="Marketing · Analytics" title={`Revue mensuelle — ${brand.name}`} subtitle={`${fmtMonth(start)} · générée depuis la couche de faits, comparée au mois précédent et au même mois N-1.`}
+        <MarketingSectionTabs section="plan" current="/marketing/analytics/plan" />
+        <PageHeader eyebrow="Plan & budget · Résultats" title={`Revue mensuelle — ${brand.name}`} subtitle={`${fmtMonth(start)} · générée depuis la couche de faits, comparée au mois précédent et au même mois N-1.`}
           actions={<div className="flex gap-2 items-center"><form method="get" className="flex gap-2"><input type="month" name="mois" defaultValue={month} className="h-9 rounded-lg border border-line-2 bg-surface px-2 text-sm" /><button className="btn-ghost btn-sm">Changer de mois</button></form><PrintButton /></div>} />
         <div className="flex gap-2 flex-wrap mb-4 text-xs">
           {brands.filter((b) => b.active && !b.mergedIntoId && (scope === null || scope.includes(b.id))).map((b) => <Link key={b.id} href={`/marketing/analytics/revue/${b.id}?mois=${month}`} className={b.id === brandId ? "btn-primary btn-sm" : "btn-ghost btn-sm"}>{b.name}</Link>)}

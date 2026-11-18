@@ -342,12 +342,12 @@ export function roiVerdict(i: VerdictInput, s: Pick<ActivationSettings, "roiRepe
       analysis.push(`Le rythme de vente a bougé de ${Math.round(c.upliftPct ?? 0)} % : l'écart (${roi.toFixed(2)} fois le coût) ne couvre pas le seuil « refaire » (${s.roiRepeatMin} fois, +${s.roiRepeatMinUpliftPct} %).`);
     } else {
       verdict = "ARRETER";
-      analysis.push("Aucune progression du rythme de vente après l'activation par rapport à la fenêtre avant.");
+      analysis.push("Aucune progression du rythme de vente après l'opération par rapport à la fenêtre avant.");
     }
   }
   const recommendation = verdict === "REFAIRE" ? "Reconduire ce format : même type, même cible, budget équivalent. Planifier la prochaine occurrence et réserver le matériel."
     : verdict === "AJUSTER" ? "Reconduire en réduisant le coût (matériel, lieu) ou en resserrant la cible sur les pharmacies qui ont progressé ; comparer au prochain passage."
-    : verdict === "ARRETER" ? "Ne pas reconduire sous cette forme. Réaffecter le budget à un type d'activation qui a mieux performé pour cette marque (voir le comparatif)."
+    : verdict === "ARRETER" ? "Ne pas reconduire sous cette forme. Réaffecter le budget à un type d'opération qui a mieux performé pour cette marque (voir le comparatif)."
     : c && !c.comparable ? `Attendre la fin de la fenêtre « après » (${c.daysUntilComparable} j) puis revenir sur cette fiche.` : "Compléter la fiche : dépenses, résultats, points de vente concernés.";
   return { verdict, roi, data, analysis, hypotheses, recommendation };
 }

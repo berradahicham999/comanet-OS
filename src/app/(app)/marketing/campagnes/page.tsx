@@ -9,6 +9,7 @@ import { fmtMAD, fmtNum, fmtDateShort, iso, today } from "@/lib/format";
 import { CAMPAIGN_TYPES, CAMPAIGN_STATUS, campaignTypeLabel } from "@/lib/marketing-shared";
 import { saveCampaign } from "../actions";
 
+import { MarketingSectionTabs } from "@/components/marketing-sections";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Campagnes" };
 
@@ -77,8 +78,9 @@ export default async function CampagnesPage(props: { searchParams: Promise<{ bra
 
   return (
     <>
+      <MarketingSectionTabs section="operations" current="/marketing/campagnes" />
       <PageHeader
-        eyebrow="Marketing Command Center"
+        eyebrow="Marketing · Opérations"
         title="Campagnes"
         subtitle="Chaque campagne relie un budget, des produits, des contenus, de la publicité et de l'influence. Le CA n'y est présenté comme attribué que lorsqu'il est mesuré."
         actions={<><Link href="/marketing" className="btn-secondary btn-sm">Vue d&apos;ensemble</Link><Link href="/marketing/budgets" className="btn-ghost btn-sm">Budgets</Link></>}

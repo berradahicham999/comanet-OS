@@ -293,7 +293,7 @@ export function DocumentEditor({ type, data, initial, action, creditReasons = []
         {internal && (
           <div className="rounded-xl bg-purple-soft border border-purple/30 px-3 py-2 text-[12.5px] space-y-1">
             <div><b>Sortie marketing — {data.natures[client!.outputNatureKey ?? ""] ?? "nature à compléter"}</b> : ce BL ne fait aucun CA. Les produits deviennent une charge marketing au coût de revient figé à la validation ; le matériel est tracé (déjà passé en charge à l&apos;achat).</div>
-            <label className="flex items-center gap-2"><span className="text-muted">Activation alimentée</span>
+            <label className="flex items-center gap-2"><span className="text-muted">Opération alimentée</span>
               <select className="select h-8 max-w-sm" value={activationId} onChange={(e) => setActivationId(e.target.value)}>
                 <option value="">Aucune</option>{data.activations.map((a) => <option key={a.id} value={a.id}>{a.name} — {a.date}</option>)}
               </select>
