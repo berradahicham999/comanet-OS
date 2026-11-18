@@ -20,7 +20,12 @@ type Row = {
   expiry_date: string | null; filing_date: string | null; authorization_number: string | null; missing_documents: string | null;
   physical_product: boolean | null; product_name: string | null; brand_name: string | null; brand_color: string | null;
   brand_id: string | null; responsible: string | null; open_tasks: number; events: number;
+  /** N° ATD des dépôts précédents (historique), pour retrouver un dossier par un ancien numéro. */
+  past_numbers: string | null;
 };
+
+/** Numéro comparable : sans espace, barre, tiret ni point, en minuscules (« ATD / 2024-123 » = « atd2024123 »). */
+const compact = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, "");
 
 export default async function ReglementairePage(props: { searchParams: Promise<{ view?: string; brand?: string; type?: string; q?: string }> }) {
   await requireAccess("reglementaire");
@@ -36,7 +41,8 @@ export default async function ReglementairePage(props: { searchParams: Promise<{
       rf.filing_date::text as filing_date, rf.authorization_number, rf.missing_documents, rf.physical_product,
       p.name as product_name, b.name as brand_name, b.color as brand_color, b.id as brand_id, u.name as responsible,
       (select count(*) from tasks tk where tk.entity_id = rf.id and tk.status in ('TODO','IN_PROGRESS','BLOCKED'))::int as open_tasks,
-      (select count(*) from regulatory_events e where e.file_id = rf.id)::int as events
+      (select count(*) from regulatory_events e where e.file_id = rf.id)::int as events,
+      (select string_agg(distinct e.reference, ' ') from regulatory_events e where e.file_id = rf.id and e.reference is not null) as past_numbers
     from regulatory_files rf
     left join products p on p.id = rf.product_id
     left join brands b on b.id = rf.brand_id
@@ -65,10 +71,16 @@ export default async function ReglementairePage(props: { searchParams: Promise<{
 
   const view = sp.view ?? "all";
   const q = (sp.q ?? "").trim().toLowerCase();
+  const qc = compact(q);
+  /** Le dossier est-il trouvé par un ancien N° ATD seulement (pas par le numéro en cours) ? */
+  const matchedOldNumber = (r: Row) =>
+    !!qc && !!r.past_numbers && compact(r.past_numbers).includes(qc) && !compact(r.authorization_number ?? "").includes(qc);
   let filtered = list;
   if (sp.brand) filtered = filtered.filter((r) => (r.brand_id ?? "—") === sp.brand);
   if (sp.type) filtered = filtered.filter((r) => r.variant_type === sp.type);
-  if (q) filtered = filtered.filter((r) => `${r.reference ?? ""} ${r.product_name ?? ""} ${r.dossier}`.toLowerCase().includes(q));
+  if (q) filtered = filtered.filter((r) =>
+    `${r.reference ?? ""} ${r.product_name ?? ""} ${r.dossier} ${r.authorization_number ?? ""} ${r.past_numbers ?? ""}`.toLowerCase().includes(q)
+    || (qc.length >= 3 && compact(`${r.authorization_number ?? ""} ${r.past_numbers ?? ""}`).includes(qc)));
   if (view === "risk") filtered = filtered.filter((r) => AT_RISK.includes(r.situation));
   else if (view === "renew") filtered = filtered.filter((r) => r.situation === "A_RENOUVELER" || r.situation === "CRITIQUE" || r.situation === "EXPIRE");
   else if (view === "ce") filtered = filtered.filter((r) => r.certificate_status === "A_DEMANDER" || r.certificate_status === "DOCS_LABO" || r.certificate_status === "EN_ATTENTE");
@@ -132,7 +144,7 @@ export default async function ReglementairePage(props: { searchParams: Promise<{
         <div>
           <form action="/reglementaire" method="get" className="flex flex-wrap gap-2 mb-3 text-[13px]">
             {sp.view && <input type="hidden" name="view" value={sp.view} />}
-            <input name="q" defaultValue={sp.q ?? ""} placeholder="Rechercher une référence…" className="input h-9 w-auto flex-1 min-w-[180px]" />
+            <input name="q" defaultValue={sp.q ?? ""} placeholder="Référence, produit ou N° ATD…" className="input h-9 w-auto flex-1 min-w-[180px]" />
             <select name="brand" defaultValue={sp.brand ?? ""} className="select h-9 w-auto">
               <option value="">Toutes les marques</option>
               {brandStats.map(([id, b]) => <option key={id} value={id}>{b.name}</option>)}
@@ -160,6 +172,8 @@ export default async function ReglementairePage(props: { searchParams: Promise<{
                       <tr key={r.id}>
                         <td className="max-w-[260px]">
                           <Link href={`/reglementaire/${r.id}`} className="font-medium hover:underline">{r.reference ?? r.product_name ?? r.dossier}</Link>
+                          {r.authorization_number && <div className="text-[11px] text-muted tabular-nums">N° ATD {r.authorization_number}</div>}
+                          {matchedOldNumber(r) && <div className="text-[11px] text-orange">Trouvé par un ancien N° ATD (historique)</div>}
                           {r.blocked && r.blocked_reason && <div className="text-[11px] text-red truncate" title={r.blocked_reason}>{r.blocked_reason}</div>}
                           {!r.blocked && r.missing_documents && <div className="text-[11px] text-orange truncate" title={r.missing_documents}>Manque : {r.missing_documents}</div>}
                         </td>
