@@ -126,6 +126,8 @@ export async function saveActivationSettings(fd: FormData) {
     overrunAlertPct: Math.max(0, num(fd, "overrunAlertPct", a.overrunAlertPct)), roiRepeatMinUpliftPct: num(fd, "roiRepeatMinUpliftPct", a.roiRepeatMinUpliftPct),
     roiRepeatMin: num(fd, "roiRepeatMin", a.roiRepeatMin), inventoryDormantDays: Math.max(1, int(fd, "inventoryDormantDays", a.inventoryDormantDays)),
     autoApproveMax: Math.max(0, num(fd, "autoApproveMax", a.autoApproveMax)),
+    goodiesManagerId: fd.has("goodiesManagerId") ? (/^[0-9a-f-]{36}$/i.test(String(fd.get("goodiesManagerId") ?? "")) ? String(fd.get("goodiesManagerId")) : null) : a.goodiesManagerId,
+    materialChargeFrom: fd.has("materialChargeFrom") ? (/^\d{4}-\d{2}-\d{2}$/.test(String(fd.get("materialChargeFrom") ?? "")) ? String(fd.get("materialChargeFrom")) : null) : a.materialChargeFrom,
   } });
   revalidatePath("/", "layout");
 }

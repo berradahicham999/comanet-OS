@@ -17,7 +17,7 @@ import { AssetUpload } from "@/components/asset-upload";
 import { EntityPicker } from "@/components/entity-picker";
 import { ActivationTypeIcon } from "@/components/activation-type-icon";
 import { fmtDate, fmtAgo, fmtMAD, initials, iso, today } from "@/lib/format";
-import { listInventory } from "@/lib/activations/inventory";
+import { holdersOverview, listInventory } from "@/lib/activations/inventory";
 import { salesImpact } from "@/lib/activations/roi";
 import { axisOptions } from "@/lib/marketing-plan/plan";
 import { roiVerdict, VERDICT_LABELS, VERDICT_TONES } from "@/lib/activations/shared";
@@ -58,7 +58,9 @@ export default async function ActivationPage(props: { params: Promise<{ id: stri
     db.execute<{ from_status: string | null; to_status: string; comment: string | null; created_at: string; user: string | null }>(sql`select h.from_status, h.to_status, h.comment, h.created_at::text as created_at, u.name as "user" from activation_status_history h left join users u on u.id = h.user_id where h.activation_id = ${id}::uuid order by h.created_at desc`),
     axisOptions(a.brandId), activationOutputs(id),
   ]);
-  const inventory = canEdit ? await listInventory({}, todayIso, settings.activations.inventoryDormantDays) : [];
+  const [inventory, holders] = canEdit ? await Promise.all([listInventory({}, todayIso, settings.activations.inventoryDormantDays), holdersOverview()]) : [[], []];
+  // Goodies sortis par défaut de chez le pilote s'il en a en main, sinon du stock central.
+  const defaultHolder = holders.some((h) => h.holderId === a.responsibleId && h.held > 0) ? a.responsibleId ?? "" : "";
   const impact = await salesImpact(a, settings.activations, todayIso);
   const checklist = (await db.execute<{ id: string; label: string; done: boolean; done_by: string | null; done_at: string | null; due_date: string | null; assignee: string | null }>(sql`
     select i.id, i.label, i.done, du.name as done_by, i.done_at::text as done_at, i.due_date::text as due_date, au.name as assignee
@@ -189,7 +191,8 @@ export default async function ActivationPage(props: { params: Promise<{ id: stri
               {canEdit && inventory.length > 0 && (
                 <form action={consumeForActivation} className="mt-2 flex flex-wrap gap-1.5 text-[12.5px]">
                   <input type="hidden" name="activationId" value={a.id} />
-                  <select name="itemId" className="select h-8 flex-1 min-w-[200px] text-[12px]">{inventory.filter((i) => i.stock > 0).map((i) => <option key={i.id} value={i.id}>{i.name}{i.brand ? ` · ${i.brand}` : ""} — {i.stock} {i.unit} dispo.</option>)}</select>
+                  <select name="itemId" className="select h-8 flex-1 min-w-[200px] text-[12px]">{inventory.filter((i) => i.stock + i.held > 0).map((i) => <option key={i.id} value={i.id}>{i.name}{i.brand ? ` · ${i.brand}` : ""} — {i.stock} au central{i.held ? `, ${i.held} chez l'équipe` : ""}</option>)}</select>
+                  <select name="holderUserId" defaultValue={defaultHolder} className="select h-8 w-auto text-[12px]" aria-label="Depuis"><option value="">Depuis le stock central</option>{holders.filter((h) => h.held > 0).map((h) => <option key={h.holderId} value={h.holderId}>Depuis {h.name} ({h.held} en main)</option>)}</select>
                   <input name="quantity" inputMode="numeric" className="input h-8 w-[90px] text-[12px]" placeholder="Qté" required />
                   <input type="date" name="date" defaultValue={todayIso} className="input h-8 w-auto text-[12px]" />
                   <button className="btn-secondary btn-sm h-8" type="submit">Sortir du stock</button>

@@ -24,8 +24,8 @@ sans réseau).
 **Jusqu'à 500 MAD** de budget au total, l'opération est **planifiée tout de suite** : vous pouvez y aller.
 **Au-delà**, elle attend la validation de la direction ; l'écran vous le dit et la direction est prévenue.
 
-Les goodies prévus ne sortent pas encore de votre stock : vous direz combien vous en avez vraiment utilisé dans le
-compte rendu.
+Les goodies proposés sont **ceux que vous avez en main** (voir « Mes goodies » ci-dessous). Ils ne sortent pas encore de
+votre stock : vous direz combien vous en avez vraiment utilisé dans le compte rendu.
 
 ## 2. Faire le compte rendu
 
@@ -39,8 +39,21 @@ compte rendu.
 5. Une **remarque** si vous voulez : accueil, affluence, ce qui a marché.
 6. **Enregistrer et clôturer**. Si l'opération n'est pas finie, choisissez **Enregistrer sans clôturer**.
 
-Les goodies utilisés sortent alors du stock. Pour corriger une quantité après coup, demandez à la direction : elle
-le fait depuis la fiche de l'opération.
+Les goodies utilisés sortent alors de **votre** stock. Vous ne pouvez pas déclarer plus que ce que vous avez en main :
+l'écran vous le dit, et rien n'est enregistré tant que ce n'est pas corrigé. Pour corriger une quantité après coup,
+demandez à la direction : elle le fait depuis la fiche de l'opération.
+
+## 3. Mes goodies
+
+Sur l'écran **Aujourd'hui**, bloc **Mes opérations**, touchez **Mes goodies**.
+
+- **En main** : les goodies que le responsable des goodies vous a donnés, moins ceux que vous avez utilisés ou donnés.
+- **Donner à une collègue ou rendre** : choisissez le goodie, la personne (ou « Rendre au stock central »), la quantité,
+  puis **Transférer**. Le goodie passe aussitôt dans le stock de la collègue.
+- **Derniers mouvements** : ce que vous avez reçu, donné et utilisé, opération par opération.
+
+Le **responsable des goodies** voit en plus le stock central (« Stock central » / « Mes goodies ») et ce que chaque
+animatrice a en main : c'est depuis cet écran qu'il distribue.
 
 ## Ce que voit la direction
 
@@ -57,5 +70,8 @@ direction de le créer.
 
 **Je me suis trompée de date ou de budget.** Une opération se corrige sur sa fiche (version bureau). Si le budget
 dépasse 500 MAD après la correction, l'opération repart en validation.
+
+**Je n'ai aucun goodie dans le formulaire.** Vous n'en avez pas en main pour ces marques : demandez au responsable des
+goodies de vous en transférer.
 
 **Je ne vois que mes opérations.** C'est normal : chaque animatrice voit les siennes. La direction voit tout.

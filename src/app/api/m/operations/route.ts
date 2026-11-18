@@ -6,7 +6,8 @@ import { getAccess } from "@/lib/access";
 import { getSettings } from "@/lib/settings";
 import { iso, today } from "@/lib/format";
 import { activationRefs } from "@/lib/activations/refs";
-import { activationScope, canDoActivation, canValidateActivation } from "@/lib/activations/access";
+import { activationScope, canDoActivation, canManageGoodies, canValidateActivation } from "@/lib/activations/access";
+import { holderStock, operationStockSource } from "@/lib/activations/inventory";
 import { getActivation } from "@/lib/activations/queries";
 import { createOperation, myOperations, reportOperation, OperationError } from "@/lib/activations/operations";
 
@@ -37,18 +38,21 @@ export async function GET() {
   const a = g.access;
   const todayIso = iso(today());
   const brandIds = a.scope === "ALL" || !a.brandIds.length ? null : a.brandIds;
-  const [refs, settings, mine, brands, products, items] = await Promise.all([
+  const source = await operationStockSource(a.user.id, await canManageGoodies());
+  const [refs, settings, mine, brands, products, held] = await Promise.all([
     activationRefs(), getSettings(), myOperations(a.user.id, todayIso),
     db.execute<{ id: string; name: string }>(sql`select id::text, name from brands where active and merged_into_id is null ${brandIds ? sql`and id = any(${pgArray(brandIds)})` : sql``} order by name`),
     db.execute<{ id: string; name: string; brandId: string }>(sql`select p.id::text, p.name, p.brand_id::text as "brandId" from products p join brands b on b.id = p.brand_id
       where p.active and b.active and b.merged_into_id is null ${brandIds ? sql`and p.brand_id = any(${pgArray(brandIds)})` : sql``} order by p.name`),
-    db.execute<{ id: string; name: string; unit: string; stock: number; brandId: string | null }>(sql`select id::text, name, unit, stock, brand_id::text as "brandId" from inventory_items where active and stock > 0 order by name`),
+    holderStock(source),
   ]);
+  // Goodies proposés : ceux que la personne a en main (stock central pour la direction qui n'en détient pas).
+  const items = held.map((h) => ({ id: h.itemId, name: h.name, unit: h.unit, stock: h.held, brandId: h.brandId }));
   return Response.json({
     today: todayIso,
     autoApproveMax: settings.activations.autoApproveMax,
     types: refs.types.filter((t) => t.active).map((t) => ({ key: t.key, label: t.label })),
-    brands: brands.rows, products: products.rows, items: items.rows,
+    brands: brands.rows, products: products.rows, items, stockSource: source ? "MINE" : "CENTRAL",
     ...mine,
   }, { headers: NO_STORE });
 }
@@ -82,7 +86,7 @@ export async function POST(req: Request) {
       const res = await reportOperation(id, {
         pharmaciesReached: numOrNull(body.pharmaciesReached), ordersOnSite: numOrNull(body.ordersOnSite), ordersAmount: numOrNull(body.ordersAmount),
         remark: typeof body.remark === "string" ? body.remark : null, materialsUsed: used ?? null, close: body.close === true,
-      }, actor, { isValidator: await canValidateActivation(op.brandId), date: iso(today()) });
+      }, actor, { isValidator: await canValidateActivation(op.brandId), date: iso(today()), stockHolder: await operationStockSource(a.user.id, await canManageGoodies()) });
       revalidatePath("/marketing/activations"); revalidatePath(`/marketing/activations/${id}`); revalidatePath("/marketing/materiel");
       return Response.json(res, { headers: NO_STORE });
     }
