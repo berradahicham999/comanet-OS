@@ -60,6 +60,11 @@ export type Recommendation = {
    * de la direction et de son manager (`canSeePositions()` de `src/lib/crm/access.ts`).
    */
   crmUserId?: string;
+  /**
+   * Module à voir en plus de ceux de la catégorie (ex. GESTION est ouverte au Stock, mais une alerte sur une commande
+   * fournisseur demande le module Achats, confidentiel).
+   */
+  requiredModule?: ModuleKey;
 };
 
 export type RecommendationWithState = Recommendation & {

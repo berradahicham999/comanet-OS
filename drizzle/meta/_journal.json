@@ -442,6 +442,13 @@
       "when": 1790005100000,
       "tag": "0062_goodies_par_detenteur",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1790005160000,
+      "tag": "0063_factures_fournisseurs_confidentielles",
+      "breakpoints": true
     }
   ]
 }

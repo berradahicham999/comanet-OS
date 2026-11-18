@@ -7,7 +7,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { normKey } from "@/lib/import/normalize";
 
-export type SearchHit = { id: string; label: string; sub: string | null; href: string; clientId?: string; ownerIds?: string[] };
+export type SearchHit = { id: string; label: string; sub: string | null; href: string; clientId?: string; ownerIds?: string[]; /** Pièce d'achat : son type (une facture fournisseur se filtre par `canPurchase()`). */ type?: string };
 export type SearchResult = {
   products: SearchHit[]; clients: SearchHit[]; brands: SearchHit[]; tasks: SearchHit[];
   regulatory: SearchHit[]; campaigns: SearchHit[]; contents: SearchHit[]; users: SearchHit[];
@@ -54,7 +54,7 @@ export async function searchEntities(q: string, limit = 10): Promise<SearchResul
     orders: pieces.filter((r) => r.type === "COMMANDE").map((r) => ({ ...pieceHit(r), ownerIds: [s(r.created_by_id), s(r.sales_rep_id)].filter((x): x is string => !!x) })),
     deliveries: pieces.filter((r) => r.type === "BL").map(pieceHit),
     invoices: pieces.filter((r) => r.type === "FACTURE" || r.type === "AVOIR").map(pieceHit),
-    purchases: purchases.map((r) => ({ id: String(r.id), label: String(r.number), sub: [s(r.supplier), r.supplier_ref ? `réf. ${r.supplier_ref}` : null, s(r.date), `${r.net} MAD HT`].filter(Boolean).join(" · "), href: `/gestion/achats/${r.id}` })),
+    purchases: purchases.map((r) => ({ id: String(r.id), type: String(r.type), label: String(r.number), sub: [s(r.supplier), r.supplier_ref ? `réf. ${r.supplier_ref}` : null, s(r.date), `${r.net} MAD HT`].filter(Boolean).join(" · "), href: `/gestion/achats/${r.id}` })),
     suppliers: suppliers.map((r) => ({ id: String(r.id), label: String(r.legal_name), sub: [s(r.city), s(r.currency)].filter(Boolean).join(" · ") || null, href: `/gestion/fournisseurs/${r.id}` })),
   };
 }

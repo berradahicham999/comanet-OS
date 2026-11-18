@@ -410,6 +410,8 @@ export const userFlags = pgTable("user_flags", {
   readActivityLog: boolean("read_activity_log").notNull().default(false),
   /** Lever un blocage commercial : remise hors plafond, client bloqué, encours dépassé, vente à perte. */
   overrideCommercial: boolean("override_commercial").notNull().default(false),
+  /** Factures fournisseurs (FF) : confidentielles, en plus du module Achats qui ouvre commandes, réceptions et retours. */
+  seeSupplierInvoices: boolean("see_supplier_invoices").notNull().default(false),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

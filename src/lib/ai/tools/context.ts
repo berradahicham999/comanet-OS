@@ -20,6 +20,7 @@ export async function buildToolContext(opts: { messageId?: string | null } = {})
     clientIds: a.scope === "ASSIGNED" && !admin && a.clientIds.length ? a.clientIds : null,
     ownOnly: a.scope === "OWN" && !admin,
     seeInternalCosts: admin || a.flags.seeInternalCosts,
+    seeSupplierInvoices: a.flags.seeSupplierInvoices,
   };
   const [{ ref }, settings] = await Promise.all([getRefDate(), getSettings()]);
   return { access, refDate: ref, now: today(), settings, deps: realDeps, messageId: opts.messageId ?? null };

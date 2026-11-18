@@ -3,12 +3,12 @@ import { notFound, redirect } from "next/navigation";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { pgArray } from "@/lib/sql-array";
-import { requireAccessContext, can } from "@/lib/access";
+import { requireAccessContext } from "@/lib/access";
 import { auditTrail } from "@/lib/audit";
 import { listAssets } from "@/lib/content/assets";
 import { getPurchase } from "@/lib/gestion/purchases";
 import { purchaseEditorData } from "@/lib/gestion/purchase-editor";
-import { PURCHASE_STATUS_META, PURCHASE_TYPE_LABELS, purchaseActions, purchaseStatusLabel, type PurchaseStatus, type PurchaseType } from "@/lib/gestion/purchases-shared";
+import { PURCHASE_STATUS_META, PURCHASE_TYPE_LABELS, canPurchase, purchaseActions, purchaseStatusLabel, type PurchaseStatus, type PurchaseType } from "@/lib/gestion/purchases-shared";
 import { SCALE, fmtMoney, formatScaled, parseDecimal } from "@/lib/gestion/money";
 import { fmtDate, fmtNum } from "@/lib/format";
 import { PageHeader, Card, Badge, Facts } from "@/components/ui";
@@ -34,10 +34,8 @@ export default async function PurchasePage(props: { params: Promise<{ id: string
   if (!d) notFound();
   const type = d.type as PurchaseType;
   const status = d.status as PurchaseStatus;
-  const modules = type === "RECEPTION" || type === "RETOUR" ? (["achats", "stock"] as const) : (["achats"] as const);
-  const allowed = (action: "view" | "create" | "edit" | "validate") => modules.some((m) => can(a.perms, m, action));
+  const allowed = (action: "view" | "create" | "edit" | "validate") => canPurchase(a, type, action);
   if (!allowed("view")) redirect(a.home);
-  const canAchats = (action: "view" | "create" | "edit" | "validate") => can(a.perms, "achats", action);
   const label = PURCHASE_TYPE_LABELS[type].one;
   const draft = status === "BROUILLON";
   const anyReceived = d.lines.some((l) => (parseDecimal(l.receivedQty, SCALE.qty) ?? 0n) > 0n);
@@ -184,15 +182,15 @@ export default async function PurchasePage(props: { params: Promise<{ id: string
             <Card title="Actions">
               <div className="space-y-3 text-[13px]">
                 {draft && allowed("validate") && <form action={validatePurchaseAction}><input type="hidden" name="id" value={id} /><button className="btn-primary btn-sm" type="submit">Valider</button></form>}
-                {actions.receive && (can(a.perms, "achats", "create") || can(a.perms, "stock", "create")) && (
+                {actions.receive && canPurchase(a, "RECEPTION", "create") && (
                   <form action={receiveOrderAction}><input type="hidden" name="id" value={id} /><button className="btn-primary btn-sm" type="submit">Réceptionner</button>
                     <p className="text-[11.5px] text-faint mt-1">Crée un bon de réception brouillon avec le reste à recevoir : ajustez les quantités, saisissez lots et péremptions.</p></form>
                 )}
-                {actions.invoice && canAchats("create") && <Link href={`/gestion/achats/facturer?supplier=${d.supplierId}`} className="btn-primary btn-sm inline-flex">Enregistrer la facture du fournisseur</Link>}
-                {actions.return && (can(a.perms, "achats", "create") || can(a.perms, "stock", "create")) && (
+                {actions.invoice && canPurchase(a, "FACTURE", "create") && <Link href={`/gestion/achats/facturer?supplier=${d.supplierId}`} className="btn-primary btn-sm inline-flex">Enregistrer la facture du fournisseur</Link>}
+                {actions.return && canPurchase(a, "RETOUR", "create") && (
                   <form action={returnReceptionAction}><input type="hidden" name="id" value={id} /><button className="btn-secondary btn-sm" type="submit">Retour fournisseur</button></form>
                 )}
-                {(actions.close || actions.cancel) && canAchats("validate") && (
+                {(actions.close || actions.cancel) && allowed("validate") && (
                   <form action={actions.close ? closeOrderAction : cancelOrderAction} className="space-y-2 pt-3 border-t border-line">
                     <input type="hidden" name="id" value={id} />
                     <p className="text-muted">{actions.close ? "Solder la commande : le reste non livré n'est plus attendu (il sort des « commandes en cours »)." : "Annuler la commande : rien n'a été reçu. Le numéro reste pris et visible."}</p>

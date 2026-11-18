@@ -2,9 +2,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { canDo, requireAccessContext } from "@/lib/access";
+import { requireAccessContext } from "@/lib/access";
 import { invoiceableReceptions } from "@/lib/gestion/purchases";
-import { PURCHASE_STATUS_META, purchaseStatusLabel } from "@/lib/gestion/purchases-shared";
+import { PURCHASE_STATUS_META, canPurchase, purchaseStatusLabel } from "@/lib/gestion/purchases-shared";
 import { fmtMoney } from "@/lib/gestion/money";
 import { fmtDate } from "@/lib/format";
 import { PageHeader, Card, Badge, Empty } from "@/components/ui";
@@ -17,7 +17,7 @@ export const metadata = { title: "Facturer des réceptions" };
 /** Enregistrement d'une facture fournisseur : un fournisseur, ses réceptions encore à facturer. */
 export default async function InvoiceReceptionsPage(props: { searchParams: Promise<{ supplier?: string; error?: string }> }) {
   const a = await requireAccessContext();
-  if (!(await canDo("achats", "create"))) redirect(a.home);
+  if (!canPurchase(a, "FACTURE", "create")) redirect(a.home);
   const sp = await props.searchParams;
   const suppliers = (await db.execute<{ id: string; name: string; n: number; oldest: string }>(sql`
     select s.id, s.legal_name as name, count(distinct d.id)::int as n, min(d.date)::text as oldest

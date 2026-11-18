@@ -30,19 +30,13 @@ export async function GestionTabs({ current }: { current: string }) {
     { href: "/gestion/reglements", label: "Règlements", ok: can(a.perms, "reglements", "view") },
     { href: "/gestion/stock", label: "Stock réel", ok: can(a.perms, "stock", "view") },
     { href: "/gestion/inventaires", label: "Inventaires", ok: can(a.perms, "stock", "view") },
-    { href: "/gestion/achats", label: "Achats", ok: can(a.perms, "achats", "view") || can(a.perms, "stock", "view") },
+    { href: "/gestion/achats", label: "Achats", ok: can(a.perms, "achats", "view") },
     { href: "/gestion/fournisseurs", label: "Fournisseurs", ok: can(a.perms, "achats", "view") },
     { href: "/gestion/pnl", label: "P&L", ok: can(a.perms, "administration", "validate") },
     { href: "/gestion/exports", label: "Envoi au comptable", ok: can(a.perms, "facturation", "view") },
     { href: "/parametres/gestion", label: "Paramètres", ok: can(a.perms, "administration", "view") },
   ].filter((t) => t.ok);
   return <Tabs current={current} tabs={tabs.map(({ href, label }) => ({ href, label }))} />;
-}
-
-/** Types de pièces d'achat visibles : commandes et factures = Achats ; réceptions et retours = Achats ou Stock (magasin). */
-export function visiblePurchaseTypes(perms: Awaited<ReturnType<typeof requireAccessContext>>["perms"]) {
-  const achats = can(perms, "achats", "view"), stock = can(perms, "stock", "view");
-  return (["COMMANDE", "RECEPTION", "FACTURE", "RETOUR"] as const).filter((t) => achats || (stock && (t === "RECEPTION" || t === "RETOUR")));
 }
 
 /** Onglets de l'espace P&L (administrateurs). */

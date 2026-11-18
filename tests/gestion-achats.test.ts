@@ -2,9 +2,10 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
-  allocateLandedCosts, computePurchase, invoiceGaps, isLateOrder, orderStatusAfterReceipt, purchaseActions, rateError,
-  receptionStatusAfterInvoice, remaining, unitCostMad,
+  allocateLandedCosts, canPurchase, computePurchase, invoiceGaps, isLateOrder, orderStatusAfterReceipt, purchaseActions, rateError,
+  receptionStatusAfterInvoice, remaining, unitCostMad, visiblePurchaseTypes,
 } from "@/lib/gestion/purchases-shared";
+import { noFlags, noPermissions } from "@/lib/permissions-shared";
 
 describe("montants d'une pièce d'achat", () => {
   test("en dirhams : ligne = qté × prix × (1 − remise), TVA sur le montant", () => {
@@ -100,5 +101,29 @@ describe("rapprochement facture ↔ réception", () => {
   });
   test("un écart dans la tolérance n'est pas signalé", () => {
     assert.deepEqual(invoiceGaps([{ designation: "Crème", productId: "p", quantity: "10", unitPrice: "12.10", discountPct: "0", source: src }], 1), []);
+  });
+});
+
+describe("droits sur les achats (confidentiels)", () => {
+  const who = (opts: { achats?: boolean; stock?: boolean; invoices?: boolean }) => {
+    const perms = noPermissions();
+    if (opts.achats) perms.achats = { view: true, create: true, edit: true, validate: true };
+    if (opts.stock) perms.stock = { view: true, create: true, edit: true, validate: true };
+    return { perms, flags: { ...noFlags(), seeSupplierInvoices: !!opts.invoices } };
+  };
+  test("le module Stock seul n'ouvre plus aucune pièce d'achat, pas même les réceptions", () => {
+    assert.deepEqual(visiblePurchaseTypes(who({ stock: true })), []);
+    assert.equal(canPurchase(who({ stock: true }), "RECEPTION", "create"), false);
+    assert.equal(canPurchase(who({ stock: true, invoices: true }), "FACTURE"), false, "l'interrupteur seul ne suffit pas");
+  });
+  test("Achats sans l'interrupteur : commandes, réceptions et retours, jamais les factures fournisseurs", () => {
+    assert.deepEqual(visiblePurchaseTypes(who({ achats: true })), ["COMMANDE", "RECEPTION", "RETOUR"]);
+    assert.equal(canPurchase(who({ achats: true }), "FACTURE", "create"), false);
+  });
+  test("Achats + « Voir les factures fournisseurs » : tout", () => {
+    assert.deepEqual(visiblePurchaseTypes(who({ achats: true, invoices: true })), ["COMMANDE", "RECEPTION", "FACTURE", "RETOUR"]);
+  });
+  test("l'interrupteur est éteint par défaut", () => {
+    assert.equal(noFlags().seeSupplierInvoices, false);
   });
 });

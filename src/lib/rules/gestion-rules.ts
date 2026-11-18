@@ -220,6 +220,7 @@ export const lateOrdersRule: Rule = {
         action: `Relancer ${r.supplier} pour une nouvelle date ; si le reliquat ne viendra pas, solder la commande (il sort alors des commandes en cours et la commande conseillée se recalcule).`,
         task: { title: `Relancer ${r.supplier} — ${r.number}`, dueInDays: 2, role: "ADMIN" },
         entity: { type: "document", id: r.id, href: `/gestion/achats/${r.id}` },
+        requiredModule: "achats",
         score: Number(r.net),
       };
     });
@@ -251,6 +252,7 @@ export const uninvoicedReceptionsRule: Rule = {
       action: "Enregistrer la facture reçue (Achats → Facturer des réceptions) et joindre son PDF ; la réclamer au fournisseur si elle n'est pas arrivée.",
       task: { title: `Enregistrer la facture de ${r.supplier}`, dueInDays: 5, role: "ADMIN" },
       entity: { type: "document", id: r.supplier_id, href: `/gestion/achats/facturer?supplier=${r.supplier_id}` },
+      requiredModule: "achats",
       score: Number(r.net),
     }));
   },

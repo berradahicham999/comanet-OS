@@ -2,26 +2,25 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireAccessContext, can } from "@/lib/access";
+import { requireAccessContext } from "@/lib/access";
 import { storeAsset } from "@/lib/content/assets";
 import { errorParam, isUuid, str } from "@/lib/gestion/form";
 import {
   cancelOrder, closeOrder, createInvoiceFromReceptions, createReceptionFromOrder, createReturnFromReception,
   deletePurchaseDraft, getPurchase, savePurchaseDraft, validatePurchase, type PurchaseInput,
 } from "@/lib/gestion/purchases";
-import { PURCHASE_TYPES, type PurchaseType } from "@/lib/gestion/purchases-shared";
+import { PURCHASE_TYPES, canPurchase, type PurchaseType } from "@/lib/gestion/purchases-shared";
 import { storedPurchasePdf } from "@/lib/gestion/purchase-pdf";
 import type { PermissionAction } from "@/lib/permissions-shared";
 
-/**
- * Droits : le module Achats pour tout ; la réception et le retour (gestes de magasin) sont aussi
- * ouverts au module Stock — le modèle « Magasin » réceptionne sans voir les factures fournisseurs.
- */
+/** Droits : `canPurchase()` — le module Achats pour tout ; la facture fournisseur demande en plus « Voir les factures fournisseurs ». */
 async function requirePurchase(type: PurchaseType, action: PermissionAction) {
   const a = await requireAccessContext();
   if (a.preview) throw new Error("Prévisualisation : lecture seule. Quittez la prévisualisation pour agir.");
-  const modules = type === "RECEPTION" || type === "RETOUR" ? (["achats", "stock"] as const) : (["achats"] as const);
-  if (!modules.some((m) => can(a.perms, m, action))) throw new Error(`Accès refusé : droit « ${action === "validate" ? "Valider" : action === "edit" ? "Modifier" : "Créer"} » requis sur ${modules.length > 1 ? "Achats ou Stock" : "Achats"}.`);
+  if (!canPurchase(a, type, action)) {
+    const verb = action === "validate" ? "Valider" : action === "edit" ? "Modifier" : action === "view" ? "Voir" : "Créer";
+    throw new Error(`Accès refusé : droit « ${verb} » requis sur Achats${type === "FACTURE" ? ", et l'interrupteur « Voir les factures fournisseurs »" : ""}.`);
+  }
   return { id: a.user.id, name: a.user.name };
 }
 
