@@ -10,8 +10,8 @@ import { getSettings } from "@/lib/settings";
 import { activationRefs, defaultActivationStatusKey } from "./refs";
 import { syncActivationExpenses } from "./budget";
 import { transitionActivation } from "./workflow";
-import { consumeMaterial } from "./inventory";
-import { cleanPlannedMaterials, closeTarget, operationLaunchTarget, requalifyTarget, type ActivationRefs } from "./shared";
+import { consumeMaterials } from "./inventory";
+import { cleanPlannedMaterials, closeTarget, operationLaunchTarget, requalifyTarget, type ActivationRefs, type Holder } from "./shared";
 
 /**
  * Opérations de terrain (décision d'Hicham, 18/11/2026). Une opération EST une activation : même table, même workflow,
@@ -20,7 +20,7 @@ import { cleanPlannedMaterials, closeTarget, operationLaunchTarget, requalifyTar
  *    facultatif), puis départ immédiat par `transitionActivation()` — « Planifiée » sous le seuil, « à valider » au-dessus ;
  *  - `requalifyAfterBudgetChange()` : une opération partie seule dont le budget passe le seuil retourne à la direction ;
  *  - `reportOperation()` : compte rendu (pharmacies touchées, commandes DÉCLARÉES, goodies réellement utilisés, remarque)
- *    et clôture. Les goodies sortent du stock par `consumeMaterial()`, sans nouvelle dépense (charge à l'achat).
+ *    et clôture. Les goodies sortent du stock par `consumeMaterials()`, sans nouvelle dépense (charge à l'achat).
  * `insertActivation()` et `setActivationLinks()` sont aussi la création et les liaisons du bureau : une seule écriture.
  */
 export type Actor = { id: string; name: string };
@@ -185,11 +185,12 @@ const intOrNull = (v: unknown) => (v === null || v === undefined || v === "" ? n
 
 /**
  * Compte rendu d'une opération : résultats DÉCLARÉS (jamais présentés comme des ventes mesurées), goodies sortis du stock
- * (`consumeMaterial()` : mouvement + ligne valorisée, aucune dépense), puis clôture si demandée. Rien n'est obligatoire,
+ * de `stockHolder` (les goodies en main de la personne, `operationStockSource()`) par `consumeMaterials()` (une transaction : tout passe ou rien ; mouvement +
+ * ligne valorisée, aucune dépense), puis clôture si demandée. Rien n'est obligatoire,
  * sauf les goodies utilisés quand des goodies étaient prévus. Les goodies ne se déclarent qu'une fois par compte rendu :
  * une correction se fait depuis la fiche (retour en stock).
  */
-export async function reportOperation(id: string, r: OperationReport, actor: Actor, opts: { isValidator: boolean; date: string }): Promise<{ status: string; closed: boolean }> {
+export async function reportOperation(id: string, r: OperationReport, actor: Actor, opts: { isValidator: boolean; date: string; stockHolder: Holder }): Promise<{ status: string; closed: boolean }> {
   const [a] = await db.select({ status: activations.status, planned: activations.plannedMaterials }).from(activations).where(eq(activations.id, id));
   if (!a) throw new OperationError("Opération introuvable.");
   const used = r.materialsUsed == null ? null : cleanPlannedMaterials(r.materialsUsed);
@@ -197,7 +198,7 @@ export async function reportOperation(id: string, r: OperationReport, actor: Act
   if (used?.length) {
     const already = await db.select({ id: activationMaterials.id }).from(activationMaterials).where(eq(activationMaterials.activationId, id)).limit(1);
     if (already.length) throw new OperationError("Des goodies sont déjà déclarés pour cette opération : corrigez-les depuis la fiche.");
-    for (const m of used) await consumeMaterial({ activationId: id, itemId: m.itemId, quantity: m.quantity, date: opts.date, userId: actor.id });
+    await consumeMaterials({ activationId: id, items: used, date: opts.date, userId: actor.id, holderUserId: opts.stockHolder });
   }
   const amount = r.ordersAmount == null || !Number.isFinite(Number(r.ordersAmount)) || Number(r.ordersAmount) < 0 ? null : String(Math.round(Number(r.ordersAmount) * 100) / 100);
   const values = { pharmaciesReached: intOrNull(r.pharmaciesReached), ordersOnSite: intOrNull(r.ordersOnSite), ordersAmount: amount, results: r.remark?.trim().slice(0, 2000) || null };

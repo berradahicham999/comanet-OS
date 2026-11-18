@@ -7,6 +7,7 @@ import { MODULE_LABELS, type ModuleKey } from "@/lib/access-shared";
 import { canValidateBrand } from "@/lib/content/workflow";
 import type { SessionUser } from "@/lib/auth";
 import { pgArray } from "@/lib/sql-array";
+import { getSettings } from "@/lib/settings";
 
 /**
  * Droits du module Activations — décision d'Hicham : pas de quinzième module.
@@ -104,4 +105,16 @@ export function scopeSql(scope: ActivationScope, alias = "a") {
     if (scope.clientIds) parts.push(sql`(${t}.client_id is null and not exists (select 1 from activation_clients x where x.activation_id = ${t}.id) or ${t}.client_id = any(${pgArray(scope.clientIds)}) or exists (select 1 from activation_clients x where x.activation_id = ${t}.id and x.client_id = any(${pgArray(scope.clientIds)})))`);
   }
   return parts.length ? sql`and ${sql.join(parts, sql` and `)}` : sql``;
+}
+
+/**
+ * Qui distribue les goodies depuis le stock central (ou reprend ceux d'une personne) ? Un administrateur, la direction
+ * marketing (Marketing « Modifier » hors portée personnelle), ou le responsable des goodies réglé dans
+ * `settings.activations.goodiesManagerId` (Sara). Chacun peut toujours donner ce qu'il a lui-même en main.
+ */
+export async function canManageGoodies(): Promise<boolean> {
+  const a = await getAccess();
+  if (!a) return false;
+  if (isAdmin(a.perms) || (can(a.perms, "marketing", "edit") && a.scope !== "OWN")) return true;
+  return (await getSettings()).activations.goodiesManagerId === a.user.id;
 }

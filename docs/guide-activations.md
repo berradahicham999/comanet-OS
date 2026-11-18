@@ -96,6 +96,25 @@ stock, le coût unitaire et la valeur.
 Un article sous son **seuil d'alerte** remonte dans l'Action Center. Un article sans sortie depuis six mois
 est signalé « dormant ».
 
+### Goodies : achat, distribution, usage
+
+1. **Achat** : Sara (responsable des goodies) choisit et commande. La commande fournisseur porte une ligne de
+   matériel ; la **réception** fait entrer les goodies au **stock central**, au coût de revient.
+2. **Charge** : à la validation de la **facture fournisseur**, chaque ligne de goodies, PLV ou print devient **une
+   dépense marketing** (HT en MAD, sur la marque de l'article). C'est la seule : la distribution et l'usage en
+   opération n'en créent jamais. Ce passage automatique démarre à la date réglée dans **Paramètres → Opérations**
+   (« Charge du matériel à la facture fournisseur ») ; avant, la charge reste saisie à la main.
+3. **Distribution** : **Goodies & matériel → Goodies chez l'équipe → Transférer** (ou « Mes goodies » sur le téléphone) :
+   du stock central vers une animatrice. Une animatrice peut aussi donner à une collègue ou rendre au central.
+   Personne ne donne plus qu'il n'a en main.
+4. **Usage** : l'animatrice déclare au compte rendu de son opération les goodies réellement utilisés ; ils sortent
+   de **son** stock. Sur la fiche d'une opération, la direction choisit « Depuis » (stock central ou une personne).
+
+Le tableau **Goodies chez l'équipe** montre pour chaque personne : reçus, donnés ou rendus, utilisés (déclarés),
+corrections, en main et sa valeur. Un stock en main qui ne baisse pas alors que des opérations sont faites est à
+vérifier avec la personne : c'est un écart déclaratif, pas une mesure. Une perte se corrige sur la fiche de l'article
+(« Stock de » la personne, ajustement).
+
 ## 5. Saisir les dépenses
 
 Sur chaque poste du budget : **Engagé** quand vous avez le devis, **Dépensé** quand vous avez la facture,

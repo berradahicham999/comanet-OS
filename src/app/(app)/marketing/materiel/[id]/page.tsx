@@ -2,9 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { requireActivationAccess, activationScope, canDoActivation } from "@/lib/activations/access";
+import { requireActivationAccess, activationScope, canDoActivation, canManageGoodies } from "@/lib/activations/access";
 import { activationRefs } from "@/lib/activations/refs";
-import { getInventoryItem, itemConsumptionByNature, itemMovements, MOVEMENT_LABELS } from "@/lib/activations/inventory";
+import { getInventoryItem, goodiesRecipients, itemConsumptionByNature, itemHolders, itemMovements, MOVEMENT_LABELS } from "@/lib/activations/inventory";
 import { INVENTORY_STATUS_LABELS, INVENTORY_STATUS_TONES, safeTone } from "@/lib/activations/shared";
 import { getSettings } from "@/lib/settings";
 import { listBrands } from "@/lib/users";
@@ -12,7 +12,7 @@ import { listAssets } from "@/lib/content/assets";
 import { PageHeader, Card, Badge, BrandDot, Facts } from "@/components/ui";
 import { AssetUpload } from "@/components/asset-upload";
 import { fmtMAD, fmtDate, iso, today } from "@/lib/format";
-import { saveInventoryItem, addMovement, beginItemAsset, appendItemChunk, finishItemAsset, deleteItemAsset } from "../actions";
+import { saveInventoryItem, addMovement, transferGoodies, beginItemAsset, appendItemChunk, finishItemAsset, deleteItemAsset } from "../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -21,15 +21,15 @@ export default async function MaterielItemPage(props: { params: Promise<{ id: st
   const { id } = await props.params;
   const { erreur } = await props.searchParams;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
-  const [refs, settings, scope, brands, canEdit] = await Promise.all([activationRefs(), getSettings(), activationScope(), listBrands(), canDoActivation("edit")]);
+  const [refs, settings, scope, brands, canEdit, manage] = await Promise.all([activationRefs(), getSettings(), activationScope(), listBrands(), canDoActivation("edit"), canManageGoodies()]);
   const todayIso = iso(today());
   const item = await getInventoryItem(id, todayIso, settings.activations.inventoryDormantDays);
   if (!item) notFound();
-  const [moves, photos, products, clients, consumption] = await Promise.all([
+  const [moves, photos, products, clients, consumption, holders, recipients] = await Promise.all([
     itemMovements(id), listAssets({ inventoryItemId: id }),
     db.execute<{ id: string; name: string }>(sql`select id, name from products where active ${item.brandId ? sql`and brand_id = ${item.brandId}::uuid` : sql``} order by name`),
     db.execute<{ id: string; name: string; city: string | null }>(sql`select id, name, city from clients where active order by name limit 600`),
-    itemConsumptionByNature(id),
+    itemConsumptionByNature(id), itemHolders(id), manage ? goodiesRecipients(settings.activations.goodiesManagerId) : Promise.resolve([]),
   ]);
   const photo = photos.find((p) => p.kind === "PHOTO");
   const visibleBrands = brands.filter((b) => b.active && (!scope.brandIds || scope.brandIds.includes(b.id)) || b.id === item.brandId);
@@ -46,8 +46,8 @@ export default async function MaterielItemPage(props: { params: Promise<{ id: st
       <div className="grid lg:grid-cols-[1fr_360px] gap-4 items-start">
         <div className="space-y-4">
           <Card title="Stock">
-            <Facts cols={4} items={[
-              { label: "En stock", value: `${item.stock} ${item.unit}` }, { label: "Valeur", value: fmtMAD(item.value) },
+            <Facts cols={3} items={[
+              { label: "Stock central", value: `${item.stock} ${item.unit}` }, { label: "Chez l'équipe", value: item.held ? `${item.held} ${item.unit}` : "—" }, { label: "Valeur (central)", value: fmtMAD(item.value) },
               { label: "Sorties 90 j", value: item.outQty90 || "—" }, { label: "Dernière sortie", value: item.lastOutAt ? fmtDate(item.lastOutAt) : "jamais" },
             ]} />
             {canEdit && (
@@ -57,8 +57,25 @@ export default async function MaterielItemPage(props: { params: Promise<{ id: st
                 <label className="block"><span className="label block">Quantité</span><input name="quantity" inputMode="numeric" className="input h-8 text-[12px]" required placeholder="ex : 50 ou -3" /></label>
                 <label className="block"><span className="label block">Coût unit. (entrée)</span><input name="unitCost" inputMode="decimal" className="input h-8 text-[12px]" placeholder={String(item.unitCost)} /></label>
                 <label className="block"><span className="label block">Date</span><input type="date" name="date" defaultValue={todayIso} className="input h-8 text-[12px]" /></label>
+                {manage && holders.length > 0 && <label className="block"><span className="label block">Stock de</span><select name="holderUserId" defaultValue="" className="select h-8 text-[12px]"><option value="">Stock central</option>{holders.map((h) => <option key={h.holderId} value={h.holderId}>{h.name}</option>)}</select></label>}
                 <label className="block sm:col-span-2"><span className="label block">Motif / client (sortie libre)</span><div className="flex gap-1"><input name="reason" className="input h-8 text-[12px]" placeholder="Réception fournisseur, dotation Karim…" /><select name="clientId" className="select h-8 text-[12px] w-[140px]" defaultValue=""><option value="">Client…</option>{clients.rows.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div></label>
                 <div className="col-span-2 sm:col-span-6 flex items-center gap-2"><button className="btn-primary btn-sm h-8" type="submit">Enregistrer le mouvement</button><span className="text-[11px] text-muted">Une sortie vers une opération se fait depuis la fiche de l&apos;opération, bloc « Matériel ».</span></div>
+              </form>
+            )}
+          </Card>
+
+          <Card title="Chez l'équipe" pad={false}>
+            {holders.length === 0 ? <p className="px-4 py-3 text-[12.5px] text-muted">Personne n&apos;a cet article en main : tout est au stock central.</p> : (
+              <ul className="divide-y divide-line text-[13px]">{holders.map((h) => <li key={h.holderId} className="px-4 py-2 flex justify-between gap-2"><span>{h.name}</span><span className="tabular-nums font-medium">{h.held} {item.unit}</span></li>)}</ul>
+            )}
+            {manage && item.stock + item.held > 0 && (
+              <form action={transferGoodies} className="px-4 py-3 border-t border-line grid grid-cols-2 sm:grid-cols-5 gap-1.5 items-end text-[12.5px]">
+                <input type="hidden" name="itemId" value={item.id} /><input type="hidden" name="back" value="item" />
+                <label className="block"><span className="label block">Depuis</span><select name="from" defaultValue="central" className="select h-8 text-[12px]"><option value="central">Stock central ({item.stock})</option>{holders.filter((h) => h.held > 0).map((h) => <option key={h.holderId} value={h.holderId}>{h.name} ({h.held})</option>)}</select></label>
+                <label className="block"><span className="label block">Vers</span><select name="to" defaultValue="" required className="select h-8 text-[12px]"><option value="" disabled>Choisir…</option>{recipients.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}<option value="central">Stock central</option></select></label>
+                <label className="block"><span className="label block">Quantité</span><input name="quantity" inputMode="numeric" required className="input h-8 text-[12px]" /></label>
+                <label className="block"><span className="label block">Motif</span><input name="reason" className="input h-8 text-[12px]" placeholder="facultatif" /></label>
+                <button className="btn-primary btn-sm h-8" type="submit">Transférer</button>
               </form>
             )}
           </Card>
@@ -76,11 +93,11 @@ export default async function MaterielItemPage(props: { params: Promise<{ id: st
 
           <Card title={`Mouvements (${moves.length})`} pad={false}>
             <div className="table-wrap"><table className="w-full text-[12.5px]">
-              <thead><tr className="text-left text-muted"><th className="px-3 py-2">Date</th><th className="px-3 py-2">Type</th><th className="px-3 py-2 text-right">Quantité</th><th className="px-3 py-2 text-right">Coût unit.</th><th className="px-3 py-2">Lié à</th><th className="px-3 py-2">Motif</th><th className="px-3 py-2">Par</th></tr></thead>
+              <thead><tr className="text-left text-muted"><th className="px-3 py-2">Date</th><th className="px-3 py-2">Type</th><th className="px-3 py-2 text-right">Quantité</th><th className="px-3 py-2 text-right">Coût unit.</th><th className="px-3 py-2">Lié à</th><th className="px-3 py-2">Stock</th><th className="px-3 py-2">Motif</th><th className="px-3 py-2">Par</th></tr></thead>
               <tbody>{moves.map((m) => (
                 <tr key={m.id} className="border-t border-line">
                   <td className="px-3 py-1.5 whitespace-nowrap">{fmtDate(m.date)}</td>
-                  <td className="px-3 py-1.5"><Badge tone={m.type === "ENTREE" ? "green" : m.type === "SORTIE" ? "orange" : "gray"}>{MOVEMENT_LABELS[m.type as keyof typeof MOVEMENT_LABELS] ?? m.type}</Badge></td>
+                  <td className="px-3 py-1.5"><Badge tone={m.type === "ENTREE" ? "green" : m.type === "SORTIE" ? "orange" : m.type === "TRANSFERT" ? "blue" : "gray"}>{MOVEMENT_LABELS[m.type as keyof typeof MOVEMENT_LABELS] ?? m.type}</Badge></td>
                   <td className={`px-3 py-1.5 text-right tabular-nums ${m.quantity < 0 ? "text-red" : ""}`}>{m.quantity > 0 ? `+${m.quantity}` : m.quantity}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{m.unitCost != null ? fmtMAD(m.unitCost) : "—"}</td>
                   <td className="px-3 py-1.5">
@@ -89,10 +106,11 @@ export default async function MaterielItemPage(props: { params: Promise<{ id: st
                     {m.activationId ? <Link href={`/marketing/activations/${m.activationId}`} className="hover:underline">{m.activation}</Link> : m.client ?? (m.documentId ? "" : "—")}
                     {m.reversed && <Badge tone="gray" className="ml-1">annulé</Badge>}
                   </td>
+                  <td className="px-3 py-1.5">{m.holder ?? "central"}</td>
                   <td className="px-3 py-1.5">{m.reason ?? "—"}</td>
                   <td className="px-3 py-1.5 text-muted">{m.createdBy ?? "—"}</td>
                 </tr>
-              ))}{moves.length === 0 && <tr><td colSpan={7} className="px-3 py-3 text-muted">Aucun mouvement.</td></tr>}</tbody>
+              ))}{moves.length === 0 && <tr><td colSpan={8} className="px-3 py-3 text-muted">Aucun mouvement.</td></tr>}</tbody>
             </table></div>
           </Card>
         </div>

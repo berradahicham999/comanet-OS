@@ -43,7 +43,7 @@ const tabsOf = (p: Persona | undefined) => (p ? TABS[p] ?? [] : []);
 /** L'écran ouvert appartient à quel onglet ? Les fiches restent sous l'onglet de leur liste. */
 function tabActive(href: string, path: string) {
   // Les opérations de terrain s'ouvrent depuis l'accueil (la barre garde 4 onglets) : elles restent sous « Aujourd'hui ».
-  if (href === "/m") return path === "/m" || path === "/m/client" || path === "/m/commande" || path.startsWith("/m/operation");
+  if (href === "/m") return path === "/m" || path === "/m/client" || path === "/m/commande" || path.startsWith("/m/operation") || path === "/m/goodies";
   if (href === "/m/medecins") return path === "/m/medecins" || path === "/m/fiche-medecin";
   if (href === "/m/tournee") return path === "/m/tournee" || path === "/m/compte-rendu";
   return path.startsWith(href);

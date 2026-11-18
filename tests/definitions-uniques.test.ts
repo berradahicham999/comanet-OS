@@ -412,6 +412,19 @@ describe("Bibliothèque d'actions — une seule écriture des modèles et de « 
   });
 });
 
+describe("Goodies par détenteur — une seule définition", () => {
+  test("seul `activations/inventory.ts` écrit les mouvements de matériel ; les transferts passent par `transferMaterial()`", () => {
+    assert.deepEqual(codeHits(/insert\(inventoryMovements\)|insert\s+into\s+inventory_movements\b/i, ["tests/"]), ["src/lib/activations/inventory.ts"]);
+    assert.deepEqual(codeHits(/type:\s*"TRANSFERT"/, ["tests/"]), ["src/lib/activations/inventory.ts"]);
+    assert.deepEqual(hits(/export function heldStockRefusal\(/), ["src/lib/activations/shared.ts"]);
+    assert.deepEqual(hits(/export function holderLedger\(/), ["src/lib/activations/shared.ts"]);
+  });
+  test("seul `gestion/material-charges.ts` passe le matériel en charge à la facture fournisseur", () => {
+    assert.deepEqual(codeHits(/purchase_line_id/i, ["tests/", "drizzle/"]).filter((f) => f !== "src/db/schema.ts"), ["src/lib/gestion/material-charges.ts"]);
+    assert.deepEqual(hits(/export function materialChargeRows\(/), ["src/lib/gestion/material-charges-shared.ts"]);
+  });
+});
+
 describe("Sorties marketing et ventes en bloc — une seule définition", () => {
   test("seul `gestion/marketing-outputs.ts` écrit les charges et les sorties de matériel nées d'un BL", () => {
     const found = codeHits(/insert into marketing_expenses[^;]*document_line_id|delete from marketing_expenses where document_line_id|recordMovement\(\{[^}]*documentLineId/i, ["lib/gestion/marketing-outputs.ts"]);

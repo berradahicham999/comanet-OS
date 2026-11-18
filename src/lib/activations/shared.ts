@@ -320,6 +320,62 @@ export function inventoryStatus(item: { stock: number; alertThreshold: number | 
 }
 
 /* ------------------------------------------------------------------ */
+/* Goodies par détenteur (décision d'Hicham, 18/11/2026)               */
+/* ------------------------------------------------------------------ */
+
+/** Détenteur d'un stock de matériel : l'identifiant de la personne, ou `null` pour le stock central. */
+export type Holder = string | null;
+
+/**
+ * Refus d'une sortie au-delà de ce que le détenteur a en main — LA règle, appliquée par `recordMovement()` au stock
+ * central comme au stock d'une personne. Renvoie le motif, ou `null` si le mouvement passe.
+ */
+export function heldStockRefusal(input: { available: number; quantity: number; itemName: string; holderLabel: string | null }): string | null {
+  const next = input.available + input.quantity;
+  if (next >= 0) return null;
+  const who = input.holderLabel ? `chez ${input.holderLabel}` : "au stock central";
+  return `Stock insuffisant pour « ${input.itemName} » ${who} : ${input.available} disponible${input.available > 1 ? "s" : ""}, ${-input.quantity} demandé${-input.quantity > 1 ? "s" : ""}.`;
+}
+
+/**
+ * Les deux mouvements d'un transfert : − chez qui donne, + chez qui reçoit, même quantité entière. Lève une erreur si le
+ * transfert n'a pas de sens (même détenteur, quantité non entière ou nulle).
+ */
+export function transferMovements(input: { from: Holder; to: Holder; quantity: number }): { holder: Holder; quantity: number }[] {
+  const q = Number(input.quantity);
+  if (!Number.isInteger(q) || q <= 0) throw new Error("Quantité à transférer invalide : un nombre entier positif.");
+  if ((input.from ?? null) === (input.to ?? null)) throw new Error("Le stock de départ et le destinataire sont les mêmes.");
+  return [{ holder: input.from ?? null, quantity: -q }, { holder: input.to ?? null, quantity: q }];
+}
+
+export type HolderMovement = { type: string; quantity: number; activationId: string | null };
+export type HolderLedger = {
+  /** Reçus par transfert (depuis le stock central ou une collègue). */
+  received: number;
+  /** Donnés à une collègue ou rendus au stock central. */
+  given: number;
+  /** Déclarés utilisés sur une opération (sorties liées à une opération, retours d'opération déduits). */
+  usedOnOperations: number;
+  /** Autres mouvements : corrections de la direction, sorties hors opération (signés). */
+  other: number;
+  /** En main = somme des mouvements. */
+  held: number;
+  /** Reçu − donné − déclaré utilisé : ce qui doit encore être en main sans correction. */
+  unaccounted: number;
+};
+
+/** Ce qu'une personne a reçu, donné, déclaré utilisé et a encore en main, à partir de ses mouvements. */
+export function holderLedger(moves: HolderMovement[]): HolderLedger {
+  let received = 0, given = 0, used = 0, other = 0;
+  for (const m of moves) {
+    if (m.type === "TRANSFERT") { if (m.quantity > 0) received += m.quantity; else given += -m.quantity; }
+    else if (m.activationId) used += -m.quantity;
+    else other += m.quantity;
+  }
+  return { received, given, usedOnOperations: used, other, held: received - given - used + other, unaccounted: received - given - used };
+}
+
+/* ------------------------------------------------------------------ */
 /* Mesure du retour (ROI)                                              */
 /* ------------------------------------------------------------------ */
 

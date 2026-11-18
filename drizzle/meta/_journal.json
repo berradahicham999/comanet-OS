@@ -435,6 +435,13 @@
       "when": 1790005000000,
       "tag": "0061_operations_terrain",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1790005100000,
+      "tag": "0062_goodies_par_detenteur",
+      "breakpoints": true
     }
   ]
 }
