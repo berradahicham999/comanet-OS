@@ -22,8 +22,9 @@ export async function requireGestionView() {
 /** Onglets de l'espace, filtrés par droits. */
 export async function GestionTabs({ current }: { current: string }) {
   const a = await requireAccessContext();
+  // « Préparation » (/gestion) et « Bascule » (/gestion/bascule) sont masquées depuis la bascule du 01/11/2026 :
+  // les pages restent ouvertes par leur adresse, Bascule aussi depuis Paramètres → Gestion.
   const tabs = [
-    { href: "/gestion", label: "Préparation", ok: canSeePreparation(a.perms) },
     { href: "/gestion/pieces", label: "Pièces", ok: can(a.perms, "commandes", "view") || can(a.perms, "livraisons", "view") || can(a.perms, "facturation", "view") },
     { href: "/gestion/pieces/facturer", label: "Facturer des BL", ok: can(a.perms, "facturation", "create") },
     { href: "/gestion/reglements", label: "Règlements", ok: can(a.perms, "reglements", "view") },
@@ -33,7 +34,6 @@ export async function GestionTabs({ current }: { current: string }) {
     { href: "/gestion/fournisseurs", label: "Fournisseurs", ok: can(a.perms, "achats", "view") },
     { href: "/gestion/pnl", label: "P&L", ok: can(a.perms, "administration", "validate") },
     { href: "/gestion/exports", label: "Envoi au comptable", ok: can(a.perms, "facturation", "view") },
-    { href: "/gestion/bascule", label: "Bascule", ok: can(a.perms, "administration", "view") },
     { href: "/parametres/gestion", label: "Paramètres", ok: can(a.perms, "administration", "view") },
   ].filter((t) => t.ok);
   return <Tabs current={current} tabs={tabs.map(({ href, label }) => ({ href, label }))} />;

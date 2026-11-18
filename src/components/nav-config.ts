@@ -51,7 +51,6 @@ export const NAV: NavGroup[] = [
   {
     title: "Gestion commerciale",
     items: [
-      { href: "/gestion", label: "Préparation", icon: "ClipboardCheck", module: PREPARATION_MODULES, exact: true },
       { href: "/gestion/pieces?type=COMMANDE", label: "Commandes clients", icon: "ShoppingCart", module: "commandes" },
       { href: "/gestion/pieces", label: "Pièces de vente", icon: "FileText", module: ["livraisons", "facturation"] },
       { href: "/gestion/reglements", label: "Règlements", icon: "Wallet", module: "reglements" },
@@ -60,7 +59,6 @@ export const NAV: NavGroup[] = [
       { href: "/gestion/inventaires", label: "Inventaires", icon: "ClipboardList", module: "stock" },
       { href: "/gestion/fournisseurs", label: "Fournisseurs", icon: "Truck", module: "achats" },
       { href: "/gestion/pnl", label: "P&L", icon: "Scale", module: "administration", action: "validate" },
-      { href: "/gestion/bascule", label: "Bascule", icon: "ArrowRightLeft", module: "administration" },
     ],
   },
   {
