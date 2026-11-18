@@ -73,6 +73,7 @@ export default async function NouvelleActivationPage(props: { searchParams: Prom
             </div>
             <label className="block"><span className="label block mb-1">Ville</span><input name="city" list="villes" className="input h-10" placeholder="Casablanca" /><datalist id="villes">{cities.map((c) => <option key={c} value={c} />)}</datalist></label>
             {!rapide && <label className="block"><span className="label block mb-1">Lieu libre (événement, salle…)</span><input name="place" className="input h-10" placeholder="Hôtel, salle, stand…" /></label>}
+            <label className="block sm:col-span-2"><span className="label block mb-1">Offre proposée (facultatif)</span><input name="offerLabel" className="input h-10" placeholder="10 + 2, -15 % sur Gamarde SPF50…" maxLength={200} /></label>
           </div>
         </Card>
 

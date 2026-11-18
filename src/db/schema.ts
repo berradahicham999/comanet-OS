@@ -2679,6 +2679,12 @@ export const activationCostItems = pgTable("activation_cost_items", {
   budgetCategory: budgetCategoryEnum("budget_category").notNull().default("AUTRES"),
   sort: integer("sort").notNull().default(0),
   active: boolean("active").notNull().default(true),
+  /**
+   * Le poste devient une dépense marketing quand l'opération est validée. Faux pour « Offre / UG » (migration 0061) :
+   * chiffré dans le budget de l'opération et compté dans le seuil de validation, mais les UG d'un BL sont déjà dans le
+   * coût des ventes du P&L — le refléter le compterait deux fois.
+   */
+  reflectsExpense: boolean("reflects_expense").notNull().default(true),
 });
 
 /** Catégories d'articles d'inventaire (PLV, échantillon, goodie, print). */
@@ -2752,6 +2758,10 @@ export const activations = pgTable(
     templateId: uuid("template_id").references(() => activationTemplates.id, { onDelete: "set null" }),
     /** Animation Terrain liée (lien, jamais une copie). */
     linkedAnimationId: uuid("linked_animation_id").references(() => animations.id, { onDelete: "set null" }),
+    /** Offre proposée au client, texte libre (« 10 + 2 », « -15 % sur Gamarde SPF50 ») — migration 0061. */
+    offerLabel: text("offer_label"),
+    /** Goodies prévus à la création (article × quantité) ; rien ne sort du stock avant le compte rendu. */
+    plannedMaterials: jsonb("planned_materials").$type<{ itemId: string; quantity: number }[]>().notNull().default([]),
     /** Somme des lignes budgétaires prévues (maintenue par `src/lib/activations/budget.ts`). */
     budgetPlanned: numeric("budget_planned", { precision: 14, scale: 2 }).notNull().default("0"),
     status: text("status").notNull().default("IDEE").references(() => activationStatuses.key),

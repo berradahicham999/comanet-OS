@@ -32,7 +32,7 @@ export function hasMobileScreens(p: Persona): boolean {
 }
 
 const SCREENS: Record<Persona, string[]> = {
-  ANIMATRICE: ["/m", "/m/saisie", "/m/stock", "/m/mois", "/m/a-corriger"],
+  ANIMATRICE: ["/m", "/m/saisie", "/m/stock", "/m/mois", "/m/a-corriger", "/m/operations", "/m/operation", "/m/operation-cr"],
   COMMERCIAL: ["/m", "/m/client", "/m/commande", "/m/a-corriger"],
   DELEGUE: ["/m/tournee", "/m/medecins", "/m/fiche-medecin", "/m/historique", "/m/compte-rendu", "/m/a-corriger"],
   DIRECTION: ["/m/brief", "/m/validations"],

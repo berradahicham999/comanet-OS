@@ -16,13 +16,23 @@ import { pgArray } from "@/lib/sql-array";
  *    administrateur, l'interrupteur « Valider une dépense », ou un validateur de la marque
  *    (`brand_validators`, partagé avec le planning éditorial).
  *  - Portée OWN : ses activations (pilote, créateur ou contributeur) et celles de ses clients assignés.
+ *  - Terrain (décision du 18/11/2026) : une animatrice crée, modifie et clôture SES opérations avec son seul droit
+ *    « Créer » sur Terrain, sans droit Marketing. Sa portée est alors forcée à ses propres opérations, quelle que soit
+ *    sa portée déclarée, et elle ne valide jamais (la validation reste à la direction).
  */
-export const ACTIVATION_MODULES: ModuleKey[] = ["marketing", "clients"];
+export const ACTIVATION_MODULES: ModuleKey[] = ["marketing", "clients", "terrain"];
+
+/** Droit demandé sur un module : par Terrain, « Créer » suffit pour modifier ses propres opérations. */
+const neededOn = (m: ModuleKey, action: PermissionAction): PermissionAction => (m === "terrain" && action === "edit" ? "create" : action);
+/** Par Terrain, jamais de validation ni de suppression. */
+const grants = (perms: Parameters<typeof can>[0], m: ModuleKey, action: PermissionAction) => !(m === "terrain" && action === "validate") && can(perms, m, neededOn(m, action));
+/** Seul Terrain donne accès aux opérations : la portée se limite à celles de la personne. */
+const terrainOnly = (perms: Parameters<typeof can>[0]) => !can(perms, "marketing", "view") && !can(perms, "clients", "view") && can(perms, "terrain", "create");
 
 /** Garde d'une page : redirige si aucun des deux modules n'est visible. */
 export async function requireActivationAccess(): Promise<SessionUser> {
   const a = await requireAccessContext();
-  const m = ACTIVATION_MODULES.find((x) => can(a.perms, x, "view"));
+  const m = ACTIVATION_MODULES.find((x) => grants(a.perms, x, "view"));
   if (!m) redirect(a.home);
   return requireView(m);
 }
@@ -30,14 +40,14 @@ export async function requireActivationAccess(): Promise<SessionUser> {
 /** Garde d'une server action : lève une erreur explicite. */
 export async function requireActivationPermission(action: PermissionAction): Promise<SessionUser> {
   const a = await requireAccessContext();
-  const m = ACTIVATION_MODULES.find((x) => can(a.perms, x, action));
-  if (!m) throw new Error(`Accès refusé : cette action demande le droit « ${action === "view" ? "Voir" : action === "create" ? "Créer" : action === "edit" ? "Modifier" : "Valider"} » sur ${MODULE_LABELS.marketing} ou ${MODULE_LABELS.clients}.`);
-  return requirePermission(m, action);
+  const m = ACTIVATION_MODULES.find((x) => grants(a.perms, x, action));
+  if (!m) throw new Error(`Accès refusé : cette action demande le droit « ${action === "view" ? "Voir" : action === "create" ? "Créer" : action === "edit" ? "Modifier" : "Valider"} » sur ${MODULE_LABELS.marketing} ou ${MODULE_LABELS.clients} (ou « Créer » sur ${MODULE_LABELS.terrain} pour ses propres opérations).`);
+  return requirePermission(m, neededOn(m, action));
 }
 
 export async function canDoActivation(action: PermissionAction = "view"): Promise<boolean> {
   const a = await getAccess();
-  return !!a && ACTIVATION_MODULES.some((m) => can(a.perms, m, action));
+  return !!a && ACTIVATION_MODULES.some((m) => grants(a.perms, m, action));
 }
 
 /**
@@ -75,6 +85,7 @@ export type ActivationScope = {
 /** Portée à appliquer aux requêtes d'activations. */
 export async function activationScope(): Promise<ActivationScope> {
   const a = await getAccess();
+  if (a && terrainOnly(a.perms)) return { ownerId: a.user.id, clientIds: [], brandIds: null };
   if (!a || a.scope === "ALL") return { ownerId: null, clientIds: null, brandIds: null };
   if (a.scope === "OWN") return { ownerId: a.user.id, clientIds: a.clientIds, brandIds: null };
   return { ownerId: null, clientIds: a.clientIds.length ? a.clientIds : null, brandIds: a.brandIds.length ? a.brandIds : null };

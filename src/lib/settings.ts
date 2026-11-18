@@ -778,6 +778,11 @@ export type ActivationSettings = {
   roiRepeatMin: number;
   /** Article d'inventaire considéré dormant après ce nombre de jours sans sortie. */
   inventoryDormantDays: number;
+  /**
+   * Budget prévu (MAD, postes « Offre / UG » compris) jusqu'auquel une opération part sans validation de la direction :
+   * au-delà, elle attend la direction (décision d'Hicham, 18/11/2026). `operationLaunchTarget()` l'applique.
+   */
+  autoApproveMax: number;
 };
 
 export const DEFAULT_ACTIVATION_SETTINGS: ActivationSettings = {
@@ -789,6 +794,7 @@ export const DEFAULT_ACTIVATION_SETTINGS: ActivationSettings = {
   roiRepeatMinUpliftPct: 10,
   roiRepeatMin: 1,
   inventoryDormantDays: 180,
+  autoApproveMax: 500,
 };
 
 /** Seuils du moteur publicitaire, tels que passés à `diagnose()`. */

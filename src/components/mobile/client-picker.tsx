@@ -9,7 +9,11 @@ import type { MobileClient } from "@/lib/mobile/snapshot-shared";
  * Choix du point de vente : ceux gardés sur le téléphone, sans réseau. Au-delà, recherche en ligne ; le résultat choisi
  * sert à la saisie en cours et n'est pas stocké.
  */
-export function ClientPicker({ clients, value, onChange, online }: { clients: MobileClient[]; value: MobileClient | null; onChange: (c: MobileClient) => void; online: boolean }) {
+export function ClientPicker({ clients, value, onChange, online, searchUrl = "/api/m/clients" }: {
+  clients: MobileClient[]; value: MobileClient | null; onChange: (c: MobileClient) => void; online: boolean;
+  /** Recherche en ligne : par défaut les points de vente de la saisie ; les opérations cherchent aussi les grossistes. */
+  searchUrl?: string;
+}) {
   const [open, setOpen] = useState(!value);
   const [q, setQ] = useState("");
   const [remote, setRemote] = useState<MobileClient[]>([]);
@@ -24,13 +28,13 @@ export function ClientPicker({ clients, value, onChange, online }: { clients: Mo
     if (!online || normKey(q).length < 2) return;
     let stale = false;
     const t = setTimeout(() => {
-      fetch(`/api/m/clients?q=${encodeURIComponent(q)}`, { cache: "no-store" })
+      fetch(`${searchUrl}?q=${encodeURIComponent(q)}`, { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : { clients: [] }))
         .then((r: { clients: MobileClient[] }) => { if (!stale) setRemote(r.clients); })
         .catch(() => {});
     }, 300);
     return () => { stale = true; clearTimeout(t); };
-  }, [q, online]);
+  }, [q, online, searchUrl]);
 
   const others = normKey(q).length >= 2 ? remote.filter((r) => !local.some((c) => c.id === r.id)) : [];
 
